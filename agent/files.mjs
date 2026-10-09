@@ -8,6 +8,12 @@
 // it (a.ts:42, a.ts#L42-L51), as a file:// address, or with its spaces written %20. `find`
 // tries the link as it is written first, and where that is no file, looks through the
 // project for the file whose path ends most like it.
+//
+// A file is found, and read, only inside the folders this machine opens files from
+// (`within`): the ones its owner lets sessions be started in, or the ones named for this
+// in its agent.json. Where it really is decides, links followed: a link inside those
+// folders to a file outside them opens nothing. So a phone or a browser of the account's
+// reads the projects it works in and not the rest of the machine.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -24,6 +30,25 @@ const NOT_LOOKED_IN = new Set(['.git', '.hg', '.svn', 'node_modules', '.venv', '
 export class FileError extends Error {}
 
 const stat = (p) => fs.promises.stat(p).catch(() => null)
+
+// The folders a machine opens files from, as they really are on disk: null where it opens none
+export function fileRoots(folders) {
+  if (!Array.isArray(folders)) return null
+  const roots = []
+  for (const f of folders) {
+    try {
+      roots.push(fs.realpathSync(path.resolve(String(f).replace(/^~(?=$|[\\/])/, os.homedir()))))
+    } catch {}
+  }
+  return roots
+}
+// Where a path really is, if that is inside one of those folders: null otherwise
+const sameCase = (p) => (process.platform === 'win32' ? p.toLowerCase() : p)
+async function inside(p, within) {
+  const real = await fs.promises.realpath(p).catch(() => null)
+  return real && within.some((root) => sameCase(real) === sameCase(root) || sameCase(real).startsWith(sameCase(root.endsWith(path.sep) ? root : root + path.sep))) ? real : null
+}
+export const OUTSIDE = 'that file is outside the folders this machine opens files from: the ones sessions may be started in, or the ones its agent.json names ("files")'
 
 // The ways a link's target may be read: the path in it, and the line it points at. Most
 // likely first: a line written after the path is taken as one before the whole is tried
@@ -118,16 +143,22 @@ async function named(top, names, until) {
 
 // The file a link means. `cwd` is the folder its session runs in; `near`, files the
 // session has had to do with, which a link is more likely to mean than others of the
-// same name. Answers { path, kind, size, mtime, line, to, exact, others }: `exact` where the
-// file is where the link says, and `others` the files it could also have meant.
-export async function find(target, { cwd = '', near = [] } = {}) {
+// same name; `within`, the folders this machine opens files from, as they really are
+// (fileRoots). Answers { path, real, kind, size, mtime, line, to, exact, others }: `exact`
+// where the file is where the link says, `real` where it really is (which is what is
+// read), and `others` the files it could also have meant.
+export async function find(target, { cwd = '', near = [], within = [] } = {}) {
   const tries = spellings(target)
   if (!tries.length) throw new FileError('that is not a link to a file')
   const home = typeof cwd === 'string' && path.isAbsolute(cwd) && (await stat(cwd))?.isDirectory() ? cwd : ''
   const top = home ? await topOf(home) : ''
+  let outside = false // there is such a file, and it is not one this machine opens
   const found = async (p, t, more = {}) => {
     const s = await stat(p)
-    return s && { path: p, kind: s.isDirectory() ? 'dir' : s.isFile() ? 'file' : 'other', size: s.size, mtime: Math.round(s.mtimeMs), line: t.line, to: t.to, exact: true, others: [], ...more }
+    if (!s) return null
+    const real = await inside(p, within)
+    if (!real) return void (outside = true)
+    return { path: p, real, kind: s.isDirectory() ? 'dir' : s.isFile() ? 'file' : 'other', size: s.size, mtime: Math.round(s.mtimeMs), line: t.line, to: t.to, exact: true, others: [], ...more }
   }
   // Where the link says: as written, from the session's folder, or from a folder above it in its project
   for (const t of tries) {
@@ -146,7 +177,8 @@ export async function find(target, { cwd = '', near = [] } = {}) {
       return { t, wanted, name: (wanted[wanted.length - 1] ?? '').toLowerCase() }
     })
     .filter((w) => w.name)
-  const inProject = top && wants.length ? await named(top, new Set(wants.map((w) => w.name)), Date.now() + LOOK_MS) : []
+  // (a project that is not inside those folders is not looked through: no file of it would be opened)
+  const inProject = top && wants.length && (await inside(top, within)) ? await named(top, new Set(wants.map((w) => w.name)), Date.now() + LOOK_MS) : []
   const hints = (Array.isArray(near) ? near : []).filter((p) => typeof p === 'string' && path.isAbsolute(p)).slice(0, 200)
   for (const { t, wanted, name } of wants) {
     const is = (p) => path.basename(p).toLowerCase() === name
@@ -157,22 +189,27 @@ export async function find(target, { cwd = '', near = [] } = {}) {
     for (const [i, r] of ranked.entries()) {
       const hit = await found(r.p, t, { exact: false })
       if (!hit) continue
-      hit.others = ranked.filter((o, j) => j !== i).slice(0, OTHERS_MAX).map((o) => o.p)
+      // (and of the others it could have meant, the ones that would be opened)
+      const others = []
+      for (const o of ranked.filter((_, j) => j !== i)) if (others.length < OTHERS_MAX && (await inside(o.p, within))) others.push(o.p)
+      hit.others = others
       return hit
     }
   }
-  throw new FileError('no file by that name was found on this machine')
+  throw new FileError(outside ? OUTSIDE : 'no file by that name was found on this machine')
 }
 
 // What is in it: a file's bytes, or a folder's entries ({ name, kind, size }, folders first)
 export async function read(found) {
+  // (read where it really is, as it was found to be: not by a name that may lead elsewhere by now)
+  const where = found.real ?? found.path
   if (found.kind === 'dir') {
-    const entries = await fs.promises.readdir(found.path, { withFileTypes: true }).catch(() => {
+    const entries = await fs.promises.readdir(where, { withFileTypes: true }).catch(() => {
       throw new FileError('that folder could not be read')
     })
     const list = []
     for (const e of entries.slice(0, LIST_MAX)) {
-      const s = e.isDirectory() ? null : await stat(path.join(found.path, e.name))
+      const s = e.isDirectory() ? null : await stat(path.join(where, e.name))
       list.push({ name: e.name, kind: e.isDirectory() || s?.isDirectory() ? 'dir' : 'file', size: s?.isFile() ? s.size : 0 })
     }
     list.sort((a, b) => (a.kind === 'dir' ? 0 : 1) - (b.kind === 'dir' ? 0 : 1) || (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1))
@@ -182,7 +219,7 @@ export async function read(found) {
   const mb = (n) => (n / 1024 / 1024).toFixed(1)
   const large = (n) => new FileError(`that file is too large to send: ${mb(n)} MB, and the most is ${mb(FILE_MAX)}`)
   if (found.size > FILE_MAX) throw large(found.size)
-  const bytes = await fs.promises.readFile(found.path).catch(() => {
+  const bytes = await fs.promises.readFile(where).catch(() => {
     throw new FileError('that file could not be read')
   })
   // (one that grew meanwhile)

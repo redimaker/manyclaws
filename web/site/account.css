@@ -1,0 +1,210 @@
+/* The account's page, the page its password is changed on, the page a computer is set up
+   from (#setup, which is laid out as the account's is), the page a session is started
+   from (#new), a computer's own page (#computer, laid out as the account's is too) and the
+   settings (#settings-page, laid out as it is as well), on a server that has a
+   front door (home.html): in the site's own style, as the way in is (join.css). app.js
+   sets data-site on the page for it; without it the page is as app.css has it. Colours and typefaces:
+   fonts.css. Sizes and spacing: as site.css, which is to say code.claude.com's: the page
+   64px in from each side and no wider than 1312px, headings in the serif and buttons with 8px
+   corners, at an app's sizes: this is a page of settings, not a front door. */
+
+/* It has the place a conversation has, beside the list of sessions, and no more of the
+   window than that: so what is narrower or wider here goes by its own width (a
+   container), not the window's. */
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) { container: acct / inline-size; --gutter: 40px; --gap: 64px; background: var(--s-bg); color: var(--s-text); color-scheme: dark; font: 15px/1.5 var(--s-sans); letter-spacing: normal; -webkit-font-smoothing: antialiased; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) ::selection { background: color-mix(in srgb, var(--s-accent) 35%, transparent); }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) :focus-visible { outline: 2px solid var(--s-accent); outline-offset: 3px; border-radius: 4px; }
+
+/* ---- The top, as the site's: what this is on the left, and on the right the ways on.
+   Beside the list it says Account; on a phone, where it is all there is, it has the
+   site's name and the way back to the sessions. */
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-head { flex: none; flex-wrap: nowrap; gap: 8px; height: calc(56px + env(safe-area-inset-top)); min-height: 0; padding: env(safe-area-inset-top) var(--gutter) 0; background: var(--s-bg); border-bottom: 1px solid var(--s-line); }
+[data-site] body.noticed :is(#account, #setup, #new, #computer, #settings-page) .chat-head { height: 56px; padding-top: 0; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-head::after { display: none; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-title { margin-right: auto; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-name { color: var(--s-text); font-family: var(--s-serif); font-size: 20px; font-weight: 500; letter-spacing: -.01em; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-sub { display: none; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .acct-mark { display: none; align-items: center; gap: 8px; margin-right: auto; color: var(--s-text); font-family: var(--s-serif); font-size: 24px; font-weight: 500; letter-spacing: -.01em; text-decoration: none; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .acct-mark svg { width: 22px; height: 22px; fill: var(--s-accent); transform: rotate(-18deg); }
+[data-site] #account #logout { order: 1; padding: 8px 12px; border: 0; border-radius: 6px; background: none; color: var(--s-muted); font: inherit; white-space: nowrap; }
+[data-site] #account #logout:hover { color: var(--s-text); }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .back { order: 2; display: none; align-items: center; min-height: 36px; margin-left: 8px; padding: 8px 16px; border-radius: 8px; background: var(--s-btn); color: var(--s-btn-text); font-size: 15px; font-weight: 500; line-height: 1; text-decoration: none; white-space: nowrap; transition: opacity .15s ease; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .back:hover { opacity: .88; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .back > [aria-hidden] { display: none; }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .back-word { display: inline; }
+
+/* ---- The page: what it is, large, and then its parts */
+[data-site] :is(#account-body, #setup-body, #new-form, #computer-body, #settings-body) { width: 100%; max-width: none; padding: 32px max(var(--gutter), calc((100% - 1312px) / 2)) var(--gap); font-size: 15px; line-height: 1.55; }
+[data-site] .acct-head { display: block; padding-bottom: 28px; }
+[data-site] .acct-tag { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .08em; line-height: 1.5; text-transform: uppercase; color: var(--s-accent); }
+[data-site] .acct-head h1 { margin: 0; font-family: var(--s-serif); font-size: clamp(26px, 3cqw, 34px); font-weight: 500; line-height: 1.15; letter-spacing: -.01em; overflow-wrap: anywhere; }
+[data-site] .acct-lede { max-width: 720px; margin: 8px 0 0; font-size: 16px; line-height: 1.5; color: var(--s-faint); }
+
+/* ---- A part: its name on the left, in the serif, and what it has beside it; a line between one and the next */
+[data-site] .acct-part { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); column-gap: 40px; margin: 0; padding: 24px 0 28px; border-top: 1px solid var(--s-line); scroll-margin-top: 24px; }
+[data-site] .acct-part > h2 { margin: 0; font-family: var(--s-serif); font-size: 20px; font-weight: 500; line-height: 1.3; letter-spacing: -.01em; text-wrap: balance; }
+[data-site] .acct-body { min-width: 0; max-width: 786px; color: var(--s-text-2); }
+[data-site] .acct-body > * { margin-top: 0; margin-bottom: 0; }
+[data-site] .acct-body > * + * { margin-top: 12px; }
+[data-site] .acct-body b { color: var(--s-text); font-weight: 600; }
+[data-site] .acct-body h3 { margin-top: 24px; font-family: var(--s-sans); font-size: 16px; font-weight: 600; letter-spacing: 0; color: var(--s-text); }
+[data-site] .acct-body .muted { color: var(--s-muted); font-size: 14px; }
+[data-site] .acct-body a { color: var(--s-text); text-decoration-color: var(--s-accent); text-underline-offset: 3px; }
+
+/* ---- What is typed, and what is pressed */
+[data-site] .acct-body .guide-form { gap: 12px; max-width: 440px; }
+[data-site] .acct-body .guide-field { gap: 6px; max-width: 440px; margin: 0; color: var(--s-muted); font-size: 14px; }
+[data-site] .acct-body input:not([type="checkbox"], [type="radio"]), [data-site] .acct-body select { min-height: 38px; padding: 6px 12px; border: 1px solid var(--s-line); border-radius: 8px; background: var(--s-surface); color: var(--s-text); font: inherit; font-size: 15px; }
+[data-site] .acct-body input::placeholder { color: var(--s-faint); }
+[data-site] .acct-body input:focus, [data-site] .acct-body select:focus { outline: 0; border-color: var(--s-text-2); }
+[data-site] .acct-body input:is([type="checkbox"], [type="radio"]) { accent-color: var(--s-accent); }
+[data-site] .acct-body .primary, [data-site] .acct-body .ghost { min-height: 36px; padding: 8px 16px; border: 0; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 500; line-height: 1; white-space: nowrap; transition: opacity .15s ease; }
+[data-site] .acct-body .primary { background: var(--s-btn); color: var(--s-btn-text); }
+[data-site] .acct-body .ghost { background: var(--s-btn-2); color: var(--s-btn-2-text); }
+[data-site] .acct-body .primary:hover, [data-site] .acct-body .ghost:hover { opacity: .88; }
+[data-site] .acct-body .primary:disabled, [data-site] .acct-body .ghost:disabled { opacity: .4; cursor: default; }
+[data-site] .acct-body .ghost.danger { color: var(--s-accent); }
+[data-site] .acct-body .link { color: var(--s-text); font: inherit; text-decoration: underline; text-decoration-color: var(--s-accent); text-underline-offset: 3px; }
+[data-site] .acct-body .form-note { color: var(--s-muted); font-size: 14px; }
+[data-site] .acct-body .form-note.error { color: var(--s-accent); }
+[data-site] .acct-body .guide-check { margin: 0; color: var(--s-text); }
+[data-site] .acct-body .guide-end { margin-bottom: 0; }
+[data-site] .acct-body .token-new, [data-site] .acct-body .passphrase-box { gap: 8px; margin-bottom: 0; }
+[data-site] .acct-body .passphrase-box { margin: 0; }
+/* The eye in the passphrase's box, and whose device this is, asked with it */
+[data-site] .acct-body .passphrase-eyed input:not([type="checkbox"], [type="radio"]) { padding-right: 44px; }
+[data-site] .passphrase-eye { width: 44px; border-radius: 8px; color: var(--s-muted); }
+[data-site] .passphrase-eye:hover, [data-site] .passphrase-eye[aria-pressed="true"] { color: var(--s-text); }
+[data-site] .acct-body .device-whose { margin: 4px 0 0; }
+[data-site] .acct-body .device-whose legend { margin-bottom: 8px; color: var(--s-text); }
+[data-site] .acct-body .device-whose .guide-check + .guide-check { margin-top: 10px; }
+[data-site] .acct-body .device-whose .guide-check span { color: var(--s-text-2); }
+[data-site] .acct-body .device-whose .guide-check b { color: var(--s-text); }
+[data-site] .acct-body .invite-form { max-width: 620px; }
+
+/* ---- A new session (#new): which computer it is for, large, as the account's page
+   opens; then, under a line, what is asked, one thing under another. What is typed in and
+   what is pressed are the account's page's own. */
+[data-site] #new-form { display: block; }
+[data-site] .new-fields { display: grid; gap: 18px; max-width: 786px; padding-top: 24px; border-top: 1px solid var(--s-line); }
+[data-site] .new-form label { gap: 6px; color: var(--s-muted); font-size: 14px; }
+[data-site] #new-form :is(input:not([type="checkbox"]), select, textarea) { min-height: 38px; padding: 6px 12px; border: 1px solid var(--s-line); border-radius: 8px; background: var(--s-surface); color: var(--s-text); font: inherit; font-size: 15px; letter-spacing: normal; }
+[data-site] #new-form select { padding-right: 30px; text-overflow: ellipsis; }
+[data-site] #new-form textarea { min-height: 168px; padding: 10px 12px; line-height: 1.5; }
+[data-site] #new-form :is(input:not([type="checkbox"]), select, textarea)::placeholder { color: var(--s-faint); }
+[data-site] #new-form :is(input:not([type="checkbox"]), select, textarea):focus { outline: 0; border-color: var(--s-text-2); }
+[data-site] .new-form label.check { gap: 10px; color: var(--s-text); font-size: 15px; cursor: pointer; }
+[data-site] #new-form label.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--s-accent); }
+[data-site] .new-other { gap: 12px; }
+[data-site] .new-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+[data-site] .new-form .error { margin: 0; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--s-accent) 50%, var(--s-line)); border-radius: 8px; background: color-mix(in srgb, var(--s-accent) 12%, var(--s-bg)); color: var(--s-text); font-size: 14px; }
+[data-site] #new-form .primary { min-height: 38px; padding: 8px 18px; border: 0; border-radius: 8px; background: var(--s-btn); color: var(--s-btn-text); font: inherit; font-size: 15px; font-weight: 500; line-height: 1; white-space: nowrap; transition: opacity .15s ease; }
+[data-site] #new-form .primary:hover { opacity: .88; }
+
+/* ---- A computer's own page (#computer): the colors it can be given, and at its foot
+   its Claude accounts as cswap draws them, in the site's colours */
+[data-site] #computer-color { --n-line: var(--s-line); --n-bg: var(--s-bg); --n-text: var(--s-text); --n-muted: var(--s-muted); --n-accent: var(--s-accent); }
+[data-site] #computer-color .mk-colors { gap: 10px; margin: 2px 0 0; }
+[data-site] #computer .where-label { color: var(--s-text); }
+[data-site] #computer-new .guide-form { gap: 14px; }
+[data-site] #computer-new .guide-end { margin: 4px 0 0; }
+[data-site] #computer-new .primary { min-width: 96px; }
+[data-site] .acct-body .swap { max-width: none; font-family: var(--s-mono); font-size: 13px; color: var(--s-text-2); }
+[data-site] .acct-body .swap-account { border-top-color: var(--s-line); }
+[data-site] .acct-body .swap-bar { grid-template-columns: 6ch minmax(40px, 1fr) 5ch max-content; }
+[data-site] .acct-body .swap-email, [data-site] .acct-body .swap-number { color: var(--s-text); }
+[data-site] .acct-body :is(.swap-org, .swap-bar, .swap-note) { color: var(--s-muted); }
+[data-site] .acct-body .swap-active { color: var(--s-accent); }
+[data-site] .acct-body .swap-track { background: var(--s-line); }
+[data-site] .acct-body .swap-fill { background: var(--s-ok); }
+[data-site] .acct-body .swap-pct { color: var(--s-ok); }
+[data-site] .acct-body .swap-bar.mid .swap-fill { background: var(--s-hi); }
+[data-site] .acct-body :is(.swap-bar.mid .swap-pct, .swap-note.warn) { color: var(--s-hi); }
+[data-site] .acct-body .swap-bar.high .swap-fill { background: var(--s-accent); }
+[data-site] .acct-body :is(.swap-bar.high .swap-pct, .swap-said.error) { color: var(--s-accent); }
+[data-site] .acct-body .swap-switch { min-height: 30px; padding: 5px 12px; font-family: var(--s-sans); font-size: 14px; }
+[data-site] .acct-body .swap-foot { font-family: var(--s-sans); }
+
+/* ---- The settings (#settings-page): a choice between two or three things is its name with
+   the switch beside it, the side that is chosen drawn as the account's page draws what is
+   pressed. The tile it shows is a piece of the list: on the list's own ground and in the
+   look's own type, not the site's, so that it is the tile as the list has it. */
+[data-site] #settings-page .set-row { max-width: 440px; min-height: 38px; margin: 0; color: var(--s-text); }
+[data-site] #settings-page .view-switch { gap: 2px; padding: 2px; border: 1px solid var(--s-line); border-radius: 8px; background: var(--s-bg); }
+[data-site] #settings-page .view-switch button { padding: 5px 12px; border-radius: 6px; color: var(--s-muted); font: inherit; font-size: 14px; font-weight: 500; line-height: 1.4; letter-spacing: normal; }
+[data-site] #settings-page .view-switch button:hover { color: var(--s-text); }
+[data-site] #settings-page .view-switch button[aria-pressed="true"] { background: var(--s-btn); color: var(--s-btn-text); }
+[data-site] #settings-page .tile-sample { max-width: 440px; margin: 0; border-color: var(--s-line); border-radius: 12px; background: var(--panel); color: var(--text); font: var(--size)/var(--line) var(--font); letter-spacing: var(--track, normal); -webkit-font-smoothing: auto; }
+[data-site] #settings-page .tile-sample .row { padding-top: 10px; padding-bottom: 10px; }
+[data-site] #set-alerts-says { color: var(--s-text-2); }
+[data-site] #set-alerts[data-state="on"] #set-alerts-says, [data-site] #set-alerts[data-state="open"] #set-alerts-says { color: var(--s-text); }
+
+/* ---- What is said of how things stand, in a card of its own */
+[data-site] #setup-status { margin: 0 0 28px; }
+[data-site] #setup-status .guide-status { margin: 0; padding: 12px 16px; border: 1px solid var(--s-line); border-radius: 12px; background: var(--s-surface); color: var(--s-text-2); }
+[data-site] #setup-status .guide-status.connected { border-color: color-mix(in srgb, var(--s-ok) 50%, var(--s-line)); background: color-mix(in srgb, var(--s-ok) 10%, var(--s-bg)); color: var(--s-text); }
+[data-site] #setup-status a { color: var(--s-text); text-decoration-color: var(--s-accent); text-underline-offset: 3px; }
+[data-site] .acct-body .guide-status { padding: 12px 16px; border: 1px solid var(--s-line); border-radius: 12px; background: var(--s-surface); color: var(--s-text-2); }
+[data-site] .acct-body .guide-status.connected { border-color: color-mix(in srgb, var(--s-ok) 50%, var(--s-line)); background: color-mix(in srgb, var(--s-ok) 10%, var(--s-bg)); color: var(--s-text); }
+[data-site] .acct-body .token-made { padding: 16px 20px; border: 1px solid color-mix(in srgb, var(--s-accent) 45%, var(--s-line)); border-radius: 16px; background: color-mix(in srgb, var(--s-accent) 10%, var(--s-bg)); color: var(--s-text); }
+[data-site] .acct-body .token-made p { margin-bottom: 12px; }
+/* (what a computer needs, on its own page: set off as the token just made is, with the accent down its side) */
+[data-site] .acct-body .needs { margin-bottom: 20px; padding: 16px 20px; border-radius: 16px; background: color-mix(in srgb, var(--s-accent) 12%, transparent); box-shadow: inset 4px 0 0 var(--s-accent); }
+[data-site] .acct-body .needs p { margin: 0; }
+[data-site] .acct-body .needs p + p { margin-top: 12px; }
+
+/* ---- Tokens and people: a row each, a line between */
+[data-site] .acct-body .token-row, [data-site] .acct-body .person { gap: 8px 16px; padding: 12px 0; border-top: 1px solid var(--s-line); }
+[data-site] .acct-body .token-row + .token-row, [data-site] .acct-body .person + .person { margin-top: 0; }
+[data-site] .acct-body .token-actions { gap: 8px; }
+[data-site] .acct-body .shut-device { padding: 16px 0; border-top: 1px solid var(--s-line); }
+[data-site] .acct-body .shut-device + .shut-device { margin-top: 0; }
+[data-site] .acct-body .shut-device:first-child { padding-top: 0; border-top: 0; }
+[data-site] .acct-body .shut-device > * + * { margin-top: 10px; }
+[data-site] .acct-body .shut-name b { font-size: 16px; }
+[data-site] .acct-body .shut-steps li + li { margin-top: 10px; }
+[data-site] .acct-body .shut-steps .code-box { max-width: 440px; margin: 8px 0; }
+[data-site] .acct-body .token-row .ghost, [data-site] .acct-body .person .ghost { min-height: 32px; padding: 6px 14px; font-size: 14px; }
+[data-site] .acct-body code { padding: 2px 6px; border-radius: 6px; background: var(--s-surface-2); font-family: var(--s-mono); font-size: .88em; overflow-wrap: anywhere; }
+[data-site] .acct-body .code-box { margin-bottom: 0; }
+[data-site] .acct-body .code-box .code { padding: 12px 84px 12px 16px; border: 1px solid var(--s-line); border-radius: 10px; background: var(--s-code); color: #c3c2b7; font-family: var(--s-mono); font-size: 13px; line-height: 1.6; }
+[data-site] .acct-body .code-box .copy { top: 10px; right: 10px; min-height: 0; padding: 4px 10px; border: 1px solid #30302e; border-radius: 6px; background: #262624; color: #c3c2b7; font-size: 13px; font-weight: 400; line-height: 1.5; }
+
+/* ---- Narrower: a part's name over what it has */
+@container acct (max-width: 1000px) {
+  [data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-head, [data-site] :is(#account-body, #setup-body, #new-form, #computer-body, #settings-body) { --gutter: 28px; --gap: 56px; }
+}
+@container acct (max-width: 860px) {
+  [data-site] :is(#account-body, #setup-body, #new-form, #computer-body, #settings-body) { padding-top: 24px; }
+  [data-site] .acct-head { padding-bottom: 24px; }
+  [data-site] .acct-part { grid-template-columns: minmax(0, 1fr); row-gap: 10px; padding: 20px 0 24px; }
+}
+@container acct (max-width: 600px) {
+  [data-site] .acct-body .swap-bar { grid-template-columns: 5ch minmax(30px, 1fr) 5ch; gap: 0 10px; padding-left: 0; margin-top: 4px; }
+  [data-site] .acct-body .swap-bar .swap-reset { grid-column: 1 / -1; padding-left: calc(5ch + 10px); white-space: normal; }
+  [data-site] .acct-body .swap-note { padding-left: 0; }
+  [data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-head, [data-site] :is(#account-body, #setup-body, #new-form, #computer-body, #settings-body) { --gutter: 20px; --gap: 48px; }
+  [data-site] .new-row { grid-template-columns: minmax(0, 1fr); }
+    [data-site] .acct-body .code-box .code { padding: 12px 16px 44px; }
+  [data-site] .acct-body .code-box .copy { top: auto; bottom: 10px; }
+}
+/* ---- A phone, where the list is a step back: the site's name, and the way to the sessions */
+@media (max-width: 760px) {
+  [data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-title { display: none; }
+  [data-site] :is(#account, #setup, #new, #computer, #settings-page) .acct-mark { display: flex; font-size: 20px; }
+  [data-site] :is(#account, #setup, #new, #computer, #settings-page) .back { display: inline-flex; }
+  [data-site] #settings-page .set-row { min-height: 44px; }
+  [data-site] #settings-page .view-switch button { padding: 8px 14px; }
+}
+/* (a touch keyboard zooms the page into anything typed in under 16px, and a finger wants more room than a pointer) */
+@media (pointer: coarse) {
+  [data-site] #computer .acct-body :is(select, .primary) { min-height: 44px; font-size: 16px; }
+  [data-site] #computer .guide-check { min-height: 44px; }
+  [data-site] #new-form :is(input:not([type="checkbox"]), select, textarea) { min-height: 44px; font-size: 16px; }
+  [data-site] .new-form label.check { min-height: 44px; }
+  [data-site] #new-form label.check input { width: 20px; height: 20px; }
+  [data-site] #new-form .primary { min-height: 44px; }
+}
+@media (max-width: 380px) {
+  [data-site] :is(#account, #setup, #new, #computer, #settings-page) .acct-mark span { display: none; }
+}

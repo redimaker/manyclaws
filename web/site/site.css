@@ -1,0 +1,242 @@
+/* The front door (home.html), the guide (setup.html) and the small print (legal.html).
+   The style, spacing and layout are code.claude.com's, measured there: text at 15 to
+   17px in the system's sans, headings in a serif at 64, 52 and 36px, the page 64px in
+   from each side and no wider than 1312px, 128px between one part and the next, cards
+   with 24px corners and 32px inside, buttons 40px tall with 8px corners. The colours and
+   typefaces are fonts.css's. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--s-bg); color: var(--s-text); scroll-behavior: smooth; -webkit-text-size-adjust: 100%; scroll-padding-top: 88px; }
+body { margin: 0; font-family: var(--s-sans); font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+img { display: block; max-width: 100%; height: auto; }
+a { color: inherit; }
+em { font-style: italic; }
+h1, h2, h3, p, ol, ul, dl, dd, figure, pre, blockquote { margin: 0; }
+ol, ul { padding: 0; list-style: none; }
+::selection { background: color-mix(in srgb, var(--s-accent) 35%, transparent); }
+:focus-visible { outline: 2px solid var(--s-accent); outline-offset: 3px; border-radius: 4px; }
+
+:root { --gutter: 64px; --page: 1312px; --inner: 1192px; --gap: 128px; --band: calc(var(--gap) * .75); }
+@media (max-width: 1000px) { :root { --gutter: 32px; --gap: 96px; } }
+@media (max-width: 600px) { :root { --gutter: 20px; --gap: 72px; } }
+
+/* ---- Headings: the serif, quiet */
+h1, h2, h3, .big, .mark, .foot-mark { font-family: var(--s-serif); font-weight: 500; letter-spacing: -.01em; text-wrap: balance; }
+h1 { font-size: clamp(40px, 5.2vw, 64px); line-height: 1.1; font-weight: 400; }
+h2 { font-size: clamp(30px, 4.2vw, 52px); line-height: 1.2; }
+
+/* ---- What's said small, over a heading */
+.tag { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--s-accent); line-height: 1.5; }
+.tag i { display: inline-block; width: 3px; height: 3px; margin: 0 .7em; vertical-align: middle; border-radius: 50%; background: currentColor; opacity: .7; }
+
+/* ---- Buttons */
+.go, .listen, .ticket-go {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 20px; border: 0; border-radius: 8px;
+  background: var(--s-btn); color: var(--s-btn-text); font: inherit; font-size: 17px; line-height: 1; text-decoration: none; white-space: nowrap; cursor: pointer;
+  transition: background-color .15s ease, opacity .15s ease;
+}
+.go:hover, .ticket:hover .ticket-go { opacity: .88; }
+.go.small { min-height: 36px; padding: 8px 16px; font-size: 15px; font-weight: 500; }
+
+/* ---- The top: the name, and the ways on */
+.top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 68px; padding: 0 var(--gutter); background: color-mix(in srgb, var(--s-bg) 92%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--s-line); }
+.mark { display: flex; align-items: center; gap: 8px; font-size: 24px; text-decoration: none; }
+.mark svg { width: 22px; height: 22px; fill: var(--s-accent); transform: rotate(-18deg); }
+.top nav { display: flex; align-items: center; gap: 8px; }
+.top nav a:not(.go) { padding: 8px 12px; color: var(--s-muted); text-decoration: none; white-space: nowrap; border-radius: 6px; }
+.top nav a:not(.go):hover { color: var(--s-text); }
+.top nav .go { margin-left: 8px; }
+
+/* ---- Each part of the page: in from the sides, and a fixed way from the next */
+main > section { max-width: calc(var(--page) + 2 * var(--gutter)); margin: 0 auto; padding: 0 var(--gutter) var(--gap); }
+
+/* ---- The hero: the words on the left, the picture in a card beside them */
+.hero { display: grid; grid-template-columns: minmax(0, 440px) minmax(0, 1fr); column-gap: 64px; align-items: center; padding-top: 64px; padding-bottom: 96px; }
+.hero > * { grid-column: 1; }
+.hero-art { grid-column: 2; grid-row: 1 / span 5; }
+.hero-art img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; object-position: 78% 42%; border-radius: 16px; border: 1px solid var(--s-line); }
+.hero-tag { margin-bottom: 16px; }
+.lede { margin-top: 20px; font-size: 20px; line-height: 1.5; color: var(--s-faint); }
+.hero-go { display: grid; gap: 12px; margin-top: 32px; }
+.listen { background: var(--s-btn-2); color: var(--s-btn-2-text); background-image: linear-gradient(90deg, color-mix(in srgb, var(--s-accent) 45%, transparent) calc(var(--played, 0) * 100%), transparent 0); }
+.listen:hover { opacity: .9; }
+.listen-dot { width: 0; height: 0; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; }
+.listen[aria-pressed="true"] .listen-dot { width: 10px; height: 12px; border: 0; background: linear-gradient(90deg, currentColor 3px, transparent 3px 7px, currentColor 7px); }
+.hero-note { margin-top: 16px; font-size: 15px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--s-faint); }
+
+/* ---- The premise: one thing said large, and a word under it */
+.premise { text-align: center; }
+.big { max-width: 900px; margin: 0 auto; font-size: clamp(30px, 4.2vw, 52px); line-height: 1.2; }
+.aside { max-width: 720px; margin: 24px auto 0; font-size: 20px; line-height: 1.5; color: var(--s-faint); }
+
+/* ---- The day: a row for each hour, its words on one side and its picture on the other, turn about */
+.day { display: grid; gap: 96px; max-width: calc(var(--inner) + 2 * var(--gutter)); }
+.beat { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); grid-template-areas: "clock art" "words art"; column-gap: 64px; align-items: center; }
+.beat:nth-child(even) { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); grid-template-areas: "art clock" "art words"; }
+.clock { grid-area: clock; align-self: end; justify-self: start; margin-bottom: 16px; padding: 4px 12px; border: 1px solid var(--s-line); border-radius: 99px; font-family: var(--s-mono); font-size: 13px; color: var(--s-muted); }
+.words { grid-area: words; align-self: start; }
+.words h2 { margin: 8px 0 16px; font-size: clamp(26px, 3vw, 36px); line-height: 1.15; }
+.words p:not(.tag) { font-size: 17px; line-height: 1.6; color: var(--s-muted); }
+.plate, .wide, .phone { grid-area: art; }
+.plate, .wide { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 24px; border: 1px solid var(--s-line); }
+.phone { display: grid; place-items: center; height: 100%; padding: 32px; background: var(--s-surface); border: 1px solid var(--s-line); border-radius: 24px; }
+.phone img { width: min(230px, 100%); border-radius: 26px; border: 1px solid var(--s-line); box-shadow: 0 16px 40px -20px rgba(0, 0, 0, .5); }
+/* (the hour with two pictures: the photograph, and the phone beside it) */
+.beat-stamp { grid-template-columns: minmax(0, 5fr) minmax(0, 3.4fr) minmax(0, 2.6fr); grid-template-areas: "clock plate phone" "words plate phone"; column-gap: 24px; align-items: stretch; }
+.beat-stamp .clock { margin-right: 40px; }
+.beat-stamp .words { margin-right: 40px; }
+/* (the photograph is cut to a tall slot here: the clerk and both of her hood's eyes are right of its middle) */
+.beat-stamp .plate { grid-area: plate; height: 100%; aspect-ratio: auto; object-position: 70% 50%; }
+.beat-stamp .phone { grid-area: phone; padding: 24px 16px; }
+
+/* ---- Every computer: the heading, the long picture, and what it runs on */
+.bench { display: grid; justify-items: center; gap: 32px; text-align: center; max-width: calc(var(--inner) + 2 * var(--gutter)); padding-bottom: var(--band); }
+.bench h2 { order: -1; }
+.bench h2 br { display: none; }
+.bench picture { width: 100%; }
+.bench img { width: 100%; border-radius: 24px; border: 1px solid var(--s-line); }
+.run { font-size: 15px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--s-muted); }
+.run span { font-family: var(--s-mono); font-size: .92em; }
+
+/* ---- What's in the box: the desk's screen, and a card for each thing (on the page's other ground, from side to side) */
+.box { display: grid; gap: 48px; max-width: none; padding-top: var(--band); padding-bottom: var(--band); background: var(--s-surface); }
+.box > * { width: 100%; max-width: var(--inner); margin: 0 auto; }
+.box-head { display: grid; justify-items: center; gap: 8px; text-align: center; }
+.screen { width: 100%; margin-top: 40px; }
+.screen img { width: 100%; border-radius: 16px; border: 1px solid var(--s-line); }
+.screen-note { margin-top: 8px; color: var(--s-faint); }
+.manifest { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.manifest li { display: grid; align-content: start; gap: 8px; padding: 24px; background: var(--s-bg); border: 1px solid var(--s-line); border-radius: 16px; }
+.manifest b { font-family: var(--s-serif); font-size: 20px; font-weight: 500; line-height: 1.25; }
+.manifest span { color: var(--s-muted); line-height: 1.6; }
+
+/* ---- Sealed: the picture, the words, and what we can and can't see, in a ledger */
+.sealed { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 64px; align-items: center; max-width: calc(var(--inner) + 2 * var(--gutter)); padding-top: var(--band); }
+.sealed .plate, .sealed .words { grid-area: auto; }
+.sealed .plate { aspect-ratio: 1; }
+.ledger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 32px; margin-top: 32px; }
+.ledger div { padding: 16px 0; border-top: 1px solid var(--s-line); }
+.ledger dt { font-weight: 600; }
+.ledger dd { margin-top: 4px; color: var(--s-muted); line-height: 1.6; }
+
+/* ---- Setting up: what to say to Claude Code, as its terminal shows it */
+.setup, .price, .asked, .last { display: grid; justify-items: center; text-align: center; }
+.setup h2, .price-head h2 { margin-top: 8px; }
+.setup-say { max-width: 720px; margin-top: 24px; font-size: 20px; line-height: 1.5; color: var(--s-faint); }
+.term { position: relative; width: 100%; max-width: 741px; margin-top: 40px; padding: 20px 24px; overflow-x: auto; text-align: left; background: var(--s-code); border: 1px solid var(--s-line); border-radius: 12px; font-family: var(--s-mono); font-size: 14px; line-height: 1.7; color: var(--s-text-2); }
+.term code { font: inherit; }
+.term .p { color: var(--s-accent); }
+.term .ok { color: var(--s-ok); }
+.term .h { color: var(--s-text); font-weight: 600; }
+.term .s { color: var(--s-hi); }
+.setup-foot { max-width: 720px; margin-top: 24px; color: var(--s-faint); line-height: 1.6; }
+.setup-foot a, .price-foot a { color: var(--s-text-2); text-underline-offset: 3px; }
+
+/* ---- The price: two cards, and the three steps to one */
+.price-art { width: min(360px, 100%); aspect-ratio: 16 / 9; object-fit: cover; margin-bottom: 32px; border-radius: 16px; border: 1px solid var(--s-line); }
+.tags { display: grid; grid-template-columns: repeat(2, minmax(0, 381px)); gap: 24px; justify-content: center; width: 100%; margin-top: 48px; text-align: left; }
+.ticket { display: grid; align-content: start; gap: 8px; padding: 32px; background: var(--s-surface); border: 1px solid var(--s-line); border-radius: 24px; text-decoration: none; }
+.ticket-year { border-color: var(--s-muted); }
+.ticket-name { font-family: var(--s-serif); font-size: 32px; font-weight: 500; line-height: 1.1; }
+.ticket-sum { display: flex; align-items: baseline; gap: 8px; margin-top: 16px; }
+.ticket-sum b { font-size: 23px; font-weight: 500; }
+.ticket-sum i { font-style: normal; color: var(--s-muted); }
+.ticket-note { color: var(--s-muted); }
+.ticket-go { width: 100%; margin-top: 24px; }
+.ticket-month .ticket-go { background: var(--s-btn-2); color: var(--s-btn-2-text); }
+.way { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; width: 100%; max-width: 786px; margin-top: 48px; counter-reset: way; text-align: left; }
+.way li { counter-increment: way; display: grid; align-content: start; gap: 4px; padding-top: 16px; border-top: 1px solid var(--s-line); color: var(--s-muted); line-height: 1.6; }
+.way li::before { content: counter(way); font-family: var(--s-mono); font-size: 13px; color: var(--s-faint); }
+.way b { display: block; color: var(--s-text); font-weight: 600; }
+.price-foot { max-width: 720px; margin-top: 40px; color: var(--s-faint); line-height: 1.6; }
+
+/* ---- Asked: one column, a line between each */
+.asked-cols { display: grid; width: 100%; max-width: 660px; margin-top: 48px; text-align: left; border-bottom: 1px solid var(--s-line); }
+.asked details { border-top: 1px solid var(--s-line); }
+.asked summary { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 28px 0; font-family: var(--s-serif); font-size: 20px; font-weight: 500; line-height: 1.3; cursor: pointer; list-style: none; }
+.asked summary::-webkit-details-marker { display: none; }
+.asked summary::after { content: "+"; flex: none; font-family: var(--s-sans); font-size: 22px; font-weight: 300; color: var(--s-muted); }
+.asked details[open] summary::after { content: "\2212"; }
+.asked details p { padding: 0 40px 28px 0; font-size: 17px; line-height: 1.6; color: var(--s-muted); }
+
+/* ---- The last word */
+.last { gap: 32px; }
+.last img { order: -1; width: min(786px, 100%); aspect-ratio: 16 / 9; object-fit: cover; border-radius: 24px; border: 1px solid var(--s-line); }
+
+/* ---- The foot */
+.foot { display: grid; gap: 16px; padding: 64px var(--gutter); border-top: 1px solid var(--s-line); color: var(--s-muted); }
+.foot-mark { font-size: 20px; color: var(--s-text); }
+.foot-links { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.foot-links a { text-decoration: none; }
+.foot-links a:hover { color: var(--s-text); }
+.foot-small { max-width: 720px; font-size: 13px; line-height: 1.6; color: var(--s-faint); }
+
+/* ---- Things come up as they're scrolled to, a little */
+@media (prefers-reduced-motion: no-preference) {
+  .rise { opacity: 0; transform: translateY(8px); transition: opacity .5s ease, transform .5s ease; }
+  .rise.risen { opacity: 1; transform: none; }
+}
+
+/* ---- The guide and the small print: one column to read, as the docs are */
+.guide { max-width: calc(760px + 2 * var(--gutter)); margin: 0 auto; padding: 64px var(--gutter) var(--gap); }
+main.guide > section { max-width: none; padding: 0; }
+.guide-intro h1 { font-size: clamp(30px, 4vw, 40px); line-height: 1.15; font-weight: 500; }
+.guide-intro p { margin-top: 16px; font-size: 18px; line-height: 1.6; color: var(--s-muted); }
+.guide-intro p b { color: var(--s-text); font-weight: 600; }
+.guide-intro .dated { font-size: 15px; color: var(--s-faint); }
+/* (what to say to Claude Code: in a card of its own, to be taken with one press) */
+.guide-intro blockquote { position: relative; margin-top: 16px; padding: 20px 96px 20px 24px; background: color-mix(in srgb, var(--s-accent) 10%, var(--s-bg)); border: 1px solid color-mix(in srgb, var(--s-accent) 45%, var(--s-line)); border-radius: 16px; }
+.guide-intro blockquote p { margin: 0; font-family: var(--s-mono); font-size: 15px; line-height: 1.6; color: var(--s-text); overflow-wrap: anywhere; }
+.guide-part { margin-top: 56px; scroll-margin-top: 88px; }
+.guide-part h2 { display: flex; align-items: baseline; gap: 12px; font-size: 28px; line-height: 1.25; }
+.guide-n { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; transform: translateY(-3px); border-radius: 50%; background: var(--s-surface-2); border: 1px solid var(--s-line); font-family: var(--s-sans); font-size: 14px; font-weight: 600; letter-spacing: 0; color: var(--s-text-2); }
+.guide-body { margin-top: 16px; font-size: 16px; line-height: 1.7; color: var(--s-text-2); }
+.guide-body > * + * { margin-top: 16px; }
+.guide-body h3 { margin-top: 32px; font-family: var(--s-sans); font-size: 18px; font-weight: 600; letter-spacing: 0; color: var(--s-text); }
+.guide-body ol, .guide-body ul { display: grid; gap: 12px; padding-left: 24px; }
+.guide-body ol { list-style: decimal; }
+.guide-body ul { list-style: disc; }
+.guide-body li::marker { color: var(--s-faint); }
+.guide-body li > * + * { margin-top: 12px; }
+.guide-body b { color: var(--s-text); font-weight: 600; }
+.guide a { color: var(--s-text); text-decoration-color: var(--s-accent); text-underline-offset: 3px; }
+.guide code { padding: 2px 6px; background: var(--s-surface-2); border-radius: 6px; font-family: var(--s-mono); font-size: .88em; overflow-wrap: anywhere; }
+.guide .term { max-width: none; margin-top: 16px; padding: 16px 84px 16px 20px; font-size: 13.5px; }
+.guide .term code { padding: 0; background: none; font-size: inherit; }
+/* (a line too long for its box goes on underneath, set in: it is still one line when copied) */
+.guide .term .l { display: block; padding-left: 2ch; text-indent: -2ch; white-space: pre-wrap; overflow-wrap: anywhere; }
+.copy { position: absolute; top: 10px; right: 10px; padding: 4px 10px; background: var(--s-surface-2); border: 1px solid var(--s-line); border-radius: 6px; color: var(--s-text-2); font: inherit; font-family: var(--s-sans); font-size: 13px; cursor: pointer; }
+.copy:hover { color: var(--s-text); }
+.for-claude, .optional { padding: 24px; background: var(--s-surface); border: 1px solid var(--s-line); border-radius: 16px; }
+.small-print .guide-part h2 { padding-top: 32px; border-top: 1px solid var(--s-line); }
+
+/* ---- Narrower: one column */
+@media (max-width: 860px) {
+  .hero { grid-template-columns: minmax(0, 1fr); padding-top: 40px; padding-bottom: 72px; }
+  .hero-art { grid-column: 1; grid-row: auto; order: 9; margin-top: 40px; }
+  .day { gap: 72px; }
+  .beat, .beat:nth-child(even), .beat-stamp { grid-template-columns: minmax(0, 1fr); grid-template-areas: "clock" "words" "art"; row-gap: 0; }
+  .beat .words { margin: 0 0 24px; }
+  .beat-stamp { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); grid-template-areas: "clock clock" "words words" "plate phone"; column-gap: 12px; }
+  .beat-stamp .clock { margin-right: 0; }
+  .phone { padding: 24px; }
+  .manifest { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .sealed { grid-template-columns: minmax(0, 1fr); row-gap: 32px; }
+  .sealed .plate { max-width: 420px; }
+}
+@media (max-width: 600px) {
+  .top { height: 60px; }
+  .mark { font-size: 21px; }
+  .top nav { gap: 0; }
+  .top nav a:not(.go) { padding: 8px; }
+  .top nav a[href="#price"], .top nav a[href="/setup.md"] { display: none; }
+  .lede, .aside, .setup-say { font-size: 18px; }
+  .manifest, .ledger, .tags, .way { grid-template-columns: minmax(0, 1fr); }
+  .plate, .wide, .phone, .bench img, .last img, .ticket { border-radius: 16px; }
+  .ticket { padding: 24px; }
+  .asked summary { padding: 20px 0; font-size: 18px; }
+  .asked details p { padding-right: 0; }
+  .guide { padding-top: 40px; }
+  .guide-intro blockquote, .guide .term { padding-right: 20px; padding-bottom: 48px; }
+  .copy { top: auto; bottom: 10px; }
+}

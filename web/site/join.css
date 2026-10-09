@@ -1,0 +1,75 @@
+/* The way in, on a server that has a front door (home.html): the cards to sign in, make
+   an account, type the email's code and pick a plan, in the site's own style. app.js sets
+   data-site on the page for it; without it the cards are as app.css has them. Colours and
+   typefaces: fonts.css. Sizes and spacing: as site.css, which is to say code.claude.com's. */
+
+[data-site] body:has(#login:not([hidden])) { background: var(--s-bg); }
+[data-site] #login { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); place-items: stretch; gap: 0; min-height: 100dvh; padding: 24px; background: var(--s-bg); color: var(--s-text); font-family: var(--s-sans); font-size: 15px; line-height: 1.5; }
+
+/* The picture's half: a card with one picture for each step, the name over it, and where in the way one is */
+[data-site] .join-art { position: relative; display: grid; align-content: space-between; padding: 24px 28px; min-height: 14rem; overflow: hidden; isolation: isolate; border: 1px solid var(--s-line); border-radius: 24px; background: var(--s-surface) center / cover no-repeat; }
+[data-site] .join-art::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(20, 20, 19, .7) 0%, transparent 28%, transparent 62%, rgba(20, 20, 19, .8) 100%); }
+[data-site] .join-art { background-image: url("/site/img/real/key.webp?v=2"); }
+[data-site] #login:has(#signup-form:not([hidden])) .join-art { background-image: url("/site/img/real/row.webp?v=2"); }
+[data-site] #login:has(#verify-form:not([hidden])) .join-art { background-image: url("/site/img/real/bell.webp?v=2"); }
+[data-site] #login:has(#pay-card:not([hidden])) .join-art { background-image: url("/site/img/real/stamp.webp?v=2"); }
+[data-site] .join-mark { justify-self: start; color: #faf9f5; text-decoration: none; font-family: var(--s-serif); font-weight: 500; font-size: 24px; letter-spacing: -.01em; }
+[data-site] .join-steps { display: none; gap: 24px; margin: 0; padding: 0; list-style: none; counter-reset: s; font-size: 15px; color: rgba(250, 249, 245, .6); }
+[data-site] #login:has(#signup-form:not([hidden]), #verify-form:not([hidden]), #pay-card:not([hidden])) .join-steps { display: flex; }
+[data-site] .join-steps li { counter-increment: s; display: flex; align-items: center; gap: 8px; }
+[data-site] .join-steps li::before { content: counter(s); display: inline-grid; place-items: center; width: 24px; height: 24px; border: 1px solid currentColor; border-radius: 50%; font-size: 13px; }
+[data-site] #login:has(#signup-form:not([hidden])) .join-steps li:nth-child(1),
+[data-site] #login:has(#verify-form:not([hidden])) .join-steps li:nth-child(2),
+[data-site] #login:has(#pay-card:not([hidden])) .join-steps li:nth-child(3) { color: #faf9f5; font-weight: 600; }
+
+/* The card: what's asked, on the page's own ground */
+[data-site] .login-card { align-self: center; justify-self: center; width: min(400px, 100%); margin: 0; padding: 32px 0; gap: 12px; background: none; border: 0; border-radius: 0; }
+[data-site] .login-card h1 { margin: 0 0 4px; font-family: var(--s-serif); font-weight: 500; font-size: 40px; line-height: 1.15; letter-spacing: -.01em; color: var(--s-text); text-wrap: balance; }
+[data-site] .login-card .muted { margin-bottom: 12px; color: var(--s-muted); font-size: 17px; }
+[data-site] .login-card input:not([type="hidden"]) { min-height: 44px; padding: 8px 14px; border: 1px solid var(--s-line); border-radius: 8px; background: var(--s-surface); color: var(--s-text); font: inherit; font-size: 16px; }
+[data-site] .login-card input::placeholder { color: var(--s-faint); }
+[data-site] .login-card input:focus { outline: 0; border-color: var(--s-text-2); }
+[data-site] #verify-code { font-family: var(--s-mono); font-size: 22px; letter-spacing: .3em; text-align: center; }
+[data-site] .login-card .primary { min-height: 44px; margin-top: 4px; padding: 8px 20px; border: 0; border-radius: 8px; background: var(--s-btn); color: var(--s-btn-text); cursor: pointer; font: inherit; font-size: 16px; font-weight: 500; }
+[data-site] .login-card .primary:hover { background: var(--s-btn); opacity: .88; }
+[data-site] .login-card .error { padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--s-accent) 50%, var(--s-line)); border-radius: 8px; background: color-mix(in srgb, var(--s-accent) 12%, var(--s-bg)); color: var(--s-text); font-size: 15px; }
+[data-site] .login-card .link { color: var(--s-muted); font: inherit; text-decoration: underline; text-decoration-color: var(--s-line); text-underline-offset: 3px; cursor: pointer; }
+[data-site] .login-card .link:hover { color: var(--s-text); }
+[data-site] .login-new { color: var(--s-muted); font-size: 15px; }
+[data-site] .login-new .link { color: var(--s-text); }
+[data-site] .login-other { margin-top: 8px; font-size: 15px; }
+[data-site] .join-terms { color: var(--s-faint); font-size: 13px; line-height: 1.6; }
+[data-site] .join-terms a { color: inherit; }
+
+/* The plans: two cards, as the front door has them */
+[data-site] .pay-plans { gap: 12px; margin: 4px 0 8px; }
+[data-site] .login-card .pay-plans button { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 4px 16px; margin: 0; padding: 20px 24px; border: 1px solid var(--s-line); border-radius: 16px; background: var(--s-surface); color: var(--s-text); font: inherit; text-align: left; cursor: pointer; }
+[data-site] .login-card .pay-plans button:hover { border-color: var(--s-muted); background: var(--s-surface); }
+[data-site] .login-card .pay-plans button[data-plan="yearly"] { order: -1; border-color: var(--s-muted); }
+[data-site] .login-card .pay-plans button span { grid-column: 1; font-family: var(--s-serif); font-size: 22px; font-weight: 500; }
+[data-site] .login-card .pay-plans button small { grid-row: 1; grid-column: 2; opacity: 1; font-size: 20px; font-weight: 500; white-space: nowrap; }
+[data-site] .login-card .pay-plans button em { grid-column: 1 / -1; grid-row: 2; font-style: normal; font-size: 15px; color: var(--s-muted); }
+
+/* The passphrase's card: its form is dressed as the account's page dresses it (account.css, .acct-body, which the
+   card's body is too), with what is typed and pressed the size the other cards have them */
+[data-site] .login-card input[type="radio"] { min-height: 0; padding: 0; border: 0; background: none; }
+[data-site] #passphrase-card .passphrase-ask { max-width: none; }
+[data-site] #passphrase-card .muted { margin-bottom: 0; font-size: 17px; }
+[data-site] #passphrase-card input:not([type="hidden"], [type="radio"]) { min-height: 44px; padding: 8px 14px; font-size: 16px; }
+[data-site] #passphrase-card .passphrase-eyed input { padding-right: 48px; }
+[data-site] #passphrase-card .passphrase-eye { width: 48px; }
+[data-site] #passphrase-card .primary, [data-site] #passphrase-card .ghost { min-height: 44px; margin-top: 0; padding: 8px 20px; font-size: 16px; }
+/* (what is said of what was typed is a line under the button, not a card's own refusal; and what is asked where it
+   does not open what is kept has buttons whose words may take two lines on a phone) */
+[data-site] #passphrase-card .form-note.error { padding: 0; border: 0; border-radius: 0; background: none; font-size: 14px; }
+[data-site] #passphrase-card .token-made .primary, [data-site] #passphrase-card .token-made .ghost { white-space: normal; line-height: 1.25; text-align: left; }
+[data-site] .passphrase-about summary { color: var(--s-muted); font-size: 15px; text-decoration: underline; text-decoration-color: var(--s-line); text-underline-offset: 3px; }
+[data-site] .passphrase-about summary:hover { color: var(--s-text); }
+[data-site] .passphrase-about p { margin-top: 12px; font-size: 15px; }
+
+@media (max-width: 820px) {
+  [data-site] #login { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding: 16px; }
+  [data-site] .join-art { min-height: 26svh; padding: 16px 20px; border-radius: 16px; background-position: 100% 50%; }
+  [data-site] .login-card { align-self: start; padding: 24px 4px; }
+  [data-site] .login-card h1 { font-size: 32px; }
+}

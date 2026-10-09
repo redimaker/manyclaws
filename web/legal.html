@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en" data-look="{{look}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ManyClaws — terms, privacy and refunds</title>
+  <meta name="theme-color" content="{{theme}}">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/site/fonts.css">
+  <link rel="stylesheet" href="/site/site.css">
+  <script src="/site/site.js" defer></script>
+</head>
+<body>
+  <!-- The terms an account is made under, what is kept of it, and how money comes back.
+       Written plainly, from what the server does (README.md): where the server changes, this does. -->
+  <header class="top">
+    <a class="mark" href="/" aria-label="ManyClaws">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M7 35C7 17 21 5 38 5c11 0 19 6 21 15L35 31l24 1c-1 15-13 27-29 27C17 59 7 49 7 35Z"/></svg>
+      <span>ManyClaws</span>
+    </a>
+    <nav><a href="/">Home</a><a href="/app" target="_top">Sign in</a></nav>
+  </header>
+  <main class="guide small-print">
+    <section class="guide-intro">
+    <h1>The small print, at a readable size</h1>
+    <p class="dated">Last changed 7 October 2026. Questions: <a href="mailto:support@manyclaws.dev">support@manyclaws.dev</a>.</p>
+    </section>
+    <section class="guide-part note-wide" id="terms">
+      <h2>Terms</h2>
+      <div class="guide-body">
+    <h3>What you are buying</h3>
+    <p>ManyClaws is a service that shows the Claude Code sessions running on your own computers on a web page, and carries your replies and answers back to them. Claude Code itself, and your Claude account, are Anthropic&rsquo;s and are covered by your agreement with Anthropic. ManyClaws is an independent product and is not affiliated with or endorsed by Anthropic.</p>
+    <h3>Your account</h3>
+    <p>You need an email address you can read, and a password. Anyone signed in to your account can read your sessions and answer their permission prompts, which means approving commands on your computers: keep your password, your encryption passphrase and your tokens to yourself, and tell us at once if you think someone else has them. You are responsible for what is done through your account.</p>
+    <p>We never have your password. If you forget it, we send a code to your account&rsquo;s email address, and with the code you set a new one: so anyone who can read that mailbox can sign in to your account, and you should keep it safe. A new password opens nothing that is sealed: that takes your passphrase. We never have your passphrase either: if you forget it you can choose a new one, and what your sessions said under the old one can then be read by nobody, and is removed.</p>
+    <h3>Paying</h3>
+    <p>A subscription is charged in advance, by the month or by the year, through Stripe, and renews until you cancel. Where a subscription begins with free days, your card is taken at the start and first charged when they are over; cancel before then and you pay nothing. You can cancel at any time from your account page; the subscription then runs to the end of the period already paid for. If a payment fails we will try again for a few days before the subscription ends. If the price changes, we will tell you by email before your next renewal at the new price.</p>
+    <h3>Using it fairly</h3>
+    <p>Use ManyClaws for your own Claude Code sessions, on computers you are entitled to use. Don&rsquo;t use it to break the law, to get into systems that aren&rsquo;t yours, to interfere with the service or with other people&rsquo;s accounts, or to resell it. We may suspend an account that does.</p>
+    <h3>What we promise, and what we don&rsquo;t</h3>
+    <p>We work to keep the service running and your data safe, but it is provided as it is, without a guarantee that it will always be available or free of faults. ManyClaws relays your decisions; what Claude Code does on your computers once you allow it is between you and Claude Code. To the extent the law allows, our liability to you for anything arising from the service is limited to what you paid us in the twelve months before the claim.</p>
+    <h3>Ending</h3>
+    <p>You can delete your account at any time by asking us; that cancels any subscription and removes what we hold of it. We may end an account that breaks these terms. We may change these terms; if a change matters, we will tell you by email before it takes effect.</p>
+      </div>
+    </section>
+    <section class="guide-part note-wide" id="privacy">
+      <h2>Privacy</h2>
+      <div class="guide-body">
+    <h3>What we hold</h3>
+    <ul>
+      <li><b>Your account:</b> your email address, and a hash of a key drawn from your password. Not the password.</li>
+      <li><b>No encryption key of yours, in any form.</b> Your key is made on your own devices from your passphrase. We hold nothing of the passphrase: not the passphrase, not the key, not a hash or fingerprint of either, not even whether you have chosen one.</li>
+      <li><b>Your sessions:</b> what your computers report of them. The content arrives sealed with your key and we cannot read it: prompts, replies, tool calls and their output, photos, titles and the text of alerts. We refuse anything a computer sends unsealed, so there is nothing of that kind to keep. We can see that a session exists, which computer and folder it runs in, when it was active, its state, and the names of the tools it used.</li>
+      <li><b>Your devices:</b> the browsers and phones you have signed in on or turned alerts on for.</li>
+      <li><b>Payments:</b> Stripe takes your card; we never see it. We keep Stripe&rsquo;s reference for you and the state of your subscription.</li>
+    </ul>
+    <h3>How long</h3>
+    <p>What we hold of a session is removed fourteen days after we last hear from it, and you can clear all of it sooner, from your account page. Your account is kept until you ask us to delete it. Records of payments are kept by Stripe, and by us as long as tax law requires.</p>
+    <h3>Who else sees it</h3>
+    <p>We don&rsquo;t sell your data or use it for advertising, and there are no trackers on this site. Three companies handle parts of it for us: Stripe (payments), Resend (the emails we send you, such as your sign-up code), and the push services of Apple, Google and Mozilla (delivering alerts to your devices). We will hand over data if the law compels us to; sealed content we cannot hand over in readable form.</p>
+    <h3>Cookies</h3>
+    <p>One: the cookie that keeps you signed in. Your browser also stores your key on your own device so it can open your sessions.</p>
+    <h3>Your rights</h3>
+    <p>You can ask us for a copy of what we hold about you, to correct it, or to delete it: write to <a href="mailto:support@manyclaws.dev">support@manyclaws.dev</a>.</p>
+      </div>
+    </section>
+    <section class="guide-part note-wide" id="refunds">
+      <h2>Refunds</h2>
+      <div class="guide-body">
+    <p>If ManyClaws isn&rsquo;t for you, write to <a href="mailto:support@manyclaws.dev">support@manyclaws.dev</a> within fourteen days of a charge and we will refund that charge in full. After that, cancelling stops the next renewal, and the subscription runs to the end of the period you paid for.</p>
+      </div>
+    </section>
+  </main>
+  <footer class="foot">
+    <p class="foot-mark">ManyClaws</p>
+    <p class="foot-links"><a href="/">Home</a><a href="/app" target="_top">Sign in</a><a href="mailto:support@manyclaws.dev">support@manyclaws.dev</a></p>
+  </footer>
+</body>
+</html>

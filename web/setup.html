@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{name}} — set up a computer</title>
+  <meta name="description" content="How to connect a computer's Claude Code sessions to {{name}}. Written so that Claude Code can follow it for you.">
+  <meta name="theme-color" content="#141413">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="alternate" type="text/markdown" href="/setup.md" title="This guide as plain text">
+  <link rel="stylesheet" href="/site/fonts.css">
+  <link rel="stylesheet" href="/site/site.css">
+  <script src="/site/site.js" defer></script>
+</head>
+<body>
+  <!-- How a computer is set up, for anyone to read: a person, or Claude Code asked to do
+       it. The words are setup.md's, which the server draws here and also sends as they
+       are (/setup.md). There is nothing of anyone's in either. -->
+  <header class="top">
+    <a class="mark" href="/" aria-label="{{name}}">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M7 35C7 17 21 5 38 5c11 0 19 6 21 15L35 31l24 1c-1 15-13 27-29 27C17 59 7 49 7 35Z"/></svg>
+      <span>{{name}}</span>
+    </a>
+    <nav><a href="/setup.md">Plain text</a><a href="/app#/setup" target="_top">Get an API token</a></nav>
+  </header>
+  <main class="guide">
+{{guide}}
+  </main>
+  <footer class="foot">
+    <p class="foot-mark">{{name}}</p>
+    <p class="foot-links"><a href="/">Home</a><a href="/app#/setup" target="_top">Get an API token</a><a href="/app" target="_top">Sign in</a><a href="/setup.md">This guide as plain text</a></p>
+  </footer>
+</body>
+</html>

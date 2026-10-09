@@ -9,11 +9,13 @@
 //   node agent.mjs sessions [words]       list sessions, newest first
 //   node agent.mjs read <session id>      print a session's conversation
 //   node agent.mjs configure --server URL [--token T] [--label NAME] [--root DIR]… [--spawn DIR]…
-//                            [--mode MODE]… [--relay] [--key KEY] [--wait]
+//                            [--mode MODE]… [--files DIR]… [--relay] [--key KEY] [--wait] [--no-keychain]
 //                                         write agent.json (the installer does); what's
 //                                         there is kept (--mode: the only permission modes
 //                                         sessions may be started in; with no list, every
-//                                         mode is allowed), the token can come in MANYCLAWS_TOKEN
+//                                         mode but bypassPermissions. --files: the folders a
+//                                         file may be opened from; with none, the --spawn
+//                                         ones), the token can come in MANYCLAWS_TOKEN
 //                                         and the key in MANYCLAWS_KEY. The key is the
 //                                         account's encryption passphrase: the key is made
 //                                         from it here, with the account's id (nothing of
@@ -21,7 +23,13 @@
 //                                         and the half that checks the list of the account's
 //                                         devices (mcf_…), never the passphrase. With --wait
 //                                         it may be written without them: the agent then waits for
-//                                         the ManyClaws plugin to give it its token and key
+//                                         the ManyClaws plugin to give it its token and key.
+//                                         On a Mac the token and the key are kept in the
+//                                         keychain (secrets.mjs), unless --no-keychain
+//   node agent.mjs verify [--server URL]  hold what is here against the signed release it was
+//                                         installed from: the agent's files, the plugin as Claude
+//                                         Code has it, and what the server hands a browser for
+//                                         its page (verify.mjs)
 //   node agent.mjs plugin [--look]        give the ManyClaws plugin in Claude Code what this machine
 //                                         was set up with (the installer does, where it was typed
 //                                         into it), so that the token and the passphrase are
@@ -39,6 +47,7 @@ import { Indexer } from './indexer.mjs'
 import { Transcript } from './transcript.mjs'
 import { findClaude, expandHome } from './host.mjs'
 import { keysFromText, keysFromPassphrase, keysText } from './seal.mjs'
+import { secretsOf, settle, forgetKept, fingerprint } from './secrets.mjs'
 
 const HOME = process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws')
 const RELAY_PORT = 8798
@@ -50,7 +59,8 @@ export function loadConfig(overrides = {}) {
   } catch {}
   const config = { roots: [path.join(os.homedir(), '.claude')], db: path.join(HOME, 'index.db'), ...file, ...overrides }
   config.roots = config.roots.map((r) => path.resolve(expandHome(r)))
-  return config
+  // (the token and the key, wherever this machine keeps them: `locked` where its keychain would not hand them over here)
+  return Object.assign(config, secretsOf(config))
 }
 
 // Writes agent.json for this machine. What's there is kept (the machine's id among it),
@@ -63,15 +73,20 @@ export function configure(opts, { home = HOME, env = process.env } = {}) {
   } catch {}
   const folders = (list) => (list ?? []).filter(Boolean).map((p) => path.resolve(expandHome(p)))
   const server = String(opts.server ?? config.server ?? '').replace(/\/+$/, '')
-  const token = opts.token || env.MANYCLAWS_TOKEN || config.token
+  // (what it has already, wherever it keeps it: in agent.json, or in the keychain with its fingerprint here)
+  const had = secretsOf(config, { env })
+  const token = opts.token || env.MANYCLAWS_TOKEN || had.token
   // The account's key, as it was made from the passphrase: everything the agent sends of this machine's sessions is
   // sealed with it, and with none it sends nothing
   if (opts.key && !keysFromText(opts.key)) throw new Error('the key is not what a ManyClaws computer keeps (mcf_, 43 characters, a dot, 43 more)')
-  const key = opts.key ? opts.key.trim() : config.key
+  const key = opts.key ? opts.key.trim() : had.key
+  // (kept in a keychain that cannot be read from here, an installer run over SSH say, both stay as they are or both are given anew)
+  const given = !!(opts.token || env.MANYCLAWS_TOKEN) + !!opts.key
+  if (had.locked && given === 1) throw new Error(`this machine keeps its token and its key in the keychain, which would not hand them over here (${had.locked}): give both the token and the passphrase, or run this in a terminal on the machine itself`)
+  const keptLocked = !!had.locked && given === 0
   // (without them it waits for both: the plugin beside it gives it what the person typed there)
-  if (!server || ((!token || !key) && !opts.wait)) throw new Error('a server, a token and your encryption key are required')
+  if (!server || ((!token || !key) && !keptLocked && !opts.wait)) throw new Error('a server, a token and your encryption key are required')
   config.server = server
-  if (token) config.token = token
   config.id ??= crypto.randomUUID()
   if (opts.label) config.label = opts.label
   if (folders(opts.root).length) config.roots = folders(opts.root)
@@ -79,15 +94,30 @@ export function configure(opts, { home = HOME, env = process.env } = {}) {
   const spawn = folders(opts.spawn)
   config.spawn = { ...(config.spawn ?? {}), enabled: spawn.length > 0, folders: spawn }
   if (opts.mode?.length) config.spawn.modes = opts.mode
+  // The folders a file may be opened from, where they are not the ones sessions are started in (`"files": false`, written
+  // there by hand, opens none)
+  if (folders(opts.files).length) config.files = folders(opts.files)
+  else if (config.files !== false) delete config.files
   if (opts.relay) config.relay = { port: RELAY_PORT, secret: config.relay?.secret ?? crypto.randomBytes(24).toString('hex') }
   else delete config.relay
-  if (key) config.key = key
+  // Where the token and the key are kept: on a Mac in the keychain, unless that was said no to. Written here, in
+  // agent.json, they are moved there by the agent as it starts (secrets.mjs); kept there already and not given anew,
+  // they stay there.
+  if (opts.keychain === false) config.secrets = 'file'
+  else if (process.platform === 'darwin') config.secrets ??= 'keychain'
+  if (!keptLocked && !(config.has && token && key && config.has === fingerprint(token, key) && !config.token && !config.key)) {
+    delete config.has
+    if (token) config.token = token
+    if (key) config.key = key
+  }
   // The claude a terminal would run, found now: a service has no PATH to find it with
   const claude = findClaude(env)
   if (claude) config.claude = claude
   fs.mkdirSync(home, { recursive: true })
   fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 })
-  return config
+  fs.chmodSync(file, 0o600)
+  // (what it was written with: and, where the two are kept in the keychain and not here, the two as well)
+  return { ...config, ...(token && !config.token ? { token } : {}), ...(key && !config.key ? { key } : {}) }
 }
 
 // What this machine keeps, written out (mcf_…), from the passphrase it was given: the
@@ -121,7 +151,7 @@ export async function keyOfPassphrase(server, token, given) {
 // gone. Only what is whole is taken, and only from a plugin that reports to the server
 // this machine does. Answers what changed ('token', 'key'), for the service to start
 // again with; nothing where the note said nothing new, or there was none.
-export function takeFromPlugin({ home = HOME } = {}) {
+export function takeFromPlugin({ home = HOME, env = process.env } = {}) {
   const note = path.join(home, 'from-plugin.json')
   let given
   try {
@@ -140,17 +170,24 @@ export function takeFromPlugin({ home = HOME } = {}) {
   }
   const address = (v) => String(v ?? '').replace(/\/+$/, '').toLowerCase()
   if (!given || typeof given !== 'object' || (config.server && address(given.server) !== address(config.server))) return []
+  // (what it has now, wherever it keeps it. Kept in a keychain that will not hand it over, it is taken to be other than
+  // what the plugin has: the plugin leaves a note only where the fingerprint here is not of its own two)
+  const has = secretsOf(config, { env })
   const changed = []
-  if (typeof given.token === 'string' && /^\S{8,400}$/.test(given.token) && given.token !== config.token) {
-    config.token = given.token
+  if (typeof given.token === 'string' && /^\S{8,400}$/.test(given.token) && given.token !== has.token) {
+    has.token = given.token
     changed.push('token')
   }
-  if (typeof given.key === 'string' && keysFromText(given.key) && given.key.trim() !== config.key) {
-    config.key = given.key.trim()
+  if (typeof given.key === 'string' && keysFromText(given.key) && given.key.trim() !== has.key) {
+    has.key = given.key.trim()
     changed.push('key')
   }
   if (!config.server && /^https?:\/\/\S+$/.test(String(given.server ?? ''))) config.server = String(given.server).replace(/\/+$/, '')
   if (changed.length) {
+    // (written here, whole: an agent that keeps them in the keychain moves them there as it starts again)
+    delete config.has
+    if (has.token) config.token = has.token
+    if (has.key) config.key = has.key
     fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 })
     // (a file that was there keeps the mode it had: this one holds the token and the key, and is its owner's alone)
     fs.chmodSync(file, 0o600)
@@ -170,6 +207,7 @@ export function takeFromPlugin({ home = HOME } = {}) {
 // { given: false, why }. Nothing that was handed over is in the answer, or in what is
 // said of it.
 export function givePlugin(config, { run = spawnSync } = {}) {
+  if (config?.locked) return { given: false, why: `this machine keeps its token and key in the keychain, which would not hand them over here (${config.locked})` }
   if (!config?.server || !config?.token || !config?.key) return { given: false, why: 'this machine has not been set up yet' }
   if (!config.claude) return { given: false, why: 'Claude Code was not found on this machine' }
   const relay = config.relay?.port && config.relay?.secret ? config.relay : null
@@ -242,7 +280,7 @@ export function leftSays(has, { server = '', waiting = true } = {}) {
 async function main() {
   const [command = 'help', ...rest] = process.argv.slice(2)
   const flags = {}
-  const lists = { root: [], spawn: [], mode: [] } // options that can be given more than once
+  const lists = { root: [], spawn: [], mode: [], files: [] } // options that can be given more than once
   const args = []
   for (let i = 0; i < rest.length; i++) {
     if (rest[i].startsWith('--')) {
@@ -265,14 +303,38 @@ async function main() {
       if (!server || !token) throw new Error('a server and a token are required')
       key = await keyOfPassphrase(server, token, key)
     }
-    const config = configure({ ...lists, server: text(flags.server), token: text(flags.token), label: text(flags.label), relay: !!flags.relay, key, wait: !!flags.wait })
+    const config = configure({ ...lists, server: text(flags.server), token: text(flags.token), label: text(flags.label), relay: !!flags.relay, key, wait: !!flags.wait, keychain: flags['no-keychain'] ? false : undefined })
     // What was written, and nothing secret but the relay's own word
-    console.log(JSON.stringify({ id: config.id, label: config.label ?? '', roots: config.roots, spawn: config.spawn, claude: config.claude ?? '', relay: config.relay ?? null, waiting: !config.token || !config.key }))
+    console.log(JSON.stringify({ id: config.id, label: config.label ?? '', roots: config.roots, spawn: config.spawn, files: config.files ?? null, claude: config.claude ?? '', relay: config.relay ?? null, secrets: config.secrets ?? 'file', waiting: !config.has && (!config.token || !config.key) }))
+    return
+  }
+  // An agent brought up to date keeps its token and key where a newly installed one does: on a Mac, in the keychain,
+  // unless this machine said no to that. Nothing else of what it was set up with is touched. (The installer, with --update.)
+  if (command === 'keychain') {
+    const file = path.join(HOME, 'agent.json')
+    const had = JSON.parse(fs.readFileSync(file, 'utf8'))
+    if (process.platform !== 'darwin' || had.secrets) return
+    fs.writeFileSync(file, JSON.stringify({ ...had, secrets: 'keychain' }, null, 2) + '\n', { mode: 0o600 })
+    return
+  }
+  // What the keychain has for this machine is taken out of it (the installer, with --uninstall)
+  if (command === 'forget') {
+    try {
+      forgetKept(JSON.parse(fs.readFileSync(path.join(HOME, 'agent.json'), 'utf8')))
+    } catch {}
+    return
+  }
+  if (command === 'verify') {
+    const config = loadConfig()
+    const { verify } = await import('./verify.mjs')
+    const { ok, lines } = await verify({ home: HOME, roots: config.roots, server: String((flags.server === true ? '' : flags.server) || config.server || '').replace(/\/+$/, '') })
+    for (const line of lines) console.log(line)
+    process.exitCode = ok ? 0 : 1
     return
   }
   if (command === 'plugin') {
     const config = loadConfig()
-    for (const line of flags.look ? leftSays(pluginHas(config), { server: config.server ?? '', waiting: !config.token || !config.key }) : pluginSays(givePlugin(config))) console.log(line)
+    for (const line of flags.look ? leftSays(pluginHas(config), { server: config.server ?? '', waiting: !config.locked && (!config.token || !config.key) }) : pluginSays(givePlugin(config))) console.log(line)
     return
   }
   const overrides = {}
@@ -281,8 +343,18 @@ async function main() {
   const config = loadConfig(overrides)
   fs.mkdirSync(path.dirname(config.db), { recursive: true })
 
-  // (what the plugin left for this machine while the agent was not running is taken first)
-  if (command === 'run') return (await import('./service.mjs')).run(takeFromPlugin().length ? loadConfig(overrides) : config, flags)
+  // (what the plugin left for this machine while the agent was not running is taken first, and what it signs in and
+  // seals with is put where this machine keeps it)
+  if (command === 'run') {
+    takeFromPlugin()
+    const said = []
+    try {
+      said.push(settle(path.join(HOME, 'agent.json')))
+    } catch (err) {
+      said.push(`the API token and the key could not be moved to the keychain (${err.message}): they stay in agent.json, which only you can read`)
+    }
+    return (await import('./service.mjs')).run(loadConfig(overrides), { ...flags, said: said.filter(Boolean) })
+  }
 
   const store = new Store(config.db)
   const when = (ts) => (ts ? new Date(ts).toISOString().slice(0, 16).replace('T', ' ') : '')
@@ -315,7 +387,7 @@ async function main() {
     for (const r of rows) console.log(`${when(r.ts)} ${r.role}: ${r.text.slice(0, 300)}${(r.toolUses ?? []).map((u) => `[${u.tool} ${JSON.stringify(u.input).slice(0, 100)} -> ${String(u.text ?? '').slice(0, 80).replace(/\s+/g, ' ')}]`).join(' ')}`)
     console.error(`${chain.length} lines in the conversation; ${t.nodes.size} in the file`)
   } else {
-    console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 14).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
+    console.log(fs.readFileSync(new URL(import.meta.url), 'utf8').split('\n').slice(1, 38).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
   }
   store.close()
 }

@@ -1,0 +1,41 @@
+/* The site's colours and typefaces. They are code.claude.com's own dark, as measured
+   there; a serif for headings (Newsreader, kept here under the SIL Open Font License)
+   and the system's sans for everything said. The crab's own red is kept for the mark and
+   the small labels. Every name here begins --s-: the page itself (index.html) loads this
+   file too, for its way in, and has colours and typefaces of its own under the plain names. */
+@font-face {
+  font-family: "Newsreader";
+  src: url("/site/fonts/newsreader.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Newsreader";
+  src: url("/site/fonts/newsreader-italic.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  --s-bg: #141413;
+  --s-surface: #1f1e1d;
+  --s-surface-2: #262624;
+  --s-line: #30302e;
+  --s-text: #faf9f5;
+  --s-text-2: #c3c2b7;
+  --s-muted: #9c9a92;
+  --s-faint: #87867f;
+  --s-accent: #e2664a;
+  --s-code: #0b0b0b;
+  --s-ok: #7fb685;
+  --s-hi: #d9a25a;
+  --s-btn: #faf9f5;
+  --s-btn-text: #141413;
+  --s-btn-2: #30302e;
+  --s-btn-2-text: #faf9f5;
+  --s-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --s-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --s-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}

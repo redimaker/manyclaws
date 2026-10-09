@@ -10,6 +10,8 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 
 const MODES = ['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions']
+// The ones a machine allows where its owner named none
+export const DEFAULT_MODES = MODES.filter((m) => m !== 'bypassPermissions')
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 // What a Claude Code session tells its children about itself, which a session the agent
 // starts must not take for its own. A service's environment is the account's, and the
@@ -38,9 +40,12 @@ export class Host {
     // (idleMinutes), so the number is of those started in that long, working or not: at
     // 4 the fifth asked for within a quarter of an hour was refused. 64 is the owner's number.
     // modes: the permission modes a session may be started in or switched to. With no list
-    // of its own a machine allows every one of them, bypassing permissions too: a list in
-    // its agent.json ("spawn": { "modes": [...] }) is how its owner narrows them.
-    this.spawnConfig = { enabled: false, folders: [], modes: [...MODES], idleMinutes: 30, max: 64, args: [], env: {}, ...(config.spawn ?? {}) }
+    // of its own a machine allows every one but bypassPermissions: a session with its
+    // permissions bypassed does whatever it is prompted to, with nobody asked, so one is
+    // started from a phone or a browser only where the machine's owner said so, on the
+    // machine. A list in its agent.json ("spawn": { "modes": [...] }, or the installer's
+    // --mode) is how its owner names them.
+    this.spawnConfig = { enabled: false, folders: [], modes: DEFAULT_MODES, idleMinutes: 30, max: 64, args: [], env: {}, ...(config.spawn ?? {}) }
     this.store = store
     this.onChange = onChange
     this.log = log

@@ -15,10 +15,10 @@ import { Host, HostError, CARRY_MAX } from './host.mjs'
 import { Cswap } from './cswap.mjs'
 import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused } from './seal.mjs'
 import { historyRows } from './rows.mjs'
-import { find as findFile, read as readFile, FileError } from './files.mjs'
+import { find as findFile, read as readFile, FileError, fileRoots } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '5.0.1'
+export const VERSION = '5.1.0'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
@@ -121,6 +121,7 @@ const POLL_WAIT_S = 25
 const POLL_MS = (POLL_WAIT_S + 15) * 1000 // how long a poll is given: what the server holds it for, and some
 const STUCK_MS = 5_000 // how long after a request is told to stop it is waited for no longer
 const DEVICES_MS = 2000 // the list of the account's devices is not asked for again sooner than this after it was
+const DEVICES_EVERY_MS = 5 * 60_000 // and it is read this often with no order to go by: a device taken off it is seen to be, while the list without it is still what the server hands over
 const OPEN_TRANSCRIPTS = 16 // sessions kept ready to read
 
 export async function run(config, flags = {}) {
@@ -143,8 +144,11 @@ export async function run(config, flags = {}) {
   const keys = config.key ? keysFromText(config.key) : null
   const ready = !!(server && config.token && keys)
   const sealKey = keys ? contentKey(keys.key) : null
-  // Files are opened from here for the account's own devices, unless agent.json says `"files": false`
-  const servesFiles = config.files !== false
+  // Files are opened from here for the account's own devices, and only from inside the folders this machine's owner
+  // lets sessions be started in, or the ones agent.json names for it (`"files": [...]`); `"files": false` opens none.
+  // (as those folders really are on disk: a file is one of theirs by where it really is, links followed. files.mjs)
+  const filesFrom = config.files === false ? null : fileRoots(Array.isArray(config.files) ? config.files : host.spawnConfig.enabled ? host.spawnConfig.folders : [])
+  const servesFiles = !!filesFrom?.length
   const transcripts = new Map() // path -> Transcript, most recently used last
   // Transcripts on their way to or from another machine, held for the minutes that takes
   const outgoing = new Map() // id -> { bytes, at }
@@ -276,11 +280,12 @@ export async function run(config, flags = {}) {
     // first piece goes with the answer, and a file of more pieces hands the rest over as
     // a transcript's are.
     'file.read': async ({ path: target, cwd, sid, near } = {}) => {
-      if (!servesFiles) throw new HostError('opening files is turned off on this machine (agent.json, "files")')
+      if (!servesFiles) throw new HostError(config.files === false ? 'opening files is turned off on this machine (agent.json, "files")' : 'this machine opens files only from the folders its owner named, and none are named: the ones sessions may be started in (the installer\'s --spawn), or others for this (--files)')
       try {
-        const found = await findFile(target, { cwd: typeof cwd === 'string' && cwd ? cwd : (store.session(String(sid ?? ''))?.cwd ?? ''), near })
+        const found = await findFile(target, { cwd: typeof cwd === 'string' && cwd ? cwd : (store.session(String(sid ?? ''))?.cwd ?? ''), near, within: filesFrom })
         const { bytes, ...listing } = await readFile(found)
-        const file = seal({ ...found, name: path.basename(found.path), sep: path.sep }, sealKey)
+        const { real, ...where } = found
+        const file = seal({ ...where, name: path.basename(found.path), sep: path.sep }, sealKey)
         // (an empty file is nothing to seal: that it is empty is said with the rest of what it is)
         if (bytes && !bytes.length) return { file, size: 0, parts: 0, data: '' }
         const packed = Buffer.from(sealBytes(new Uint8Array(bytes ?? Buffer.from(JSON.stringify(listing))), sealKey))
@@ -360,6 +365,8 @@ export async function run(config, flags = {}) {
     const about = {
       roots: config.roots,
       spawn: host.spawnConfig.enabled ? { folders: host.spawnConfig.folders, modes: host.spawnConfig.modes } : null,
+      // (the folders a file may be opened from)
+      files: filesFrom ?? [],
       stats: { ...store.stats(), pending: indexer.pending.length, bytesLeft: Math.max(0, indexer.bytesLeft) },
     }
     // What the machine is called and what its agent can do are the account's to see as a
@@ -407,11 +414,34 @@ export async function run(config, flags = {}) {
   try {
     devicesKept = fs.readFileSync(devicesFile, 'utf8')
   } catch {}
-  const devices = devicesMemory(devicesKept, sealKey, keys?.checker, (now) => {
-    try {
-      fs.writeFileSync(devicesFile, now, { mode: 0o600 })
-    } catch {}
-  })
+  // (and the devices it has seen taken off that list, which are none of the account's here again whatever list has them
+  // later: kept by whose list it is, so that another passphrase's starts with none)
+  const goneFile = devicesFile + '-gone.json'
+  const whose = keys ? Buffer.from(keys.checker).toString('base64url') : ''
+  let goneKept = []
+  try {
+    const was = JSON.parse(fs.readFileSync(goneFile, 'utf8'))
+    if (was?.checker === whose && Array.isArray(was.gone)) goneKept = was.gone
+  } catch {}
+  const devices = devicesMemory(
+    devicesKept,
+    sealKey,
+    keys?.checker,
+    (now) => {
+      try {
+        fs.writeFileSync(devicesFile, now, { mode: 0o600 })
+      } catch {}
+    },
+    {
+      gone: goneKept,
+      saveGone: (gone) => {
+        log(`a device was taken off the list of your account's devices: what it asks is refused here from now on, whatever list has it later (${gone.length} taken off so far)`)
+        try {
+          fs.writeFileSync(goneFile, JSON.stringify({ checker: whose, gone }), { mode: 0o600 })
+        } catch {}
+      },
+    },
+  )
   let devicesRead = null // the last reading of that list from the server, or the one under way: { at, done }
   let taken = null // the order the call being answered was run on: forgotten again if it did not run after all
   const take = (order, to, does) => {
@@ -606,20 +636,24 @@ export async function run(config, flags = {}) {
       if (!what || typeof what !== 'object' || Array.isArray(what)) throw new HostError(NO_KEY)
       return what
     }
+    // The list of the account's devices, read from the server and taken where it is the account's
+    const readList = async () => {
+      try {
+        const r = await request('/api/agent/devices', {}, 10_000)
+        if (r.ok) devices.take(JSON.parse(r.text).devices)
+      } catch {}
+    }
     // The account's devices, as the server has them now: asked for before an order is gone by (and not again within two seconds)
     const freshDevices = async () => {
       // (orders that come together are gone by one reading, which each of them waits for)
-      if (!devicesRead || Date.now() - devicesRead.at >= DEVICES_MS) {
-        const read = async () => {
-          try {
-            const r = await request('/api/agent/devices', {}, 10_000)
-            if (r.ok) devices.take(JSON.parse(r.text).devices)
-          } catch {}
-        }
-        devicesRead = { at: Date.now(), done: read() }
-      }
+      if (!devicesRead || Date.now() - devicesRead.at >= DEVICES_MS) devicesRead = { at: Date.now(), done: readList() }
       await devicesRead.done
     }
+    // And read as the agent starts, and every so often after, with no order to go by (DEVICES_EVERY_MS). Those readings
+    // are apart from the one an order waits for: an order from a browser that was given the passphrase a moment ago is
+    // gone by the list as it stands then, not by one read just before the browser was on it.
+    readList()
+    setInterval(readList, DEVICES_EVERY_MS).unref()
     const answer = async (c) => {
       // (a call with no name is one this machine does not know)
       const method = typeof c.method === 'string' ? c.method : ''
@@ -651,6 +685,11 @@ export async function run(config, flags = {}) {
       sendAnswer(body, method === 'session.export.part' || method.startsWith('file.') ? 180_000 : 30_000).catch((err) => log('result not sent:', err.message))
     }
     poll()
+  } else if (config.locked) {
+    // They are in the keychain, and it would not hand them over (it is locked, as it is until the account's user has
+    // signed in on the machine's own screen): asked again by starting again, which whatever keeps the agent running does
+    log(`this machine's API token and key are in the keychain, which did not hand them over (${config.locked}): starting again in a moment to ask again`)
+    setTimeout(() => process.exit(1), 15_000)
   } else {
     const how = '(in Claude Code: /plugin, the gear beside manyclaws, then a new session). Indexing meanwhile'
     log(!server ? 'no server in agent.json: indexing only' : !config.token ? `no API token yet: waiting for the ManyClaws plugin to give this machine its token and key ${how}` : `no encryption key yet: waiting for the ManyClaws plugin to give this machine its key ${how}`)
@@ -726,6 +765,7 @@ export async function run(config, flags = {}) {
   process.on('SIGTERM', stop)
   process.on('SIGINT', stop)
   log(`ManyClaws agent ${VERSION} on ${machine.name}: ${config.roots.join(', ')} -> ${server || '(no server)'}`)
+  for (const line of flags.said ?? []) log(line)
   // The id is kept, so the machine is the same one after a restart
   if (!flags.ephemeral) saveId(config)
 }

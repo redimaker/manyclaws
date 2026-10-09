@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en" data-view="vscode">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f8f8f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)">
+  <!-- Added to a phone's home screen, it opens as an app of its own -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="ManyClaws">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <title>ManyClaws</title>
+  <!-- Every script and style sheet this page runs is named here with the SHA-384 of the file (release.mjs writes
+       them), and the browser runs none that is anything else: so this one file stands for all of the page's code,
+       and holding it against the public repository's is holding all of it. The modules the script goes on to
+       import are named too, each fetched and checked before the script asks for it (seal.js before keys.js, which
+       imports it). -->
+  <link rel="stylesheet" href="app.css" integrity="sha384-3SLaBjkSyOv5mxEIxqR0gT90Xo+ZbEMXtS9cv+Qwu5a3nZYN9lucJEePOo7OUXjW">
+  <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
+  <link rel="stylesheet" href="/site/join.css" integrity="sha384-It05x/2EV39+9/HmQFKcu0xLy0Rs5ZCmqyt4XwhlEcW2mU87v/zjlyvqiIz2en0u">
+  <link rel="stylesheet" href="/site/account.css" integrity="sha384-ULTJ89WZ9+4RXOW62G3TXOWdyHcpPmWFfDlj3HmZ+Ahz8jbBLag8JrNA8ow0fXmX">
+  <link rel="modulepreload" href="/seal.js" integrity="sha384-B1CvuHkwxxLe6VIx00ahJBtgg+SZDU3ZEzHKK/X9HRbSRG1z+ui5orsJIvJrtpnx">
+  <link rel="modulepreload" href="/keys.js" integrity="sha384-vjYD0/zLU+HzcLnhWRAepZlgvqGIWMy7uD1jWGWYGt58IbWv+uEbZfg1YMEjH1UB">
+  <link rel="modulepreload" href="/qr.js" integrity="sha384-w+/fVzQtEtgcqsDZth00TL3NiGQ8L7PE5ffHkCqrGaekGoOy5O6yNiwwkdLXXgzP">
+  <script src="app.js" defer integrity="sha384-arh+RYIgwTnInN0UBSZsN7MgDCnqyFxZ8x/HXhOadSvtg5kuyiXAOVNI/Hshre0O"></script>
+</head>
+<body>
+  <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
+       code, where the server asks for one); or set a new password with a code sent to the account's email.
+       A password typed here is never sent: keys are drawn from it on this device (keys.js). -->
+  <div id="login" class="login" hidden>
+    <!-- On a server with a front door (home.html), the cards stand beside its picture: join.css -->
+    <aside id="join-art" class="join-art" hidden>
+      <a class="join-mark" href="/">ManyClaws</a>
+      <ol class="join-steps"><li>Account</li><li>Email</li><li>Plan</li></ol>
+    </aside>
+    <form id="login-form" class="login-card">
+      <h1 data-site-says="Welcome back.">ManyClaws</h1>
+      <p class="muted">Sign in to see your Claude Code sessions.</p>
+      <input id="login-email" type="email" placeholder="Email" autocomplete="username" autocapitalize="off" required>
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button type="submit" class="primary">Sign in</button>
+      <p id="login-error" class="error" hidden></p>
+      <p id="login-new" class="login-new" hidden>New here? <button type="button" id="login-signup" class="link" data-card="signup-form">Create an account</button></p>
+      <p class="login-other"><button type="button" class="link" data-card="recover-form">Forgot your password?</button><button type="button" class="link" data-card="token-form">Sign in with a token</button></p>
+    </form>
+    <form id="token-form" class="login-card" hidden>
+      <h1 data-site-says="By token.">ManyClaws</h1>
+      <p class="muted">For whoever runs this server: its web token signs in the server's first account.</p>
+      <input id="login-token" type="password" placeholder="Web token" autocomplete="off" required>
+      <button type="submit" class="primary">Sign in</button>
+      <p id="token-error" class="error" hidden></p>
+      <p class="login-other"><button type="button" class="link" data-card="login-form">Sign in with an email</button></p>
+    </form>
+    <form id="signup-form" class="login-card" hidden>
+      <h1 data-site-says="Make your account.">Create your account</h1>
+      <p id="signup-note" class="muted">Every Claude Code session you have running, on every computer, on one page and on your phone.</p>
+      <input id="signup-email" type="email" placeholder="Email" autocomplete="username" autocapitalize="off" required>
+      <input id="signup-password" type="password" placeholder="Password, 8 characters or more" autocomplete="new-password" minlength="8" required>
+      <input id="signup-invite" type="hidden">
+      <button type="submit" class="primary">Create account</button>
+      <p id="signup-terms" class="join-terms" hidden>By making an account you agree to the <a href="/legal#terms" target="_blank" rel="noopener">terms</a> and the <a href="/legal#privacy" target="_blank" rel="noopener">privacy notice</a>.</p>
+      <p id="signup-error" class="error" hidden></p>
+      <p class="login-other"><button type="button" class="link" data-card="login-form">I have an account</button></p>
+    </form>
+    <!-- A forgotten password: a code is sent to the account's email, and typed here with a new password. The
+         password is never sent, as ever: what it is stretched into is. Nothing of this touches the encryption
+         passphrase, of which the server has nothing. A server that sends no mail has no way past one, and says so. -->
+    <form id="recover-form" class="login-card" hidden>
+      <h1>Forgot your password?</h1>
+      <p id="recover-note" class="muted">Enter your email and we will send it a code to set a new password with.</p>
+      <input id="recover-email" type="email" placeholder="Email" autocomplete="username" autocapitalize="off" required>
+      <input id="recover-code" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" maxlength="12" hidden>
+      <input id="recover-password" type="password" placeholder="New password, 8 characters or more" autocomplete="new-password" minlength="8" hidden>
+      <button id="recover-go" type="submit" class="primary">Email me a code</button>
+      <p id="recover-error" class="error" hidden></p>
+      <p class="login-other"><button type="button" class="link" data-card="login-form">Sign in</button><button type="button" id="recover-again" class="link" hidden>Send another code</button></p>
+    </form>
+    <!-- Signed in, on a server that sends mail, with an email not yet shown to be the account's: the code it was sent -->
+    <form id="verify-form" class="login-card" hidden>
+      <h1>Check your email</h1>
+      <p id="verify-note" class="muted"></p>
+      <input id="verify-code" inputmode="numeric" autocomplete="one-time-code" placeholder="6-digit code" maxlength="12" required>
+      <button type="submit" class="primary">Verify</button>
+      <p id="verify-error" class="error" hidden></p>
+      <p class="login-other"><button type="button" id="verify-again" class="link">Send it again</button><button type="button" id="verify-email" class="link">Wrong address?</button><button type="button" id="verify-logout" class="link">Sign out</button></p>
+    </form>
+    <!-- Signed in, on a server that charges, with no subscription: the two plans, each a way to Stripe's page to pay on -->
+    <div id="pay-card" class="login-card" hidden>
+      <h1 data-site-says="Pick a plan.">Subscribe</h1>
+      <p id="pay-note" class="muted"></p>
+      <div id="pay-plans" class="pay-plans"></div>
+      <p id="pay-error" class="error" hidden></p>
+      <p class="login-other"><button type="button" id="pay-code" class="link" hidden>I have a code</button><button type="button" id="pay-manage" class="link" hidden>Billing and invoices</button><button type="button" id="pay-logout" class="link">Sign out</button></p>
+    </div>
+    <!-- Signed in, on a browser that has not been given the account's passphrase: it is asked for here, before the
+         sessions, which this browser could show only as encrypted. The box is the one the account's page has (app.js,
+         passphraseParts): what is typed is made into the key here, and nothing of it goes to the server. It can be
+         left for later, and the sessions are then shown closed, with the line across the top that leads to the box. -->
+    <div id="passphrase-card" class="login-card" hidden>
+      <h1 data-site-says="Your passphrase.">Encryption passphrase</h1>
+      <div id="passphrase-ask" class="passphrase-ask acct-body"></div>
+      <p class="login-other"><button type="button" id="passphrase-later" class="link">Not now</button><button type="button" id="passphrase-logout" class="link">Sign out</button></p>
+    </div>
+  </div>
+
+  <div id="app" hidden>
+    <!-- What the whole page has to say, over the list and the chat alike -->
+    <div id="notices" class="notices">
+      <p id="offline" class="notice offline" role="status" hidden>Not connected: what's here may be out of date. Trying again…</p>
+      <p id="update" class="notice update" role="status" hidden><span>A new version of ManyClaws is ready.</span> <button type="button" id="update-reload">Reload</button></p>
+      <p id="locked" class="notice locked" role="status" hidden><span id="locked-says">Your sessions are encrypted, and this browser has not been given your passphrase.</span> <a id="locked-link" href="#/account">Type it in</a></p>
+    </div>
+    <aside id="list-pane">
+      <header class="bar">
+        <h1 class="brand">ManyClaws</h1>
+        <span id="conn" class="conn" title="Live updates"></span>
+      </header>
+      <div class="search-box">
+        <input id="search" type="search" placeholder="Search every session" autocomplete="off" spellcheck="false" aria-label="Search every session on every machine">
+      </div>
+      <div id="pull" class="pull" aria-hidden="true"><span class="pull-mark">↓</span><span class="pull-text">Pull to refresh</span></div>
+      <div id="session-list" class="session-list"></div>
+      <p id="alerts-note" class="alerts-note" hidden></p>
+      <!-- Under the list: the account on the left, this device's notifications in the middle, and on the right the way to the settings, a page of their own -->
+      <footer class="list-footer">
+        <a id="account-link" class="link foot-link" href="#/account">
+          <svg class="foot-icon" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="7" r="3.3"/><path d="M3.6 16.9c.7-3.1 3.2-4.9 6.4-4.9s5.7 1.8 6.4 4.9"/></svg>
+          <span>Account</span>
+        </a>
+        <button id="alerts" type="button" class="link foot-link" hidden>
+          <span>Notifications</span>
+          <span id="alerts-state" class="alerts-state"></span>
+        </button>
+        <a id="settings" class="link foot-link" href="#/settings">
+          <svg class="foot-icon" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M8.61 4.42 8.86 2.38 11.14 2.38 11.39 4.42 12.96 5.07 14.58 3.81 16.19 5.42 14.93 7.04 15.58 8.61 17.62 8.86 17.62 11.14 15.58 11.39 14.93 12.96 16.19 14.58 14.58 16.19 12.96 14.93 11.39 15.58 11.14 17.62 8.86 17.62 8.61 15.58 7.04 14.93 5.42 16.19 3.81 14.58 5.07 12.96 4.42 11.39 2.38 11.14 2.38 8.86 4.42 8.61 5.07 7.04 3.81 5.42 5.42 3.81 7.04 5.07Z"/><circle cx="10" cy="10" r="2.5"/></svg>
+          <span>Settings</span>
+        </a>
+      </footer>
+      <div id="divider" class="divider" role="separator" aria-orientation="vertical" aria-label="Width of the session list" tabindex="0" title="Drag to resize. Double-click to reset."></div>
+    </aside>
+
+    <main id="chat-pane">
+      <div id="empty" class="empty"><span id="empty-pick">Pick a session to see its chat.</span><span id="empty-new" hidden>No computer is connected to your account yet.<br><a href="#/setup" class="primary button-link">Set up a computer</a></span></div>
+      <section id="chat" hidden>
+        <header class="bar chat-head">
+          <a id="back" href="#" class="back" aria-label="Back to sessions">‹</a>
+          <div class="chat-title">
+            <div id="chat-name" class="chat-name"></div>
+            <div id="chat-sub" class="chat-sub"></div>
+          </div>
+          <button id="mark-open" type="button" class="mark-open" hidden aria-haspopup="dialog" aria-expanded="false" aria-label="Name, label, color and reminder for this session, and where its prompts are answered" title="Give this session a name of your own, a label or a color, set a reminder on it, or choose where its prompts are answered"><svg class="mark-pencil" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M4 16l.9-3.6 8.4-8.4a1.5 1.5 0 0 1 2.1 0l.6.6a1.5 1.5 0 0 1 0 2.1l-8.4 8.4zM11.9 5.4l2.7 2.7"/></svg><span class="mark-short">Edit</span><span class="mark-words">Name, reminder, answers</span></button>
+          <button id="favorite" type="button" class="star" hidden></button>
+          <button id="ns-open" type="button" class="ns-open" hidden aria-haspopup="dialog" aria-expanded="false" title="A new session from this one: an empty one, a clone of it, or one that starts from a handoff it writes"><span class="ns-plus" aria-hidden="true">+</span><span class="ns-words">New session</span></button>
+          <span id="chat-state" class="badge"></span>
+          <button id="more" type="button" class="more" aria-expanded="false" aria-label="More for this session" title="Its name, label and reminder, where its prompts are answered, the look, and what can be done with this session">⋯</button>
+          <div class="view-switch in-chat" role="group" aria-label="Look">
+            <button type="button" data-set-view="vscode">VS Code</button>
+            <button type="button" data-set-view="terminal">Terminal</button>
+          </div>
+          <button id="stop" class="stop" hidden title="Interrupts what Claude is doing. The Escape key does the same.">Stop</button>
+          <button id="release" class="ghost" hidden title="Ends the copy this machine's agent is running. The session stays on the machine, where a reply here, or claude --resume in a terminal, picks it up again.">Exit</button>
+          <button id="remove" class="ghost" hidden>Remove</button>
+        </header>
+        <div id="attention" class="attention-banner" hidden></div>
+        <!-- The open session's reminder, once it has come due: that it has, and the ways to clear it or put it off -->
+        <div id="remind-due" class="remind-due" role="status" hidden></div>
+        <div class="chat-body">
+          <button id="pinned" type="button" class="pinned" hidden title="The prompt this part of the chat answers. Click to read all of it."><span class="bubble"></span></button>
+          <div id="messages" class="messages"></div>
+          <button id="latest" type="button" class="latest" hidden aria-label="Jump to the latest" title="Jump to the latest">↓</button>
+        </div>
+        <div id="agents" class="agents-strip" hidden></div>
+        <div id="requests" class="requests" hidden></div>
+        <form id="composer" class="composer">
+          <div class="composer-box">
+            <div id="foot-menu" class="foot-menu" hidden></div>
+            <div id="chips" class="chips" hidden></div>
+            <div class="composer-input">
+              <span class="prompt-char for-terminal" aria-hidden="true">❯</span>
+              <textarea id="input" rows="1" placeholder="Reply to Claude…"></textarea>
+            </div>
+            <div class="composer-foot">
+              <button id="attach" type="button" class="foot-btn" title="Attach a photo. You can also paste one, or drop it here." aria-label="Attach a photo">
+                <span class="for-vscode" aria-hidden="true">+</span><span class="for-terminal">+ image</span>
+              </button>
+              <input id="file" type="file" accept="image/*" multiple hidden>
+              <button id="foot-model" type="button" class="foot-model" hidden aria-haspopup="true" aria-expanded="false"></button>
+              <span id="foot-mode" class="foot-mode"></span>
+              <button id="foot-auto" type="button" class="foot-auto" hidden aria-haspopup="true" aria-expanded="false"></button>
+              <span class="foot-break"></span>
+              <span class="foot-space"></span>
+              <button id="foot-effort" type="button" class="foot-effort for-terminal" hidden aria-haspopup="true" aria-expanded="false"></button>
+              <button id="send" type="submit" class="send" title="Send" aria-label="Send">
+                <svg class="for-vscode" viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M10 4.2 15.3 9.5l-1.06 1.06-3.49-3.49V15.8h-1.5V7.07l-3.49 3.49L4.7 9.5z"/></svg>
+                <span class="for-terminal">send ⏎</span>
+              </button>
+            </div>
+          </div>
+        </form>
+        <p id="composer-note" class="composer-note" hidden></p>
+      </section>
+      <!-- A new session on a computer. On a server with a front door it is dressed as the account's page is
+           (site/account.css): its head the site's, and over what is asked, which computer it is for. -->
+      <section id="new" class="new-session" hidden>
+        <header class="bar chat-head">
+          <a href="#" class="back" aria-label="Back to sessions"><span aria-hidden="true">‹</span><span class="back-word">Sessions</span></a>
+          <a href="#" class="acct-mark" aria-label="ManyClaws: back to sessions">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M7 35C7 17 21 5 38 5c11 0 19 6 21 15L35 31l24 1c-1 15-13 27-29 27C17 59 7 49 7 35Z"/></svg>
+            <span>ManyClaws</span>
+          </a>
+          <div class="chat-title">
+            <div id="new-title" class="chat-name"></div>
+            <div class="chat-sub">Claude Code starts on that machine, run by its agent. What it needs permission for is asked here.</div>
+          </div>
+        </header>
+        <form id="new-form" class="new-form">
+          <header class="acct-head">
+            <p class="acct-tag">New session</p>
+            <h1 id="new-where"></h1>
+            <p class="acct-lede">Claude Code starts on that machine, run by its agent. What it needs permission for is asked here.</p>
+          </header>
+          <div class="new-fields">
+            <label>Project
+              <select id="new-project" required></select>
+            </label>
+            <div id="new-other" class="new-other" hidden>
+              <label>Folder
+                <input id="new-cwd" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+              </label>
+              <label class="check"><input id="new-create" type="checkbox"> Make the folder if it isn't there</label>
+            </div>
+            <label class="check" id="new-listed-row"><input id="new-listed" type="checkbox" checked> Show in VS Code's resume list</label>
+            <div class="new-row">
+              <label>Permissions <select id="new-mode"></select></label>
+              <label>Model <select id="new-model"></select></label>
+              <label>Effort <select id="new-effort"></select></label>
+            </div>
+            <label>Prompt
+              <textarea id="new-prompt" rows="6" required></textarea>
+            </label>
+            <p id="new-error" class="error" hidden></p>
+            <div><button type="submit" class="primary">Start session</button></div>
+          </div>
+        </form>
+      </section>
+      <!-- How to connect a computer: an API token to make, the passphrase where this browser has none yet, and the
+           way to the guide. Laid out as the account's page is, and dressed as it is on a server with a front door. -->
+      <section id="setup" class="new-session" hidden>
+        <header class="bar chat-head">
+          <a href="#" class="back" aria-label="Back to sessions"><span aria-hidden="true">‹</span><span class="back-word">Sessions</span></a>
+          <a href="#" class="acct-mark" aria-label="ManyClaws: back to sessions">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M7 35C7 17 21 5 38 5c11 0 19 6 21 15L35 31l24 1c-1 15-13 27-29 27C17 59 7 49 7 35Z"/></svg>
+            <span>ManyClaws</span>
+          </a>
+          <div class="chat-title">
+            <div class="chat-name">Set up a computer</div>
+            <div class="chat-sub">Connect the computers you run Claude Code on, and your phone.</div>
+          </div>
+        </header>
+        <div id="setup-body" class="guide"></div>
+      </section>
+      <!-- The account: its email and the way to its password, its tokens, signing out; and for the admin,
+           who else is here. On a server with a front door it is dressed as that is (site/account.css),
+           in the place a conversation has; on a phone its head has the site's name and the way back. -->
+      <section id="account" class="new-session" hidden>
+        <header class="bar chat-head">
+          <a href="#" class="back" aria-label="Back to sessions"><span aria-hidden="true">‹</span><span class="back-word">Sessions</span></a>
+          <a href="#" class="acct-mark" aria-label="ManyClaws: back to sessions">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M7 35C7 17 21 5 38 5c11 0 19 6 21 15L35 31l24 1c-1 15-13 27-29 27C17 59 7 49 7 35Z"/></svg>
+            <span>ManyClaws</span>
+          </a>
+          <div class="chat-title">
+            <div class="chat-name">Account</div>
+            <div id="account-sub" class="chat-sub"></div>
+          </div>
+          <button id="logout" class="ghost">Sign out</button>
+        </header>
+        <div id="account-body" class="guide"></div>
+      </section>
+      <!-- The settings (#/settings), from Settings under the list: what the list shows, how the page looks, what a
+           session's tile says, and this device's notifications. All of it is this device's own, kept in its
+           browser. Laid out as the account's page is, and dressed as it is on a server with a front door. -->
+      <section id="settings-page" class="new-session" hidden>
+        <header class="bar chat-head">
+          <a href="#" class="back" aria-label="Back to sessions"><span aria-hidden="true">‹</span><span class="back-word">Sessions</span></a>
+          <a href="#" class="acct-mark" aria-label="ManyClaws: back to sessions">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M7 35C7 17 21 5 38 5c11 0 19 6 21 15L35 31l24 1c-1 15-13 27-29 27C17 59 7 49 7 35Z"/></svg>
+            <span>ManyClaws</span>
+          </a>
+          <div class="chat-title">
+            <div class="chat-name">Settings</div>
+            <div class="chat-sub">What the list shows and how the page looks, on this device.</div>
+          </div>
+        </header>
+        <div id="settings-body" class="guide">
+          <header class="acct-head">
+            <p class="acct-tag">Settings</p>
+            <h1>On this device</h1>
+            <p class="acct-lede">What the list shows and how the page looks. These are kept in this browser: another device has its own.</p>
+          </header>
+          <section class="acct-part" id="set-list">
+            <h2>The list</h2>
+            <div class="acct-body">
+              <label class="guide-check"><input type="checkbox" id="show-ended"> Show inactive</label>
+              <div class="set-row" title="How each computer's past sessions are listed: the newest first, or under the folder they ran in">
+                <span class="set-name">Group by</span>
+                <span class="view-switch" role="group" aria-label="Group past sessions by">
+                  <button type="button" data-set-by="time">None</button>
+                  <button type="button" data-set-by="project">Project</button>
+                </span>
+              </div>
+            </div>
+          </section>
+          <section class="acct-part" id="set-look">
+            <h2>Look</h2>
+            <div class="acct-body">
+              <div class="set-row">
+                <span class="set-name">Sessions and their chats look like</span>
+                <span class="view-switch" role="group" aria-label="Look">
+                  <button type="button" data-set-view="vscode" title="Look like the VS Code extension">VS Code</button>
+                  <button type="button" data-set-view="terminal" title="Look like Claude Code in the terminal">Terminal</button>
+                </span>
+              </div>
+            </div>
+          </section>
+          <section class="acct-part" id="set-tile">
+            <h2>Session tiles</h2>
+            <div class="acct-body">
+              <p class="muted">What each session in the list shows under its name. Here is one, as this device has them now:</p>
+              <div id="tile-sample" class="tile-sample" aria-hidden="true"></div>
+              <label class="guide-check"><input type="checkbox" data-tile="where"> The project and computer it is on</label>
+              <label class="guide-check"><input type="checkbox" data-tile="prompt"> What you last said to it</label>
+              <label class="guide-check"><input type="checkbox" data-tile="reply"> What Claude last said</label>
+              <label class="guide-check"><input type="checkbox" data-tile="time"> When it was last active</label>
+              <div class="set-row" title="How many lines each of the two things said may take before it is cut short">
+                <span class="set-name">Lines for what was said</span>
+                <span class="view-switch" role="group" aria-label="Lines for what was said">
+                  <button type="button" data-tile-lines="1">1</button>
+                  <button type="button" data-tile-lines="2">2</button>
+                  <button type="button" data-tile-lines="3">3</button>
+                </span>
+              </div>
+            </div>
+          </section>
+          <section class="acct-part" id="set-alerts">
+            <h2>Notifications</h2>
+            <div class="acct-body">
+              <p id="set-alerts-says"></p>
+              <div><button type="button" id="set-alerts-go" class="primary">Turn on</button></div>
+              <p id="set-alerts-note" class="muted" hidden></p>
+            </div>
+          </section>
+        </div>
+      </section>
+      <!-- A computer's own page, from the gear by its name in the list: the color its name is shown in, a new
+           session on it, and at the foot, where it has cswap, the Claude accounts Claude Code can be switched
+           between there. Laid out as the account's page is, and dressed as it is on a server with a front door. -->
+      <section id="computer" class="new-session" hidden>
+        <header class="bar chat-head">
+          <a href="#" class="back" aria-label="Back to sessions"><span aria-hidden="true">‹</span><span class="back-word">Sessions</span></a>
+          <a href="#" class="acct-mark" aria-label="ManyClaws: back to sessions">
+            <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M7 35C7 17 21 5 38 5c11 0 19 6 21 15L35 31l24 1c-1 15-13 27-29 27C17 59 7 49 7 35Z"/></svg>
+            <span>ManyClaws</span>
+          </a>
+          <div class="chat-title">
+            <div id="computer-name" class="chat-name"></div>
+            <div id="computer-sub" class="chat-sub"></div>
+          </div>
+        </header>
+        <div id="computer-body" class="guide"></div>
+      </section>
+    </main>
+  </div>
+  <dialog id="ns-box" class="ns-box" aria-labelledby="ns-tag ns-title">
+    <form id="ns-form" method="dialog">
+      <button id="ns-close" type="button" class="ns-close" aria-label="Close">✕</button>
+      <div id="ns-tag" class="ns-tag">New session from</div>
+      <h2 id="ns-title" class="ns-title"></h2>
+      <div class="ns-where">
+        <label>Device
+          <select id="ns-device"></select>
+        </label>
+        <label>Project
+          <select id="ns-project"></select>
+        </label>
+      </div>
+      <label class="ns-listed"><input id="ns-listed" type="checkbox" checked><span><b>Show in VS Code's resume list</b><i id="ns-listed-hint"></i></span></label>
+      <div class="ns-ways">
+        <button type="button" data-how="new"><b>New</b><span>An empty session in that project.</span></button>
+        <button type="button" data-how="clone"><b>Full context clone</b><span>A copy that knows all this one knows.</span></button>
+        <button type="button" data-how="handoff"><b>Handoff</b><span>This session writes a handoff document, and a new session starts from it.</span></button>
+      </div>
+      <div id="ns-note" class="ns-note" role="status" hidden></div>
+    </form>
+  </dialog>
+  <!-- A file from the computer a session runs on, opened from a link in its chat: it comes sealed, and is opened and shown here -->
+  <dialog id="file-box" class="file-box" aria-labelledby="file-name">
+    <header class="file-head">
+      <div class="file-title">
+        <div id="file-name" class="file-name"></div>
+        <div id="file-where" class="file-where"></div>
+      </div>
+      <button id="file-view" type="button" class="file-act" hidden></button>
+      <a id="file-open" class="file-act" target="_blank" rel="noopener" hidden>Open</a>
+      <a id="file-save" class="file-act" hidden title="Keeps a copy on this device">Save</a>
+      <button id="file-close" type="button" class="file-close" aria-label="Close">✕</button>
+    </header>
+    <div id="file-note" class="file-note" role="status" hidden></div>
+    <div id="file-body" class="file-body" tabindex="-1"></div>
+  </dialog>
+  <!-- What the account puts on a session (app.js, marks): a name of its own, a label, a color behind its row, and a
+       reminder. Where the account's sessions are sealed, all of it is sealed on this device before it is sent.
+       With them, where a running session's prompts are answered: that is the session's own setting, not a mark. -->
+  <dialog id="mk-box" class="ns-box mk-box" aria-labelledby="mk-tag mk-title">
+    <form id="mk-form" method="dialog" novalidate>
+      <button id="mk-close" type="button" class="ns-close" aria-label="Close">✕</button>
+      <div id="mk-tag" class="ns-tag">Name, label and reminder for</div>
+      <h2 id="mk-title" class="ns-title"></h2>
+      <label class="mk-field mk-first">Name
+        <input id="mk-name" maxlength="80" autocomplete="off" spellcheck="false">
+      </label>
+      <!-- (the labels the account has on its sessions already, each a press away, and the way to a new one) -->
+      <div class="mk-field" id="mk-label-name">Label
+        <div id="mk-labels" class="mk-labels" role="group" aria-labelledby="mk-label-name"></div>
+        <input id="mk-label" maxlength="24" autocomplete="off" placeholder="A word or two" aria-label="A new label" hidden>
+      </div>
+      <div class="mk-field" id="mk-color-name">Color
+        <div id="mk-colors" class="mk-colors" role="group" aria-labelledby="mk-color-name"></div>
+      </div>
+      <div class="mk-field" id="mk-when-name">Remind me
+        <div id="mk-when" class="mk-when" role="group" aria-labelledby="mk-when-name"></div>
+        <input id="mk-at" type="datetime-local" aria-label="The day and time to be reminded" hidden>
+        <div id="mk-says" class="mk-says"></div>
+      </div>
+      <label id="mk-notify-row" class="ns-listed"><input id="mk-notify" type="checkbox"><span><b>Send a notification then</b><i id="mk-notify-hint"></i></span></label>
+      <label id="mk-answer-row" class="mk-field mk-apart" title="Where permission prompts and Claude's questions are answered. Here + the terminal: in both at once (in VS Code, wherever you sent the last prompt from). Always here: only here. The terminal only: the terminal's own dialog.">Permission prompts and questions
+        <select id="mode">
+          <option value="auto">Answer: here + terminal</option>
+          <option value="remote">Answer: always here</option>
+          <option value="local">Answer: terminal only</option>
+        </select>
+      </label>
+      <div id="mk-note" class="ns-note" role="status" hidden></div>
+      <div class="mk-foot">
+        <button id="mk-clear" type="button" class="mk-plain">Clear everything</button>
+        <button id="mk-save" type="submit" class="mk-save">Save</button>
+      </div>
+    </form>
+  </dialog>
+  <!-- What the page asks before it does what is not undone with a press, and what it has to say that can't
+       wait (app.js, ask and tell): a box of its own, in the new-session box's dress, where the browser's own
+       ("manyclaws.dev says") was. Its words, and what its two ways out are called, are put in as it opens. -->
+  <dialog id="ask-box" class="ns-box ask-box" aria-labelledby="ask-title" aria-describedby="ask-says">
+    <form id="ask-form" method="dialog" novalidate>
+      <h2 id="ask-title" class="ask-title"></h2>
+      <div id="ask-says" class="ask-says"></div>
+      <input id="ask-text" class="ask-text" autocomplete="off" autocapitalize="off" spellcheck="false" hidden>
+      <div class="ask-foot">
+        <button id="ask-no" type="button" class="ask-no">Cancel</button>
+        <button id="ask-yes" type="submit" class="ask-yes">OK</button>
+      </div>
+    </form>
+  </dialog>
+  <!-- A little tour, once, for an account that has just paid, on a desk's browser (app.js, showTour): how ManyClaws
+       is used on a phone, which is by opening this same page there. Three steps, in the new-session box's dress: what
+       is said on the left, over the page's address and a code a phone's camera opens it by (qr.js); the page on a
+       phone on the right; and under both where in the tour one is, and the ways on and back. -->
+  <dialog id="tour-box" class="ns-box tour-box" aria-labelledby="tour-tag tour-title" aria-describedby="tour-says">
+    <form id="tour-form" method="dialog" novalidate>
+      <button id="tour-close" type="button" class="ns-close" aria-label="Close">✕</button>
+      <div class="tour-words">
+        <div id="tour-tag" class="ns-tag"></div>
+        <h2 id="tour-title" class="ask-title"></h2>
+        <div id="tour-says" class="ask-says"></div>
+        <div id="tour-open" class="tour-open">
+          <div id="tour-code" class="tour-code"></div>
+          <div class="tour-address"><span>In your phone’s browser, open</span><b id="tour-address" translate="no"></b></div>
+        </div>
+      </div>
+      <figure class="tour-phone"><img id="tour-shot" alt="" width="780" height="1688"></figure>
+      <div class="ask-foot tour-foot">
+        <span id="tour-dots" class="tour-dots" aria-hidden="true"></span>
+        <button id="tour-back" type="button" class="ask-no">Back</button>
+        <button id="tour-next" type="submit" class="ask-yes">Next</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

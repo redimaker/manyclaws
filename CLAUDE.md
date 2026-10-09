@@ -1,4 +1,4 @@
-# ManyClaws, the plugin and the agent: rules for working in this repository
+# ManyClaws, the plugin, the agent and the page: rules for working in this repository
 
 ## This repository is public
 
@@ -17,12 +17,24 @@ These are the owner's standing instructions (2026-10-08). They have no exception
 
 ## Copies that must stay the same
 
-- `mod/hooks/seal.js` and `agent/seal.mjs` are one file in two places, and the server's page has a third copy. A test with the server compares all three: change them together.
+- `mod/hooks/seal.js`, `agent/seal.mjs` and `web/seal.js` are one file in three places. A test with the server compares all three: change them together.
 - `mod/hooks/rows.js` and `agent/rows.mjs` likewise.
 
-## What is on main is what people run
+## The page
+
+- `web/` is what the server hands a browser: the server's repository reaches it through a link (`server/public`), as it reaches `mod` and `agent`.
+- `web/index.html` names every script and style sheet the page loads with the SHA-384 of the file, and a browser runs none that is anything else. **After changing any of them, run `node release.mjs`**, which writes those values, and commit `web/index.html` with the change: a page whose HTML is stale runs nothing. The server's test runner does it before every run, and its deploy refuses a checkout where it is not done.
+- A module the page's script imports is named in `index.html` too (`<link rel="modulepreload">`): one that is added gets a line there, before anything that imports it.
+
+## What is on main is what people run, and it is a signed release
 
 - Computers install and update the plugin and the agent from this repository, as its `main` branch stands: the plugin through Claude Code's marketplace (`claude plugin marketplace add redimaker/manyclaws`), the agent through `agent/install.sh`, which fetches this repository's archive. **A push to main is a release to every computer that next updates.** Nothing half done goes to main, and nothing that the server it reports to would refuse.
+- **What is pushed to main is signed.** `release.json` lists every file under `agent/`, `mod/`, `web/` and `.claude-plugin/` with its SHA-256, and `release.json.sig` is that list signed. The agent's installer installs nothing else: a main whose list is stale, or not signed by a key the installer knows, is refused by every computer, and says so. So the last step before a push, after any change under those folders, is
+
+  `MANYCLAWS_RELEASE_KEY=<the release key> node release.mjs --sign`
+
+  and the two files are committed with the change. `node release.mjs --check` says whether it is done. The key is not here: the server's repository says where it is kept, and who may use it.
+- The keys a release may be signed by are `SIGNERS` in `agent/install.sh`. A key is replaced by a release, signed with the old one, whose installer names the new one: never by a release signed with a key no installed agent knows.
 - A change that the server has to match (what is sent, what is refused as too old) is pushed here and deployed there together: the server's repository says how.
 
 ## Versions

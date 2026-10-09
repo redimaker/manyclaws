@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ManyClaws — every Claude Code session you have, answered from your phone</title>
+  <meta name="description" content="Claude Code stops and asks before it runs things. ManyClaws puts every session you have, on every computer, on one page and on your phone, so the answer takes ten seconds.">
+  <meta name="theme-color" content="#141413">
+  <meta property="og:title" content="ManyClaws — it's waiting for a yes">
+  <meta property="og:description" content="Every Claude Code session you have, on every computer, on one page and on your phone.">
+  <meta property="og:image" content="/site/img/real/hero.webp?v=2">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="preload" as="image" href="/site/img/real/hero.webp?v=2" media="(min-width: 761px)">
+  <link rel="stylesheet" href="/site/fonts.css">
+  <link rel="stylesheet" href="/site/site.css">
+  <script src="/site/site.js" defer></script>
+</head>
+<body>
+  <!-- The front door of a server that charges: what it is, what it's like to have, what it
+       costs, and the way in. It comes in two looks with the same words and the same way in,
+       one of photographs and one of drawings: the server writes the look's name into this
+       file as it sends it, and of what is marked here as said of one look only it keeps
+       that look's: what a picture shows, since the photographs are of people dressed as
+       crabs and lobsters and the drawings are of a crab.
+       A picture is kept by a browser for a day, so one that is changed gets a new number
+       after its name. Nothing here is styled inline: the page's own rules forbid it. -->
+  <header class="top">
+    <a class="mark" href="#top" aria-label="ManyClaws">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M7 35C7 17 21 5 38 5c11 0 19 6 21 15L35 31l24 1c-1 15-13 27-29 27C17 59 7 49 7 35Z"/></svg>
+      <span>ManyClaws</span>
+    </a>
+    <nav>
+      <a href="#price">Price</a>
+      <a href="/app" target="_top">Sign in</a>
+      <a class="go small" href="/app#signup" target="_top">{{#trial}}Try it free{{/trial}}{{^trial}}Start <span data-price="monthly-short">$4.99</span>{{/trial}}</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <picture class="hero-art">
+        <source media="(max-width: 760px)" srcset="/site/img/real/hero-s.webp?v=2">
+        <img src="/site/img/real/hero.webp?v=2" alt="Three people in lobster and crab costumes at work on laptops, late at night, the nearest frowning at his screen" width="2400" height="1610">
+      </picture>
+      <p class="tag hero-tag">For Claude Code <i></i> on every computer you own</p>
+      <h1>It&rsquo;s waiting<br>for a <em>yes.</em></h1>
+      <p class="lede">Claude Code stops and asks before it runs things. Then it waits, however long you&rsquo;re gone. ManyClaws puts every session you have, on every computer, on your phone or browser, so the answer takes ten seconds instead of the afternoon.</p>
+      <div class="hero-go">
+        <a class="go" href="/app#signup" target="_top">{{#trial}}Try it free for {{trial}}{{/trial}}{{^trial}}Start for <span data-price="monthly">$4.99 a month</span>{{/trial}}</a>
+        <button type="button" class="listen" id="listen" aria-pressed="false">
+          <span class="listen-dot" aria-hidden="true"></span>
+          <span class="listen-text">Hear it in 40 seconds</span>
+        </button>
+        <audio id="pitch" preload="none" src="/site/audio/real.mp3"></audio>
+      </div>
+      <p class="hero-note tag">02:14 <i></i> three sessions <i></i> nobody home</p>
+    </section>
+
+    <section class="premise">
+      <p class="big">Claude does the work. It just can&rsquo;t <em>be you</em> when it needs one.</p>
+      <p class="aside">You know the shape of it. You hand over forty minutes of work, go and do something else, and come back to find it stopped at minute three, asking whether it may run a command. Here is a day with that taken away.</p>
+    </section>
+
+    <section class="day" aria-label="A day with ManyClaws">
+      <article class="beat beat-list">
+        <p class="clock">08:12</p>
+        <figure class="phone"><img src="/site/img/real/shot-list.webp?v=2" alt="The ManyClaws page on a phone: six Claude Code sessions on four computers, two of them marked as needing an answer" width="780" height="1688" loading="lazy"></figure>
+        <div class="words">
+          <p class="tag">On the train</p>
+          <h2>Six sessions, four computers, one list.</h2>
+          <p>The desktop at home, the laptop in your bag, the build box under a desk, the Windows machine you keep for one thing. Whatever Claude Code is doing on each of them is here, live, with the ones that need you on top.</p>
+        </div>
+      </article>
+
+      <article class="beat beat-bell">
+        <p class="clock">10:47</p>
+        <img class="plate" src="/site/img/real/bell.webp?v=2" alt="A man in a crab costume at a hotel desk, pressing its brass bell with a padded claw" width="1200" height="1490" loading="lazy">
+        <div class="words">
+          <p class="tag">In a meeting</p>
+          <h2>Your phone taps you. <em>checkout-api</em> needs you.</h2>
+          <p>A session that stops to ask sends an alert to your phone, and so does one that finishes. Claude can send one itself, too, when you&rsquo;ve told it to say when the tests are green.</p>
+        </div>
+      </article>
+
+      <article class="beat beat-stamp">
+        <p class="clock">10:48</p>
+        <img class="plate" src="/site/img/real/stamp.webp?v=2" alt="A woman in a lobster costume bringing a rubber stamp down on a slip of paper" width="1300" height="1300" loading="lazy">
+        <figure class="phone"><img src="/site/img/real/shot-approve.webp?v=2" alt="A session on a phone, stopped at a permission prompt: Claude wants to use Bash to run a migration on staging, with Allow and Deny" width="780" height="1688" loading="lazy"></figure>
+        <div class="words">
+          <p class="tag">Under the table</p>
+          <h2>Read the command. Allow. Done.</h2>
+          <p>You see exactly what it wants to run and what it did to get there. One tap, and it&rsquo;s working again. The same prompt is still up in the terminal at home: whichever is answered first counts.</p>
+        </div>
+      </article>
+
+      <article class="beat beat-ask">
+        <p class="clock">13:20</p>
+        <figure class="phone"><img src="/site/img/real/shot-question.webp?v=2" alt="A session on a phone asking a question, with two answers to tap and a box to type another" width="780" height="1688" loading="lazy"></figure>
+        <div class="words">
+          <p class="tag">In the lunch queue</p>
+          <h2>It has a question. You have a thumb.</h2>
+          <p>When Claude wants a decision from you, tap one of its answers or type your own. Or just reply: send a new prompt, attach a photo of the whiteboard, or stop a turn that has wandered off.</p>
+        </div>
+      </article>
+
+      <article class="beat beat-night">
+        <img class="wide" src="/site/img/real/sleep.webp?v=2" alt="A dog in a lobster costume on the bed, its nose beside a glowing phone; through the door, someone in a crab costume still at work on a laptop" width="1800" height="1208" loading="lazy">
+        <p class="clock">23:05</p>
+        <div class="words">
+          <p class="tag">From bed</p>
+          <h2>Start tomorrow&rsquo;s work on the machine downstairs.</h2>
+          <p>With the small agent on a computer, you can start a new session there in a folder you&rsquo;ve allowed, pick up one that ended, and search everything Claude has ever done on it.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="bench">
+      <picture>
+        <source media="(max-width: 760px)" srcset="/site/img/real/bench-s.webp?v=2">
+        <img src="/site/img/real/bench.webp?v=2" alt="A long workbench with five different computers, someone in a crab or lobster costume at work on each" width="2600" height="1103" loading="lazy">
+      </picture>
+      <h2>Every computer. <br>Every account. <br><em>One page.</em></h2>
+      <p class="tag run">macOS <i></i> Linux <i></i> Windows <i></i> the terminal <i></i> VS Code <i></i> the desktop app <i></i> <span>claude -p</span> in a script</p>
+    </section>
+
+    <section class="box">
+      <div class="box-head">
+        <p class="tag">The whole of it</p>
+        <h2>What&rsquo;s in the box</h2>
+        <figure class="screen"><img src="/site/img/real/shot-desk.webp?v=2" alt="The same page on a desk screen: the list of sessions beside one session's chat" width="2000" height="1250" loading="lazy"></figure>
+        <p class="screen-note">The same page on a big screen. Nothing to install to look at it.</p>
+      </div>
+      <ol class="manifest">
+        <li><b>Every session, live</b><span>What Claude is doing, as it does it: the chat, the tool calls, the diffs, the output.</span></li>
+        <li><b>Permission prompts</b><span>Allow or deny from anywhere, having read exactly what it is.</span></li>
+        <li><b>Questions</b><span>Answer the ones Claude asks, with a tap or in your own words.</span></li>
+        <li><b>Reply, attach, stop</b><span>Send a prompt, add a photo, interrupt a turn.</span></li>
+        <li><b>Alerts on your phone</b><span>When a session needs you, and when it&rsquo;s done.</span></li>
+        <li><b>Search</b><span>Every session on a machine, old ones included.</span></li>
+        <li><b>Start and resume</b><span>New work on a computer you aren&rsquo;t at, in the folders you chose.</span></li>
+        <li><b>Favorites</b><span>The ones that matter this week, kept on top.</span></li>
+        <li><b>Several Claude accounts</b><span>Work and personal side by side, each session under the account it runs as.</span></li>
+      </ol>
+    </section>
+
+    <section class="sealed">
+      <img class="plate" src="/site/img/real/key.webp?v=2" alt="A woman in a lobster costume holding an old iron key, on guard at a door with a brass padlock" width="1300" height="1300" loading="lazy">
+      <div class="words">
+        <p class="tag">What we can&rsquo;t read</p>
+        <h2>Sealed before it leaves your desk.</h2>
+        <p>Your sessions are sealed with a key made from a passphrase you choose. Each of your devices makes the key itself, from the passphrase you type there, and nothing of either is ever sent to us: no key, no hash, not even whether you have a passphrase. Each computer seals what its sessions say before sending it: prompts, replies, tool calls and their output, photos, titles, even the text of your alerts. Your phone opens it with the same key. There is no setting for this, and no way round it: we refuse anything that arrives unsealed.</p>
+        <dl class="ledger">
+          <div><dt>We can see</dt><dd>that a session is running, on which of your computers, and when.</dd></div>
+          <div><dt>We can&rsquo;t see</dt><dd>what you asked, what Claude said, or what it ran.</dd></div>
+          <div><dt>We never have</dt><dd>your password or your passphrase. Your own devices turn them into what is needed; neither leaves them.</dd></div>
+          <div><dt>The catch</dt><dd>a forgotten password is set again by a code to your email. A forgotten passphrase is not: we never had it, and what was sealed stays sealed.</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="setup">
+      <p class="tag">Getting it going</p>
+      <h2>Ask Claude to set it up.</h2>
+      <p class="setup-say">On each computer, say one sentence to Claude Code. It reads the guide and installs the plugin. Then the plugin asks you, in its own dialog, for two things from your account page: an API token, and your encryption passphrase. Neither goes into a chat or a command.</p>
+      <pre class="term" aria-label="What you say to Claude Code, and what comes back"><code><span class="p">&gt;</span> Read https://manyclaws.dev/setup.md and set this computer up.
+
+<span class="ok">✓ Added the marketplace</span>
+<span class="ok">✓ Installed the plugin</span>
+Your turn. Type <span class="h">/plugin configure manyclaws@manyclaws</span>
+and give it your <span class="s">API token</span> and your <span class="s">passphrase</span>.</code></pre>
+      <p class="setup-foot">Claude Code keeps running on your computers, under your own Claude account, exactly as it does now. <a href="/setup">The guide</a> is public and the same for everyone, if you would rather read it first or do it by hand.</p>
+    </section>
+
+    <section class="price" id="price">
+      <img class="price-art" src="/site/img/real/shell.webp?v=2" alt="" width="1800" height="1005" loading="lazy">
+      <div class="price-head">
+        <p class="tag">What it costs{{#trial}} <i></i> after {{trial}} free{{/trial}}</p>
+        <h2>Less than the coffee that went cold.</h2>
+      </div>
+      <div class="tags">
+        <a class="ticket ticket-year" href="/app#signup" target="_top" data-plan="yearly">
+          <span class="ticket-name">By the year</span>
+          <span class="ticket-sum"><b data-price="yearly-sum">$49.99</b><i>a year</i></span>
+          <span class="ticket-note" data-price="saving">Two months free, near enough</span>
+          <span class="ticket-go">Start with this one</span>
+        </a>
+        <a class="ticket ticket-month" href="/app#signup" target="_top" data-plan="monthly">
+          <span class="ticket-name">By the month</span>
+          <span class="ticket-sum"><b data-price="monthly-sum">$4.99</b><i>a month</i></span>
+          <span class="ticket-note">Stop whenever you like</span>
+          <span class="ticket-go">Or this one</span>
+        </a>
+      </div>
+      <ol class="way">
+        <li><b>Make an account</b> An email and a password.</li>
+        <li><b>Confirm your email</b> We send a six-digit code.</li>
+        <li><b>Pick a plan</b> {{#trial}}Your card goes in on Stripe&rsquo;s page, and isn&rsquo;t charged for {{trial}}. We never see it.{{/trial}}{{^trial}}You pay on Stripe&rsquo;s page. We never see your card.{{/trial}}</li>
+      </ol>
+      <p class="price-foot">{{#trial}}Free for {{trial}}: cancel in that time and you pay nothing. {{/trial}}One price, everything in it: as many computers and sessions as you have. Cancel from your account page and it runs to the end of what you paid for. <a href="/legal#refunds">Refunds</a> are simple.</p>
+    </section>
+
+    <section class="asked">
+      <h2>Asked, mostly before paying</h2>
+      <div class="asked-cols">
+        <div>
+          <details open>
+            <summary>Does Claude run on your servers?</summary>
+            <p>No. Claude Code runs on your own computers, signed in to your own Claude account, as it does today. ManyClaws is the part in between: it carries what your sessions say to your phone, and your answers back.</p>
+          </details>
+          <details>
+            <summary>Do I need a particular Claude plan?</summary>
+            <p>Whatever plan Claude Code is signed in to works. ManyClaws doesn&rsquo;t use your Claude allowance for anything of its own.</p>
+          </details>
+          <details>
+            <summary>Will this keep working if I switch accounts?</summary>
+            <p>Yes. ManyClaws follows your sessions, whichever Claude account they&rsquo;re signed in to. Switch accounts in the middle of a session and it stays where it was on your page. Different computers can be signed in to different accounts, and they all show up together.</p>
+          </details>
+          <details>
+            <summary>Is this made by Anthropic?</summary>
+            <p>No. ManyClaws is an independent product that works with Claude Code through its plugin system. It isn&rsquo;t affiliated with or endorsed by Anthropic.</p>
+          </details>
+        </div>
+        <div>
+          <details>
+            <summary>What if my phone is off?</summary>
+            <p>Nothing breaks. Every prompt is still asked in the terminal as well, and the first answer wins. You are adding a second place to say yes, not moving the only one.</p>
+          </details>
+          <details>
+            <summary>How do the alerts get to an iPhone?</summary>
+            <p>Add the page to your Home Screen from Safari&rsquo;s Share menu, open it from there, and turn on alerts. On Android and on a desk, the browser asks you once.</p>
+          </details>
+          <details>
+            <summary>Do you store any data?</summary>
+            <p>Yes: your sessions&rsquo; chats, for fourteen days, and only encrypted. We keep them for two reasons. Most connections upload slowly, so your phone gets a chat from us much faster than from your computer. And a computer that is asleep or restarting can&rsquo;t answer at all, while its chats can still be read here. All of it is sealed on your computer before it is sent, and only your own devices can open it, with the passphrase you enter on each of them. We can&rsquo;t read any of it. A chat is removed fourteen days after we last hear from its session, and you can clear all of them from your account page whenever you like: your computers send them again as they connect. The transcripts on your own computers are yours and stay where they are.</p>
+          </details>
+          <details>
+            <summary>Can I stop paying?</summary>
+            <p>Any time, from your account page. {{#trial}}Stop in the first {{trial}} and you have paid nothing. {{/trial}}Deleting your account cancels the subscription too.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="last">
+      <img src="/site/img/real/row.webp?v=2" alt="Five people in crab and lobster costumes side by side on a sofa, each at a laptop" width="1800" height="1005" loading="lazy">
+      <h2>Let them <em>work.</em></h2>
+      <a class="go" href="/app#signup" target="_top">{{#trial}}Try it free for {{trial}}{{/trial}}{{^trial}}Start for <span data-price="monthly">$4.99 a month</span>{{/trial}}</a>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p class="foot-mark">ManyClaws</p>
+    <p class="foot-links"><a href="/app" target="_top">Sign in</a><a href="/legal#terms">Terms</a><a href="/legal#privacy">Privacy</a><a href="/legal#refunds">Refunds</a><a href="mailto:support@manyclaws.dev">support@manyclaws.dev</a></p>
+    <p class="foot-small">ManyClaws is an independent product. Claude and Claude Code are trademarks of Anthropic, PBC, which has no part in this. No crab has ever been given a shell prompt.</p>
+  </footer>
+</body>
+</html>

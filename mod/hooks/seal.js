@@ -79,7 +79,10 @@
 // has no device's key, and cannot write a list. A computer has neither: it can read what
 // the account's sessions say, and cannot give an order to another computer. And a device
 // that is lost is taken off the list by any other, with the passphrase: its orders are
-// refused from then on, and nothing else has to change.
+// refused from then on, by every computer that has seen the list without it, whatever
+// list is handed over later (devicesMemory). It still has the key it was given, which
+// opens what is sealed and gives no order: shutting it out of what is said from then on
+// too takes another passphrase, which makes another key.
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -869,28 +872,9 @@ export async function keysFromPassphrase(passphrase, account, { pause, engine, c
   return { key, signer, checker: verifyKey(signer) }
 }
 
-// What a computer keeps between sessions (its key, and the half that checks the list of
-// the account's devices): locked under the computer's own token, which the system's secure
-// storage holds. So what is kept opens for whoever has the token, and for nobody who only
-// has the file it is in.
-const KEPT_AAD = enc.encode('manyclaws kept key v4')
-const keptWrap = (secret) => hkdf(enc.encode(String(secret)), 'manyclaws kept key v4')
-export function keepKeys({ key, checker }, secret) {
-  const iv = random(12)
-  return 'v5.' + toB64(concat(iv, gcmEncrypt(keptWrap(secret), iv, concat(key, checker), KEPT_AAD)))
-}
-// What was kept, or null: kept under another token or passphrase, or not this at all (and
-// then the key is made again from the passphrase)
-export function keptKeys(text, secret) {
-  if (typeof text !== 'string' || !text.startsWith('v5.')) return null
-  try {
-    const raw = fromB64(text.slice(3))
-    const both = gcmDecrypt(keptWrap(secret), raw.subarray(0, 12), raw.subarray(12), KEPT_AAD)
-    return both && both.length === 64 ? { key: both.slice(0, 32), checker: both.slice(32) } : null
-  } catch {
-    return null
-  }
-}
+// (A computer keeps its key written out, keysText above, where its system keeps secrets.
+// It is not kept wrapped under anything a passphrase is part of: what opens with a guess
+// at a passphrase and one cheap sum is a way to try guesses without Argon2id's cost.)
 
 // The key ready for use: what seal() and open() take. With it, what names are made with
 // (nameOf): drawn from the key, so that a name tells nothing of the key and is the same
@@ -1014,24 +998,53 @@ export const deviceIn = (list, key, now = Date.now()) => {
 }
 
 // What a computer knows of the account's devices: the newest list it has seen that the
-// passphrase's signer signed. `kept` is the list as it was last kept here, sealed, and
-// `save` keeps one. One older than the one held is not taken, so a device taken off the
-// list stays off it, whatever the server hands over later.
-export function devicesMemory(kept, key, checker, save = () => {}) {
+// passphrase's signer signed, and every device it has seen taken off one. `kept` is the
+// list as it was last kept here, sealed, and `save` keeps one. One older than the one held
+// is not taken, so a device taken off the list stays off it, whatever the server hands
+// over later.
+//
+// Nor does one come back on a newer list. A browser being given the passphrase has no
+// list of its own to go by: it builds the next one on the list the server hands it, and
+// signs that. Handed an old one, it would sign a device back on that had been taken off
+// since, under a newer number than any list here. So a device that was on the list held
+// here and is not on the one that replaced it is remembered as gone (`gone`: the keys
+// remembered so before; `saveGone` keeps them), and is none of the account's here again,
+// whichever list has it. Nothing is lost by that: a browser makes itself a new key each
+// time it is given the passphrase, so no device is ever put back under the key it was
+// taken off by.
+const MAX_GONE = 500
+export function devicesMemory(kept, key, checker, save = () => {}, { gone = [], saveGone = () => {} } = {}) {
   let held = readDevices(kept, key, checker)
   let as = held ? kept : null // the list held, as it came: one handed over again as it is has nothing new to say
+  const off = new Set((Array.isArray(gone) ? gone : []).filter(isDeviceKey))
+  // (the list as this computer goes by it: without the devices it has seen taken off)
+  const without = (list) => (list && list.devices.some((d) => off.has(d.key)) ? { ...list, devices: list.devices.filter((d) => !off.has(d.key)) } : list)
+  let known = without(held)
   return {
     get list() {
-      return held
+      return known
+    },
+    // The devices seen taken off, by their keys
+    get gone() {
+      return [...off]
     },
     // A list as the server has it: true where it is the account's, and is the one held from here on
     take(text) {
       if (held && text === as) return true
       const next = readDevices(text, key, checker)
       if (!next || (held && next.v < held.v)) return false
+      if (held && next.v > held.v) {
+        const stay = new Set(next.devices.map((d) => d.key))
+        const left = held.devices.filter((d) => !stay.has(d.key) && !off.has(d.key))
+        for (const d of left) off.add(d.key)
+        // (the oldest are let go of first, should there ever be so many)
+        for (const k of off) if (off.size > MAX_GONE) off.delete(k)
+        if (left.length) saveGone([...off])
+      }
       if (!held || next.v > held.v) save(text)
       held = next
       as = text
+      known = without(held)
       return true
     },
   }
