@@ -18,7 +18,25 @@ import { historyRows } from './rows.mjs'
 import { find as findFile, read as readFile, FileError } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '5.0.0'
+export const VERSION = '5.0.1'
+
+// Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
+// whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
+// has been seen never to end and never to be given up (two agents, 2026-10-08 and 09: each went on saying hello for
+// hours after the answer to a poll that it never asked again), and waiting on such a one was for ever.
+export function ended(start, ms, stuckMs = STUCK_MS) {
+  const stop = new AbortController()
+  let told = null
+  let late = null
+  const given = new Promise((_, no) => {
+    told = setTimeout(() => stop.abort(Object.assign(new Error(`no answer in ${ms / 1000} s`), { name: 'TimeoutError' })), ms)
+    late = setTimeout(() => no(Object.assign(new Error(`it did not end ${stuckMs / 1000} s after it was told to stop`), { name: 'StuckError' })), ms + stuckMs)
+  })
+  const whole = Promise.resolve().then(() => start(stop.signal))
+  // (given up, it may still end one day, either way: nobody is waiting, and nothing is to be said of it)
+  whole.catch(() => {})
+  return Promise.race([whole, given]).finally(() => (clearTimeout(told), clearTimeout(late)))
+}
 
 // A chat as words, oldest first, for a session that is to take it as what was said
 // before: who spoke, what they said, and what was run. The rows are the ones a chat
@@ -100,6 +118,8 @@ const SCAN_MS = 10_000 // how often the disk is checked for new and changed tran
 const FROM_PLUGIN_MS = 3000 // how often the agent looks for what the plugin left for it
 const HELLO_MS = 60_000
 const POLL_WAIT_S = 25
+const POLL_MS = (POLL_WAIT_S + 15) * 1000 // how long a poll is given: what the server holds it for, and some
+const STUCK_MS = 5_000 // how long after a request is told to stop it is waited for no longer
 const DEVICES_MS = 2000 // the list of the account's devices is not asked for again sooner than this after it was
 const OPEN_TRANSCRIPTS = 16 // sessions kept ready to read
 
@@ -489,7 +509,10 @@ export async function run(config, flags = {}) {
   // ---- The server
 
   const headers = { authorization: 'Bearer ' + config.token, 'content-type': 'application/json', 'x-manyclaws-machine': machine.id }
-  const post = (p, body, ms = 30_000) => fetch(server + p, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(ms) })
+  // A request to the server, with the time it is given, and its answer's text read inside that time (a body that
+  // stops half way is a request that has not ended)
+  const request = (p, init = {}, ms = 30_000) => ended((signal) => fetch(server + p, { ...init, headers, signal }).then(async (r) => ({ ok: r.ok, status: r.status, text: await r.text() })), ms)
+  const post = (p, body, ms = 30_000) => request(p, { method: 'POST', body: JSON.stringify(body) }, ms)
   // A call's answer, sent until the server has had it, three times at the most. Sent once, an answer whose request
   // failed on its way (a connection the server had let go of meanwhile, the network gone for a moment) was lost, and
   // whoever had asked waited for nothing: a transcript on its way to another machine never arrived for one piece of
@@ -513,7 +536,7 @@ export async function run(config, flags = {}) {
       helloTimer = setTimeout(async () => {
         try {
           const r = await post('/api/machine/hello', { machine: describe() })
-          if (!r.ok) log('hello refused:', r.status, (await r.text()).slice(0, 400))
+          if (!r.ok) log('hello refused:', r.status, r.text.slice(0, 400))
         } catch (err) {
           log('server unreachable:', err.message, err.cause?.message ?? '')
         }
@@ -524,12 +547,18 @@ export async function run(config, flags = {}) {
 
     // Calls come down a long poll; each answer goes back on its own
     let cursor = 0
-    const poll = async () => {
+    // (when a poll last ended, either way, and which loop is the one polling: see the timer under the loop)
+    let polled = Date.now()
+    let polling = 0
+    const poll = async (mine = ++polling) => {
       for (;;) {
+        // (a loop that was given up for stopped, and has woken after all, leaves the polling to the one started in its place)
+        if (mine !== polling) return
         try {
-          const r = await fetch(`${server}/api/machine/poll?machine=${machine.id}&after=${cursor}&wait=${POLL_WAIT_S}`, { headers, signal: AbortSignal.timeout((POLL_WAIT_S + 15) * 1000) })
+          const r = await request(`/api/machine/poll?machine=${machine.id}&after=${cursor}&wait=${POLL_WAIT_S}`, {}, POLL_MS)
+          polled = Date.now()
           if (!r.ok) throw new Error('poll ' + r.status)
-          const { commands = [], unknown } = await r.json()
+          const { commands = [], unknown } = JSON.parse(r.text)
           // The server doesn't know the machine yet, or restarted and has forgotten what
           // it runs: say hello, and give that a moment before asking again
           if (unknown) {
@@ -543,11 +572,22 @@ export async function run(config, flags = {}) {
             answer(c).catch((err) => log('a call was not answered:', err?.stack ?? err))
           }
         } catch (err) {
-          if (flags.verbose) log('poll:', err.message)
+          polled = Date.now()
+          // (a request that did not end is said whether or not the rest is: it is what stops a machine being heard)
+          if (flags.verbose || err?.name === 'StuckError') log('poll:', err.message)
           await new Promise((r) => setTimeout(r, 3000))
         }
       }
     }
+    // The loop above is all that asks for this machine's calls, and nothing here can end it. Should it stop all the
+    // same, for longer than three polls take, another is started in its place: without one the machine goes on
+    // saying hello, so it shows as there, and answers nothing it is asked.
+    setInterval(() => {
+      if (Date.now() - polled < 3 * POLL_MS) return
+      log(`no poll has ended in ${Math.round((Date.now() - polled) / 1000)} s: polling is started again`)
+      polled = Date.now()
+      poll()
+    }, POLL_MS).unref()
     // What a call is run with, of what came with it (`raw`).
     // What acts: what its order says (ORDERED), with what came sealed beside it opened.
     // A piece of a transcript on its way, and what only stops: as it came (PLAIN).
@@ -572,8 +612,8 @@ export async function run(config, flags = {}) {
       if (!devicesRead || Date.now() - devicesRead.at >= DEVICES_MS) {
         const read = async () => {
           try {
-            const r = await fetch(server + '/api/agent/devices', { headers, signal: AbortSignal.timeout(10_000) })
-            if (r.ok) devices.take((await r.json()).devices)
+            const r = await request('/api/agent/devices', {}, 10_000)
+            if (r.ok) devices.take(JSON.parse(r.text).devices)
           } catch {}
         }
         devicesRead = { at: Date.now(), done: read() }
