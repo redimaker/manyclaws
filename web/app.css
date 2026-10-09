@@ -532,6 +532,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .mark-open:hover, .mark-open[aria-expanded="true"] { border-color: var(--text); background: var(--hover); }
 .mark-pencil { flex: none; width: 1.1em; height: 1.1em; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .mark-words { display: none; }
+.upload-open:disabled { opacity: .7; cursor: progress; }
 .chat-head[data-color] { box-shadow: inset 0 -3px 0 var(--mk); }
 .remind-due { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 7px 20px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--due) 18%, var(--bg)); }
 .remind-says { flex: 1 1 14em; min-width: 0; font-weight: 600; }
@@ -918,6 +919,11 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .msg.user.pending .bubble { opacity: .55; }
 .thumb { display: block; max-width: min(240px, 100%); max-height: 240px; border-radius: 6px; margin: 4px 0 2px; }
 .thumb[src] { cursor: zoom-in; }
+/* A file that went with a reply: a click opens it from the computer it was put on */
+.sent-file { display: flex; align-items: baseline; gap: .6em; width: fit-content; max-width: 100%; box-sizing: border-box; margin: 4px 0 2px; padding: 3px 10px; border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 6px; color: inherit; font: .92em/1.5 var(--mono); text-decoration: none; cursor: pointer; }
+.sent-file:hover, .sent-file:focus-visible { border-color: currentColor; outline: 0; }
+.sent-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sent-file-size { flex: none; opacity: .7; }
 .thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* Claude's text and tool calls: a dot each, joined by a line */
@@ -1260,6 +1266,13 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
+/* A file that goes with the reply: its name, and how much of it has reached the session's computer */
+.chip-file { display: flex; align-items: center; box-sizing: border-box; height: 48px; max-width: min(240px, 100%); padding: 0 14px 0 12px; border: 1px solid var(--input-border); border-radius: 8px; }
+.chip-file-says { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.chip-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92em; color: var(--text); }
+.chip-file-size { font-size: .8em; color: var(--muted); }
+.chip-file.uploading::after { display: none; }
+.chip-file.uploading .chip-file-name { opacity: .6; }
 .chip-remove {
   position: absolute;
   top: -6px;
@@ -1517,7 +1530,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 [data-view="terminal"] [data-permission-mode="plan"] .foot-mode { color: var(--plan); }
 [data-view="terminal"] [data-permission-mode="bypassPermissions"] .foot-mode, [data-view="terminal"] [data-permission-mode="auto"] .foot-mode { color: var(--err); }
 [data-view="terminal"] .chips { padding: 0 0 .5em; }
-[data-view="terminal"] .chip-photo img { border-radius: 0; }
+[data-view="terminal"] .chip-photo img, [data-view="terminal"] .chip-file, [data-view="terminal"] .sent-file { border-radius: 0; }
 [data-view="terminal"] .composer-note { padding: 0 calc(3 * var(--cell-w)) .5em; }
 
 /* ---- Phones ---- */
@@ -1641,11 +1654,13 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .composer-foot { padding: 6px; gap: 4px; }
   .foot-btn, .send { width: 42px; height: 42px; border-radius: 12px; }
   .foot-btn { font-size: 26px; }
+  .foot-btn svg { width: 24px; height: 24px; }
   .send svg { width: 26px; height: 26px; }
   .foot-mode { line-height: 42px; font-size: .9em; }
   .resume-mode { font-size: 16px; padding: 6px 8px; border-radius: 8px; }
   .chips { gap: 10px; padding: 10px 10px 0; }
   .chip-photo img { width: 64px; height: 64px; border-radius: 10px; }
+  .chip-file { height: 64px; border-radius: 10px; }
   .chip-remove { width: 26px; height: 26px; top: -8px; right: -8px; font: 16px/26px var(--font); }
   .composer-note { padding: 0 16px 12px; }
   .new-form { padding: 16px 14px; gap: 14px; }
@@ -1828,6 +1843,11 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 .file-where { color: var(--muted); font: .92em/1.4 var(--mono); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .file-act { flex: none; padding: 4px 10px; border: 1px solid var(--input-border); border-radius: 5px; background: none; color: var(--text); font: inherit; text-decoration: none; cursor: pointer; }
 .file-act:hover { background: var(--hover); }
+.file-act:disabled { opacity: .55; cursor: default; }
+/* (what saves a file that was changed here is the way ahead, and looks it) */
+.file-act.primary { border-color: transparent; background: var(--button-bg); color: var(--button-text); }
+.file-act.primary:hover:not(:disabled) { background: var(--button-hover); }
+.file-over { margin-left: 10px; }
 .file-close { flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--muted); font-size: 15px; line-height: 1; }
 .file-close:hover { background: var(--hover); color: var(--text); }
 .file-note { padding: 10px 16px; border-bottom: 1px solid var(--border); color: var(--muted); }
@@ -1840,6 +1860,8 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 .file-text .fl { display: block; position: relative; min-height: 1lh; padding: 0 16px 0 calc(var(--digits) * 1ch + 28px); }
 .file-text .fl::before { content: attr(data-n); position: absolute; left: 0; width: calc(var(--digits) * 1ch + 12px); text-align: right; color: var(--muted); opacity: .7; }
 .file-text .fl.pointed { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
+/* A text file being changed: the box's whole body, set as the file's lines are */
+.file-edit { display: block; box-sizing: border-box; width: 100%; height: 100%; margin: 0; padding: 8px 16px; border: 0; border-radius: 0; outline: 0; resize: none; background: none; color: var(--text); font: .92em/1.5 var(--mono); tab-size: 4; white-space: pre; overflow: auto; }
 .file-picture { display: grid; place-items: center; box-sizing: border-box; min-height: 100%; padding: 16px; }
 .file-picture img { max-width: 100%; height: auto; }
 /* (one drawn smaller than it is, and at its own size after a click on it: the box is as wide as the picture then, and scrolls) */
@@ -1858,6 +1880,8 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .file-act { padding: 8px 12px; }
   .file-close { width: 40px; height: 40px; }
   .file-text { display: block; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* (in letters a phone does not zoom in on to type) */
+  .file-edit { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 16px; padding: 10px 14px; }
   .file-md { padding: 14px 14px 32px; }
   .file-entry { padding: 8px 14px; }
 }

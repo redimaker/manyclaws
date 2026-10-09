@@ -14,6 +14,14 @@
 // in its agent.json. Where it really is decides, links followed: a link inside those
 // folders to a file outside them opens nothing. So a phone or a browser of the account's
 // reads the projects it works in and not the rest of the machine.
+//
+// A file is written under the same rule (`place`, `write`): one the account's own device
+// sends is put in its session's folder, or among that folder's uploads, under a name no
+// file there has; and one that was opened here and changed there is written back where
+// it was read from, while it is still the file that was read. Nothing is written outside
+// the folders this machine takes files into, nor among this agent's own files, whatever
+// folders were named.
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -225,4 +233,132 @@ export async function read(found) {
   // (one that grew meanwhile)
   if (bytes.length > FILE_MAX) throw large(bytes.length)
   return { bytes }
+}
+
+// ---- A file written here: one a device of the account's sends to a session's folder,
+// or one that was opened from here and is written back changed.
+
+// Where a file sent with a reply is kept, under its session's folder: a folder of its own,
+// which says of itself that git is to keep none of it, so that what was sent for Claude
+// to read is in no commit by being swept up with the rest
+export const UPLOADS = '.manyclaws-uploads'
+const NAME_MAX = 200 // the longest name a file is given, in bytes
+const NAMES_TRIED = 500 // how many names are tried for a file whose own is taken
+
+// The SHA-256 of some bytes, as an order says it (base64url)
+export const digest = (bytes) => crypto.createHash('sha256').update(bytes).digest('base64url')
+
+// The name a file is given here, from the one it was sent with: the last part of it, with
+// nothing that leads to another folder
+export function plainName(name) {
+  const base = String(name ?? '').slice(0, 2000).split(/[\\/]/).pop().replace(/[\u0000-\u001f\u007f]/g, '').trim()
+  if (!base || base === '.' || base === '..') throw new FileError('that is not a name a file can have')
+  // (one too long keeps its ending, which says what kind of file it is)
+  const dot = base.lastIndexOf('.')
+  let [stem, ending] = dot > 0 && base.length - dot <= 20 ? [base.slice(0, dot), base.slice(dot)] : [base, '']
+  while (Buffer.byteLength(stem + ending) > NAME_MAX) stem = [...stem].slice(0, -1).join('')
+  return stem + ending
+}
+// The names tried for it where its own is taken: notes.txt, notes (2).txt, notes (3).txt
+function* otherNames(name) {
+  yield name
+  const dot = name.lastIndexOf('.')
+  const [stem, ending] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, '']
+  for (let n = 2; n < NAMES_TRIED + 2; n++) yield `${stem} (${n})${ending}`
+}
+
+export const CHANGED = 'that file has changed on this machine since it was opened'
+export const NOT_WRITTEN = 'that is outside the folders this machine takes files into: the ones sessions may be started in, and the ones it opens files from where its agent.json says so ("upload": true)'
+const OWN = "that is among the ManyClaws agent's own files on this machine, which are not written from anywhere else"
+
+// Where a file is to be written, and whether that is somewhere this machine writes.
+// `to` is the order's: `{ path }` for a file that was opened from here, which is written
+// back where it really is and only while it is still there; or `{ name, into }` for a
+// new one, in its session's folder (`cwd`) or among that folder's uploads. `within`, the
+// folders this machine opens files from (fileRoots); `own`, the agent's own folder,
+// inside which nothing is written. Answers { path, real, existing } (`existing`: its
+// stat, for one written back), or { dir, name } for a new one, whose name is settled as
+// it is made.
+export async function place(to, { cwd = '', within = [], own = '' } = {}) {
+  const mine = own ? await fs.promises.realpath(own).catch(() => path.resolve(own)) : ''
+  const notOwn = (real) => {
+    if (mine && (sameCase(real) === sameCase(mine) || sameCase(real).startsWith(sameCase(mine + path.sep)))) throw new FileError(OWN)
+    return real
+  }
+  if (typeof to?.path === 'string' && to.path) {
+    if (!path.isAbsolute(to.path)) throw new FileError('which file that is was not said whole')
+    const s = await stat(to.path)
+    if (!s) throw new FileError('that file is no longer there: it was moved or deleted on this machine since it was opened')
+    if (!s.isFile()) throw new FileError('that is not a file that can be written')
+    const real = await inside(to.path, within)
+    if (!real) throw new FileError(NOT_WRITTEN)
+    // (one its owner has marked not to be written is not written from elsewhere either)
+    if (!(s.mode & 0o200)) throw new FileError('that file is marked read-only on this machine')
+    return { path: to.path, real: notOwn(real), existing: s }
+  }
+  const name = plainName(to?.name)
+  if (!['folder', 'uploads'].includes(to?.into)) throw new FileError('where that file is to go was not said')
+  const home = typeof cwd === 'string' && path.isAbsolute(cwd) && (await stat(cwd))?.isDirectory() ? await inside(cwd, within) : null
+  if (!home) throw new FileError(typeof cwd === 'string' && cwd && (await stat(cwd)) ? NOT_WRITTEN : "the session's folder was not found on this machine")
+  notOwn(home)
+  if (to.into === 'folder') return { dir: home, name }
+  const dir = path.join(home, UPLOADS)
+  await fs.promises.mkdir(dir).catch((err) => {
+    if (err.code !== 'EEXIST') throw new FileError('the folder for what is sent to this session could not be made')
+  })
+  // (a link by that name to somewhere else is not followed out of those folders)
+  const real = await inside(dir, within)
+  if (!real || !(await stat(real))?.isDirectory()) throw new FileError(NOT_WRITTEN)
+  notOwn(real)
+  await fs.promises.writeFile(path.join(real, '.gitignore'), '# What was sent to this session from the ManyClaws page. Git keeps none of it.\n*\n', { flag: 'wx' }).catch(() => {})
+  return { dir: real, name }
+}
+
+// Writes it. A new file is made under a name nothing there has, and never in another's
+// place; one that could not be written whole is not left there in part. One written back
+// takes the place of the file it was read from, whole or not at all, and keeps who may
+// read and run it. It is written only over the file that was read: `was` is the SHA-256
+// of that, and where the file is no longer that, it has changed here meanwhile and is
+// left as it is. Answers { path, name, size, mtime, made }.
+export async function write(where, bytes, { was } = {}) {
+  if (bytes.length > FILE_MAX) throw new FileError(`that file is too large to take: the most is ${(FILE_MAX / 1024 / 1024).toFixed(1)} MB`)
+  const done = async (p, made) => ({ path: p, name: path.basename(p), size: bytes.length, mtime: Math.round((await stat(p))?.mtimeMs ?? Date.now()), made })
+  if (where.dir) {
+    for (const name of otherNames(where.name)) {
+      const p = path.join(where.dir, name)
+      let made = null
+      try {
+        made = await fs.promises.open(p, 'wx')
+      } catch (err) {
+        if (err.code === 'EEXIST') continue
+        throw new FileError('that file could not be written')
+      }
+      try {
+        await made.writeFile(bytes)
+        await made.close()
+      } catch {
+        // (it is this call's own, made a moment ago: nobody else's file is taken away)
+        await made.close().catch(() => {})
+        await fs.promises.rm(p, { force: true }).catch(() => {})
+        throw new FileError('that file could not be written')
+      }
+      return done(p, true)
+    }
+    throw new FileError('there are too many files by that name there already')
+  }
+  if (typeof was !== 'string' || !was) throw new FileError('which file that takes the place of was not said')
+  // (one longer than any file that is read is not the one that was read)
+  const now = where.existing.size > FILE_MAX ? null : await fs.promises.readFile(where.real).catch(() => null)
+  if (!now || digest(now) !== was) throw new FileError(CHANGED)
+  const beside = path.join(path.dirname(where.real), `.${path.basename(where.real)}.${crypto.randomBytes(6).toString('hex')}.tmp`)
+  try {
+    await fs.promises.writeFile(beside, bytes, { flag: 'wx', mode: where.existing.mode & 0o777 })
+    // (as it was allowed to be read and run, whatever this agent's own default for a new file is)
+    await fs.promises.chmod(beside, where.existing.mode & 0o777)
+    await fs.promises.rename(beside, where.real)
+  } catch {
+    await fs.promises.rm(beside, { force: true }).catch(() => {})
+    throw new FileError('that file could not be written')
+  }
+  return done(where.path, false)
 }

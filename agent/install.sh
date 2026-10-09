@@ -47,6 +47,8 @@
 #                       it. The list is "spawn": { "modes": [...] } in agent.json.
 #   --files DIR         a folder the page may open files from; repeat for several. With none,
 #                       the --spawn folders. A file anywhere else on the machine is not opened.
+#                       (Files are put only into the --spawn folders: "upload": true in
+#                       agent.json has them put into these too, and "upload": false nowhere.)
 #   --relay             send this machine's ManyClaws mod through the agent, so the
 #                       machine has one connection to the server
 #   --token TOKEN       the API token, where it can't be asked for (or MANYCLAWS_TOKEN)
@@ -394,6 +396,8 @@ fi
 if [ ${#files[@]} -gt 0 ]; then echo "The page may open files from: ${files[*]}"
 elif [ ${#spawn[@]} -gt 0 ]; then echo "The page may open files from those folders, and from nowhere else on this machine (--files DIR names others)."
 else echo "The page opens no files from this machine (--files DIR names folders it may)."; fi
+if [ ${#spawn[@]} -gt 0 ]; then echo "The page may put files into the folders sessions are started in, and nowhere else (\"upload\": false in agent.json has none put anywhere)."
+else echo "The page puts no files on this machine."; fi
 
 # The plugin beside it, in Claude Code, and this agent are given the same token and key,
 # typed once. Typed here, on a terminal, they are given to the plugin now (where it

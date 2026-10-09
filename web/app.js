@@ -62,8 +62,8 @@ const app = {
   typed: new Map(), // session id -> the last thing its user typed, as this page read it: for a session whose card does not say
   stream: null,
   partial: '', // the open session's reply as it streams
-  attachments: [], // photos uploaded for the next reply: { id, name, url }
-  uploads: Promise.resolve(), // settles when every photo picked so far has been uploaded
+  attachments: [], // photos uploaded for the next reply ({ id, name, url }), and files put on the session's computer for it ({ file, id, path, name, size })
+  uploads: Promise.resolve(), // settles when every photo and file picked so far has been uploaded
   uploading: 0,
   results: new Map(), // tool results that arrived before their call: toolUseId -> message
   refoldTimer: 0,
@@ -2133,6 +2133,8 @@ function renderStar() {
   const old = el('favorite')
   el('ns-open').hidden = !open
   renderMarkHead(open)
+  // (and the way to put a file in its folder, where its computer takes them)
+  if (!el('upload-open').disabled) el('upload-open').hidden = !open || !putsFiles(fileHome())
   if (!open) return void (old.hidden = true)
   const star = starButton(open)
   star.id = 'favorite'
@@ -3878,6 +3880,7 @@ function renderPastHeader() {
   el('input').disabled = !canReply
   el('send').disabled = !canReply
   el('attach').hidden = true
+  el('attach-file').hidden = true
   el('input').placeholder = live || s?.hosted ? 'Reply to Claude…' : elsewhere ? 'Continue in a copy…' : 'Reply to resume this session…'
 }
 
@@ -4216,6 +4219,7 @@ function renderHeader() {
   el('send').disabled = !canSend
   el('composer').hidden = !canSend
   el('attach').hidden = false
+  el('attach-file').hidden = !putsFiles(fileHome())
   el('input').placeholder = resumes ? 'Reply to resume this session…' : 'Reply to Claude…'
 }
 
@@ -5189,20 +5193,36 @@ function refoldSoon() {
 
 window.addEventListener('resize', refoldSoon)
 
-// A prompt's "[Attachment <id>: …]" notes, drawn as the photos they stand for
+// A prompt's "[Attachment <id>: …]" notes, drawn as the photos they stand for; and its
+// "[Attached file: …]" notes, each drawn as the file it says is on the session's computer
 const ATTACHMENT_NOTE = /\n*\[Attachment ([a-f0-9]{16}): ([^\]]*)\]/g
+// (where it is, is written as JSON writes a string: a name may have a bracket in it, or a full stop after one)
+const FILE_NOTE = /\n*\[Attached file: ("(?:[^"\\\n]|\\.)*") \(([^()\n]*)\)\. The user sent it from the ManyClaws page, and it is on this computer at that path: read it there\.\]/g
+const withoutNotes = (text, photo = '', file = '') => text.replace(ATTACHMENT_NOTE, photo).replace(FILE_NOTE, file)
 
 function withThumbnails(text) {
   const out = []
   let last = 0
-  for (const m of text.matchAll(ATTACHMENT_NOTE)) {
+  const notes = [...[...text.matchAll(ATTACHMENT_NOTE)].map((m) => ({ m, photo: true })), ...[...text.matchAll(FILE_NOTE)].map((m) => ({ m }))].sort((a, b) => a.m.index - b.m.index)
+  for (const { m, photo } of notes) {
     if (m.index > last) out.push(text.slice(last, m.index))
     // A photo is opened here, and shown from what was opened (it has no address of its own to open in a tab)
-    out.push(sealedPhoto('/api/attachments/' + m[1], m[2].replace(/ \(image\/[^)]*\)\. Call the view_attachment tool .*$/, '')))
+    out.push(photo ? sealedPhoto('/api/attachments/' + m[1], m[2].replace(/ \(image\/[^)]*\)\. Call the view_attachment tool .*$/, '')) : sentFile(m[1], m[2]) ?? m[0])
     last = m.index + m[0].length
   }
   if (last < text.length) out.push(text.slice(last))
   return out
+}
+
+// A file that went with a reply, in the chat: its name, and a click opens it from the computer it was put on
+// (`written`: where it is as its note has it, a string as JSON writes one; null where that is not one)
+function sentFile(written, size) {
+  let where = null
+  try {
+    where = JSON.parse(written)
+  } catch {}
+  if (typeof where !== 'string' || !where) return null
+  return h('a', { class: 'sent-file', role: 'link', tabindex: 0, 'data-file': where, title: where }, h('span', { class: 'sent-file-name' }, lastPart(where)), size && h('span', { class: 'sent-file-size' }, size))
 }
 
 function sealedPhoto(src, name) {
@@ -5235,8 +5255,8 @@ function b64(bytes) {
 // no longer. Replies sent while Claude was at work can arrive together, as one prompt
 // with a line or more for each: then each of them is in it, in the order they were sent.
 function clearPending(text) {
-  const bare = text.replace(ATTACHMENT_NOTE, '').trim()
-  const typed = (p) => p.text.trim() || 'See the attached photo.'
+  const bare = withoutNotes(text).trim()
+  const typed = (p) => p.text.trim() || p.said || 'See the attached photo.'
   // (one too long for the session to report whole arrives cut short)
   const same = (p) => typed(p) === text.trim() || typed(p) === bare || (typed(p).length > 4000 && bare.startsWith(typed(p).slice(0, 4000)))
   let arrived = app.pending.filter(same).slice(0, 1)
@@ -5458,7 +5478,10 @@ const fileRef = (target, label) => (isFileLink(target) ? `<a class="ref" role="l
 
 const FILE_LINES = 20_000 // the most lines of a file that are drawn
 const FILE_RENDERED = 400_000 // the longest Markdown that is drawn as a document
-const fileBox = { seq: 0, urls: [], shown: null } // which asking the box shows the answer to, the addresses made here for what it shows, and what that is
+const FILE_EDITED = 2_000_000 // the longest text that is changed here
+const FILE_PART = 2 * 1024 * 1024 // a file goes to a computer in pieces of this many sealed bytes, as one comes from it
+const FILE_MOST = 16 * 1024 * 1024 // and the largest a computer takes, which is the largest it sends
+const fileBox = { seq: 0, urls: [], shown: null, editing: null } // which asking the box shows the answer to, the addresses made here for what it shows, what that is, and what is being changed of it
 
 const lastPart = (p) => String(p).replace(/[#?].*$/, '').split(/[\\/]/).filter(Boolean).pop() || String(p)
 const fileSize = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(n < 10_240 ? 1 : 0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
@@ -5492,9 +5515,10 @@ function clearFile() {
   for (const url of fileBox.urls) URL.revokeObjectURL(url)
   fileBox.urls = []
   fileBox.shown = null
+  fileBox.editing = null
   el('file-body').replaceChildren()
   el('file-where').textContent = ''
-  for (const id of ['file-note', 'file-save', 'file-view', 'file-open']) el(id).hidden = true
+  for (const id of ['file-note', 'file-download', 'file-view', 'file-open', 'file-edit', 'file-cancel', 'file-write']) el(id).hidden = true
 }
 
 function fileNote(text, { error = false, more = [] } = {}) {
@@ -5509,13 +5533,36 @@ function closeFile() {
   if (el('file-box').open) el('file-box').close()
   clearFile()
 }
-el('file-close').addEventListener('click', closeFile)
+// Shut by its own ways (the ✕, a click beside it, Escape): where a file was changed here and not saved, that is asked first
+const fileChanged = () => !!fileBox.editing && fileBox.editing.area.value !== fileBox.editing.was
+const fileUnsaved = () => fileChanged() || !!fileBox.editing?.saving
+async function leaveFile() {
+  const { seq, shown, editing } = fileBox
+  // (one on its way to its computer is not waited for by force: but shut now, whether it got there is said nowhere)
+  if (editing?.saving) {
+    if (!(await ask('Still saving', { says: `${shown.info.name} is on its way to ${machineName(shown.m)}. If you shut this now, you are not told here whether it got there.`, yes: 'Shut anyway', no: 'Wait', danger: true }))) return
+  } else if (fileChanged() && !(await ask('Discard what you changed?', { says: `${shown.info.name} is left as it is on ${machineName(shown.m)}.`, yes: 'Discard', no: 'Keep editing', danger: true }))) return
+  if (seq === fileBox.seq) closeFile()
+}
+el('file-close').addEventListener('click', leaveFile)
 // (a click beside the box closes it, as Escape does)
-el('file-box').addEventListener('click', (ev) => ev.target === el('file-box') && closeFile())
+el('file-box').addEventListener('click', (ev) => ev.target === el('file-box') && leaveFile())
+el('file-box').addEventListener('cancel', (ev) => {
+  if (!fileUnsaved()) return
+  ev.preventDefault()
+  leaveFile()
+})
 // Escape shuts the box by itself. The browser says so at its next frame, by when the box
 // may be open again on another file: what it shows then is left as it is.
-el('file-box').addEventListener('close', () => !el('file-box').open && closeFile())
-window.addEventListener('hashchange', closeFile)
+el('file-box').addEventListener('close', () => {
+  if (el('file-box').open) return
+  // (a browser shuts a box at a second Escape whatever the page says to the first: over something typed and not saved,
+  // it is opened again as it was, and what was typed is still there to be saved or dropped by choice)
+  if (fileUnsaved()) return void el('file-box').showModal()
+  closeFile()
+})
+// (going elsewhere on the page shuts it: but not over something typed and not saved, or on its way, which stays in hand)
+window.addEventListener('hashchange', () => !fileUnsaved() && closeFile())
 
 const unb64 = (text) => {
   const raw = atob(text)
@@ -5537,34 +5584,44 @@ async function openFile(target, { from } = {}) {
   if (!m) return no(`Files are opened through the ManyClaws agent, and ${home.host || "this session's computer"} has none connected. `, [h('a', { href: '#/setup' }, 'Set up a computer'), ' has how to install it.'])
   if (!m.online) return no(`${machineName(m)} is not connected, so its files can't be reached.`)
   fileNote(`Fetching from ${machineName(m)}…`)
-  const r = await sendJson(`/api/machines/${m.id}/file`, { order: await orderFor(m.id, 'file', { path: target, cwd: from || home.cwd, sid: home.sid, near: filesNear() }) })
-  if (seq !== fileBox.seq) return
-  if (!r.ok) return no(sentence(r.error))
+  const got = await fetchFile(m, { path: target, cwd: from || home.cwd, sid: home.sid, near: filesNear() }, { still: () => seq === fileBox.seq, says: fileNote })
+  if (!got) return
+  if (got.error) return no(got.error)
+  showFile(got.info, got.bytes, { target, home, m })
+}
+
+// A file from a computer, asked for on an order (`what`: which file, and where its session runs), fetched in its pieces
+// and opened: { info, bytes }, or { error } with why not. `still` says whether it is still wanted (null where it is
+// not, with nothing more fetched), and `says` is told how far it has come.
+async function fetchFile(m, what, { still = () => true, says = () => {} } = {}) {
+  const r = await sendJson(`/api/machines/${m.id}/file`, { order: await orderFor(m.id, 'file', what) })
+  if (!still()) return null
+  if (!r.ok) return { error: sentence(r.error) }
   const info = r.data.file
-  if (!info || typeof info !== 'object') return no(`What ${machineName(m)} sent could not be opened with the key this device has: the two were given different passphrases.`)
+  if (!info || typeof info !== 'object') return { error: `What ${machineName(m)} sent could not be opened with the key this device has: the two were given different passphrases.` }
   const pieces = [unb64(r.data.data ?? '')]
   for (let part = 1; part < r.data.parts; part++) {
-    fileNote(`Fetching from ${machineName(m)}… ${fileSize(pieces.reduce((n, p) => n + p.length, 0))} of ${fileSize(r.data.size)}`)
+    says(`Fetching from ${machineName(m)}… ${fileSize(pieces.reduce((n, p) => n + p.length, 0))} of ${fileSize(r.data.size)}`)
     const p = await sendJson(`/api/machines/${m.id}/file/part`, { id: await sealFor(r.data.id), part })
-    if (seq !== fileBox.seq) return
-    if (!p.ok) return no(sentence(p.error))
+    if (!still()) return null
+    if (!p.ok) return { error: sentence(p.error) }
     pieces.push(unb64(p.data.data ?? ''))
   }
   const packed = new Uint8Array(pieces.reduce((n, p) => n + p.length, 0))
   pieces.reduce((at, p) => (packed.set(p, at), at + p.length), 0)
   // (opening megabytes takes a moment: what is said meanwhile is drawn first)
   if (packed.length > 1_000_000) {
-    fileNote('Opening…')
+    says('Opening…')
     await new Promise((done) => setTimeout(done, 30))
-    if (seq !== fileBox.seq) return
+    if (!still()) return null
   }
   const bytes = r.data.parts ? await vault.openBytes(packed, app.key) : new Uint8Array(0)
-  if (!bytes) return no(`What ${machineName(m)} sent could not be opened with the key this device has.`)
-  showFile(info, bytes, { target, home, m })
+  if (!bytes) return { error: `What ${machineName(m)} sent could not be opened with the key this device has.` }
+  return { info, bytes }
 }
 
 // A photo in the chat, in the box: from the bytes the page drew it small from, so nothing is
-// fetched and no computer is asked. It is shown as a file is, with its name and Save.
+// fetched and no computer is asked. It is shown as a file is, with its name and Download.
 function openPhoto(img) {
   const [, data] = /^data:[^,]*;base64,(.*)$/.exec(img.src) ?? []
   if (!data) return
@@ -5583,6 +5640,9 @@ function fileUrl(bytes, type) {
 }
 
 // A file's words, where it is text: null where it is not
+const isUtf16 = (b) => (b[0] === 0xff && b[1] === 0xfe) || (b[0] === 0xfe && b[1] === 0xff)
+// Whether a text's lines all end the same way: \n throughout, or \r\n throughout
+const endsAlike = (text) => !/\r(?!\n)/.test(text) && !(text.includes('\r\n') && /(^|[^\r])\n/.test(text))
 function textOf(b) {
   if (b[0] === 0xff && b[1] === 0xfe) return new TextDecoder('utf-16le').decode(b)
   if (b[0] === 0xfe && b[1] === 0xff) return new TextDecoder('utf-16be').decode(b)
@@ -5615,7 +5675,9 @@ function fileKind(b, name) {
 function showFile(info, bytes, { target, home, m }) {
   const sep = info.sep === '\\' ? '\\' : '/'
   const dir = info.kind === 'dir' ? info.path : info.path.slice(0, Math.max(0, info.path.length - String(info.name).length - 1)) || sep
-  fileBox.shown = { info, dir }
+  fileBox.shown = { info, dir, bytes, target, home, m }
+  fileBox.editing = null
+  for (const id of ['file-cancel', 'file-write']) el(id).hidden = true
   const inside = home.cwd && info.path.startsWith(home.cwd) && /^[\\/]/.test(info.path.slice(home.cwd.length))
   el('file-name').textContent = info.name || info.path
   el('file-where').textContent = [inside ? info.path.slice(home.cwd.length + 1) : info.path, info.kind === 'dir' ? null : fileSize(info.size), m && machineName(m)].filter(Boolean).join(' · ')
@@ -5625,10 +5687,14 @@ function showFile(info, bytes, { target, home, m }) {
   fileNote(info.exact ? '' : `Nothing is at "${target}". This is the nearest by name${others.length ? ', and it could also mean:' : '.'}`, { more: others })
   const body = el('file-body')
   if (info.kind === 'dir') return void body.replaceChildren(folderList(info, bytes, sep))
-  el('file-save').href = fileUrl(bytes, 'application/octet-stream')
-  el('file-save').download = info.name || 'file'
-  el('file-save').hidden = false
+  el('file-download').href = fileUrl(bytes, 'application/octet-stream')
+  el('file-download').download = info.name || 'file'
+  el('file-download').hidden = false
   const is = fileKind(bytes, String(info.name ?? ''))
+  // What is text can be changed here and saved back, where its computer takes files (a photo in the chat is from no computer)
+  // (in UTF-8, and with its lines ending one way throughout: what is typed here is saved with the endings the file had,
+  // and a file that mixes them would come back with every line changed)
+  el('file-edit').hidden = !(m?.capabilities?.includes('upload') && is.text !== undefined && bytes.length <= FILE_EDITED && !isUtf16(bytes) && endsAlike(is.text))
   const views = []
   if (is.kind === 'image') views.push(['Picture', () => pictureOf(fileUrl(bytes, is.type), info.name)])
   if (is.kind === 'text' && is.document && !info.line) views.push(['Document', () => documentOf(is.text)])
@@ -5638,7 +5704,7 @@ function showFile(info, bytes, { target, home, m }) {
     el('file-open').href = fileUrl(bytes, is.type)
     el('file-open').hidden = false
   }
-  if (!views.length) views.push(['', () => h('p', { class: 'file-plain' }, is.kind === 'pdf' ? 'A PDF. Open shows it in a tab of its own, and Save keeps a copy on this device.' : 'This is not a file that can be shown here. Save keeps a copy on this device.')])
+  if (!views.length) views.push(['', () => h('p', { class: 'file-plain' }, is.kind === 'pdf' ? 'A PDF. Open shows it in a tab of its own, and Download keeps a copy on this device.' : 'This is not a file that can be shown here. Download keeps a copy on this device.')])
   let at = 0
   const draw = () => {
     body.replaceChildren(views[at][1]())
@@ -5653,6 +5719,164 @@ function showFile(info, bytes, { target, home, m }) {
     draw()
   }
   draw()
+}
+
+// ---- A file for a computer: one changed in the box and saved back, one put in a session's
+// folder from its head, or one sent with a reply. It is sealed here, whole, and goes on an
+// order that says where it is to be written, how long it is and the SHA-256 of what is in
+// it: so the computer writes what this device signed for, there and nowhere else, and
+// nobody between can put other bytes in its place. Its agent writes only inside the
+// folders its owner named, and what a new file was called there comes back sealed.
+
+// Whether the computer a chat runs on takes files (its agent says so of itself), and the chat has a folder there
+const putsFiles = (home) => !!home?.cwd && !!app.machines.get(home.mid)?.capabilities?.includes('upload')
+
+// Sends it: { ok, file } with what it was written as ({ path, name, size }), or { ok: false, error }.
+// `to` is where: { path, was } for a file that was opened from there (`was`: the SHA-256 of what was read, which is the
+// only file it is written over, so that one changed there meanwhile is left as it is), or { name, into, cwd, sid } for
+// a new one. The order carries a mark made here for this asking alone, which the computer says back, sealed, with what
+// it wrote: an answer to some other asking, kept by whoever passed it on and handed back in this one's place, has
+// another mark or none, and is not taken for this file having been written.
+const shaOf = async (bytes) => vault.toB64(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)))
+async function putFile(m, bytes, to, { onProgress = () => {} } = {}) {
+  if (!app.key) return { ok: false, error: NO_KEY_MACHINE }
+  if (!m?.online) return { ok: false, error: `${machineName(m)} is not connected, so nothing can be sent to it.` }
+  if (bytes.length > FILE_MOST) return { ok: false, error: `It is ${fileSize(bytes.length)}, and the most a computer takes is ${fileSize(FILE_MOST)}.` }
+  // (an empty file is nothing to seal: that it is empty is in the order)
+  const packed = bytes.length ? await vault.sealBytes(bytes, app.key) : new Uint8Array(0)
+  const parts = Math.ceil(packed.length / FILE_PART)
+  const piece = (n) => b64(packed.subarray(n * FILE_PART, (n + 1) * FILE_PART))
+  const mark = vault.toB64(crypto.getRandomValues(new Uint8Array(12)))
+  let r = await sendJson(`/api/machines/${m.id}/file/write`, { order: await orderFor(m.id, 'write', { ...to, size: bytes.length, sha: await shaOf(bytes), parts, ask: mark }), data: piece(0) })
+  const id = r.ok ? r.data.id : null
+  for (let part = 1; r.ok && !r.data.file && part < parts; part++) {
+    onProgress(part / parts)
+    r = await sendJson(`/api/machines/${m.id}/file/write/part`, { id: await sealFor(id), part, data: piece(part) })
+  }
+  if (!r.ok) return { ok: false, error: sentence(r.error) }
+  const file = r.data.file
+  if (!file || typeof file !== 'object' || typeof file.path !== 'string') return { ok: false, error: `What ${machineName(m)} answered could not be opened with the key this device has.` }
+  if (file.ask !== mark) return { ok: false, error: `What came back from ${machineName(m)} is not its answer to this, so the file is not known to be written there: open it again to see.` }
+  return { ok: true, file }
+}
+
+// A text file, changed in the box. What is typed is the file's own text: a file whose
+// lines end the way Windows ends them is saved with them so, and one that begins with
+// the mark some editors put before UTF-8 keeps it.
+function editFile() {
+  const { info, bytes } = fileBox.shown ?? {}
+  const text = bytes && textOf(bytes)
+  if (typeof text !== 'string') return
+  const area = h('textarea', { class: 'file-edit', spellcheck: 'false', autocapitalize: 'off', autocomplete: 'off', autocorrect: 'off', 'aria-label': 'What is in ' + info.name })
+  area.value = text
+  fileBox.editing = { area, was: area.value, crlf: /\r\n/.test(text) && !/(^|[^\r])\n/.test(text), bom: bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf, saving: false }
+  for (const id of ['file-view', 'file-open', 'file-edit', 'file-download']) el(id).hidden = true
+  for (const id of ['file-cancel', 'file-write']) el(id).hidden = el(id).disabled = false
+  fileNote('')
+  el('file-body').replaceChildren(area)
+  // (where the link pointed, if it pointed at a line)
+  const at = info.line > 1 ? area.value.split('\n').slice(0, info.line - 1).join('\n').length + 1 : 0
+  area.focus()
+  area.setSelectionRange(at, at)
+  area.addEventListener('keydown', (ev) => {
+    if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && ev.key.toLowerCase() === 's') {
+      ev.preventDefault()
+      saveFile()
+    }
+  })
+}
+el('file-edit').addEventListener('click', editFile)
+
+// Back to the file as it was read, with nothing saved
+async function cancelEdit() {
+  const { shown, editing, seq } = fileBox
+  if (!editing || editing.saving) return
+  if (fileChanged() && !(await ask('Discard what you changed?', { says: `${shown.info.name} is left as it is on ${machineName(shown.m)}.`, yes: 'Discard', no: 'Keep editing', danger: true }))) return
+  if (seq === fileBox.seq && fileBox.editing === editing) showFile(shown.info, shown.bytes, shown)
+}
+el('file-cancel').addEventListener('click', cancelEdit)
+
+// Saved back to its computer, where it was read from. `over`: over what is there now, where the file has changed there
+// since it was opened (Claude may be at work on it): without that, such a file is left as it is and said to have changed.
+async function saveFile({ over = false } = {}) {
+  const { shown, editing } = fileBox
+  if (!editing || editing.saving) return
+  const seq = fileBox.seq
+  const typed = new TextEncoder().encode(editing.crlf ? editing.area.value.replace(/\n/g, '\r\n') : editing.area.value)
+  const bytes = new Uint8Array((editing.bom ? 3 : 0) + typed.length)
+  if (editing.bom) bytes.set([0xef, 0xbb, 0xbf])
+  bytes.set(typed, bytes.length - typed.length)
+  const busy = (on) => {
+    editing.saving = on
+    editing.area.readOnly = on
+    for (const id of ['file-cancel', 'file-write']) el(id).disabled = on
+  }
+  const still = () => seq === fileBox.seq && fileBox.editing === editing
+  busy(true)
+  fileNote(`Saving to ${machineName(shown.m)}…`)
+  // It is written over one file and no other: the one that was read here, or, said to save over what is there, the one
+  // that is there now, which is read again for that. So what is asked here cannot land later over something newer.
+  let old = shown.bytes
+  if (over) {
+    const now = await fetchFile(shown.m, { path: shown.info.path, sid: shown.home?.sid }, { still })
+    if (!now) return
+    if (now.error || !now.info.exact || now.info.kind !== 'file' || now.info.path !== shown.info.path) {
+      busy(false)
+      return fileNote(now.error ?? `${shown.info.name} is no longer where it was on ${machineName(shown.m)}, so it was not saved.`, { error: true })
+    }
+    old = now.bytes
+  }
+  const r = await putFile(shown.m, bytes, { path: shown.info.path, sid: shown.home?.sid, was: await shaOf(old) })
+  if (!still()) return
+  busy(false)
+  if (!r.ok) {
+    const changed = /has changed on this machine since it was opened/.test(r.error)
+    return fileNote(changed ? `${shown.info.name} has changed on ${machineName(shown.m)} since you opened it, so it was not saved. Saving over it undoes what changed there.` : r.error, {
+      error: true,
+      more: changed ? [h('button', { type: 'button', class: 'file-act file-over', onclick: () => saveFile({ over: true }) }, 'Save over it')] : [],
+    })
+  }
+  // (shown again as it is now: what is there is what was typed here)
+  showFile({ ...shown.info, size: bytes.length, exact: true, others: [], line: undefined, to: undefined }, bytes, shown)
+  fileNote(`Saved to ${machineName(shown.m)}.`)
+}
+el('file-write').addEventListener('click', () => saveFile())
+
+// A file from this device, put in the open session's folder on its computer: under its own
+// name, or beside a file that has that name already. Nothing is said of it to Claude.
+el('upload-open').addEventListener('click', () => el('upload-pick').click())
+el('upload-pick').addEventListener('change', (ev) => {
+  const files = [...ev.target.files]
+  ev.target.value = ''
+  uploadToFolder(files)
+})
+async function uploadToFolder(files) {
+  const home = fileHome()
+  const m = home && app.machines.get(home.mid)
+  const button = el('upload-open')
+  if (!files.length || !m || button.disabled) return
+  const says = button.querySelector('.mark-short')
+  const [short, words] = [says.textContent, button.querySelector('.mark-words').textContent]
+  const label = (text) => {
+    says.textContent = text
+    button.querySelector('.mark-words').textContent = text === short ? words : text
+  }
+  button.disabled = true
+  const put = []
+  const not = []
+  for (const [i, file] of files.entries()) {
+    const which = files.length > 1 ? ` ${i + 1} of ${files.length}` : ''
+    label(`Uploading${which}…`)
+    const bytes = await file.arrayBuffer().then((b) => new Uint8Array(b)).catch(() => null)
+    const r = bytes ? await putFile(m, bytes, { name: file.name, into: 'folder', cwd: home.cwd, sid: home.sid }, { onProgress: (f) => label(`Uploading${which}… ${Math.round(f * 100)}%`) }) : { ok: false, error: 'It could not be read on this device.' }
+    if (r.ok) put.push(r.file.path)
+    else not.push(`${file.name}: ${r.error}`)
+  }
+  button.disabled = false
+  label(short)
+  renderStar()
+  const title = !put.length ? 'Not uploaded' : put.length === 1 ? `${lastPart(put[0])} is on ${machineName(m)}` : `${put.length} files are on ${machineName(m)}`
+  tell(title, [...put, ...(put.length && not.length ? ['Not uploaded:'] : []), ...not])
 }
 
 // A picture, fitted to the box's width. One that is wider than that is drawn smaller than
@@ -5691,7 +5915,7 @@ function textLines(text, info) {
   // (how wide the numbers are: set on the node, since the page's policy takes no style written as an attribute)
   pre.style.setProperty('--digits', String(Math.min(lines.length, FILE_LINES)).length)
   if (lines.length <= FILE_LINES) return pre
-  return h('div', null, pre, h('p', { class: 'file-plain' }, `The first ${FILE_LINES.toLocaleString()} of its ${lines.length.toLocaleString()} lines are shown. Save keeps all of it on this device.`))
+  return h('div', null, pre, h('p', { class: 'file-plain' }, `The first ${FILE_LINES.toLocaleString()} of its ${lines.length.toLocaleString()} lines are shown. Download keeps all of it on this device.`))
 }
 
 // A folder: what is in it, each a link to it
@@ -5814,7 +6038,7 @@ async function send() {
   const m = s?.ended ? app.machines.get(s.machine) : null
   const mode = m ? resumeMode(m, s) : undefined
   const waiting = m ? `starting on ${machineName(m)}…` : s?.online ? 'sending…' : 'waiting for the session to reconnect…'
-  const node = userNode([text], { note: app.uploading ? 'uploading the photo…' : waiting, pending: true })
+  const node = userNode([text], { note: app.uploading ? (app.attachments.some((p) => p.sid === sid && p.file && !p.id) ? 'uploading the file…' : 'uploading the photo…') : waiting, pending: true })
   const entry = { text, node }
   app.pending.push(entry)
   tail()
@@ -5822,22 +6046,25 @@ async function send() {
   el('input').value = ''
   autosize()
   keepDraft()
-  // Photos still on their way up go with this reply
+  // Photos and files still on their way up go with this reply
   await app.uploads
-  const photos = app.attachments.filter((p) => p.sid === sid && p.id)
-  app.attachments = app.attachments.filter((p) => !photos.includes(p))
+  const ready = app.attachments.filter((p) => p.sid === sid && p.id)
+  app.attachments = app.attachments.filter((p) => !ready.includes(p))
+  const photos = ready.filter((p) => !p.file)
+  const files = ready.filter((p) => p.file)
   renderChips()
-  node.querySelector('.bubble').append(...photos.map((p) => thumb(p.name, p.url)))
+  node.querySelector('.bubble').append(...photos.map((p) => thumb(p.name, p.url)), ...files.map((p) => sentFile(JSON.stringify(p.path), fileSize(p.size))))
   node.querySelector('.from').textContent = waiting
-  if (!text && !photos.length) {
-    // The only photo failed to upload: there's nothing left to send
+  if (!text && !ready.length) {
+    // The only photo or file failed to upload: there's nothing left to send
     node.remove()
     app.pending = app.pending.filter((p) => p !== entry)
     return
   }
-  // (the reply is signed here, with its photos' notes: what is typed here goes nowhere in the open, and where this
-  // device cannot sign it, it is not sent)
-  const plain = [text || 'See the attached photo.', ...photos.map(photoNote)].join('\n\n').trim()
+  // (the reply is signed here, with its photos' notes and where its files were put: what is typed here goes nowhere in
+  // the open, and where this device cannot sign it, it is not sent)
+  entry.said = !files.length ? 'See the attached photo.' : photos.length || files.length > 1 ? 'See what is attached.' : 'See the attached file.'
+  const plain = [text || entry.said, ...photos.map(photoNote), ...files.map(fileNoteOf)].join('\n\n').trim()
   const to = app.sessions.get(sid) ?? s
   const order = await promptOrder(sid, to?.machine, !!(to?.ended || to?.hosted), { text: plain, mode })
   if (!order) {
@@ -5897,7 +6124,14 @@ document.addEventListener('paste', (ev) => {
   el('input').focus()
 })
 
-// Image files dragged onto the chat
+// Any file, picked beside the photos' button: put on the session's computer, where the reply says it is
+el('attach-file').addEventListener('click', () => el('file-any').click())
+el('file-any').addEventListener('change', (ev) => {
+  attachAny([...ev.target.files])
+  ev.target.value = ''
+})
+
+// Files dragged onto the chat: an image goes as a photo, and anything else as a file, where the session's computer takes them
 el('chat').addEventListener('dragover', (ev) => {
   if (!canAttach() || !ev.dataTransfer?.types.includes('Files')) return
   ev.preventDefault()
@@ -5912,6 +6146,7 @@ el('chat').addEventListener('drop', (ev) => {
   if (!canAttach() || !ev.dataTransfer?.types.includes('Files')) return
   ev.preventDefault()
   attachFiles(imageFiles(ev.dataTransfer))
+  if (!el('attach-file').hidden) attachAny([...ev.dataTransfer.files].filter((f) => !f.type.startsWith('image/')))
 })
 
 function canAttach() {
@@ -5946,7 +6181,40 @@ function attachFiles(files) {
   }
 }
 
-// What a reply says of a photo, for Claude to fetch it by
+// A file of any kind, for Claude: put among the uploads of the session's folder on its computer as it is picked, and
+// sent with the next reply, which says where it is
+function attachAny(files) {
+  const sid = app.current
+  for (const file of files) {
+    app.uploading++
+    app.uploads = app.uploads.then(() => uploadFile(sid, file))
+  }
+}
+async function uploadFile(sid, file) {
+  const entry = { sid, file: true, id: null, name: file.name || 'file', size: file.size, path: '', sent: 0 }
+  try {
+    const s = app.sessions.get(sid)
+    const m = s && app.machines.get(s.machine)
+    if (!putsFiles({ mid: s?.machine, cwd: s?.cwd })) throw new Error("this session's computer takes no files")
+    if (app.current === sid) {
+      app.attachments.push(entry)
+      renderChips()
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer().catch(() => Promise.reject(new Error('it could not be read on this device'))))
+    const r = await putFile(m, bytes, { name: entry.name, into: 'uploads', cwd: s.cwd, sid }, { onProgress: (f) => ((entry.sent = f), renderChips()) })
+    if (!r.ok) throw new Error(r.error)
+    Object.assign(entry, { id: r.file.path, path: r.file.path, name: r.file.name, size: r.file.size })
+  } catch (err) {
+    app.attachments = app.attachments.filter((p) => p !== entry)
+    tell('Could not attach ' + entry.name, sentence(String(err.message ?? err)))
+  } finally {
+    app.uploading--
+    renderChips()
+  }
+}
+
+// What a reply says of a photo, for Claude to fetch it by; and of a file, which is where it says
+const fileNoteOf = (p) => `[Attached file: ${JSON.stringify(p.path)} (${fileSize(p.size)}). The user sent it from the ManyClaws page, and it is on this computer at that path: read it there.]`
 const photoNote = (p) => `[Attachment ${p.id}: ${p.name} (${p.type}). Call the view_attachment tool with id "${p.id}" to see it.]`
 
 async function upload(sid, file) {
@@ -6020,8 +6288,8 @@ function renderChips() {
     ...mine.map((p) =>
       h(
         'div',
-        { class: 'chip-photo' + (p.id ? '' : ' uploading'), title: p.id ? p.name : 'Uploading ' + p.name + '…' },
-        h('img', { src: p.url, alt: p.name }),
+        { class: (p.file ? 'chip-photo chip-file' : 'chip-photo') + (p.id ? '' : ' uploading'), title: p.id ? (p.file ? p.path : p.name) : 'Uploading ' + p.name + '…' },
+        p.file ? h('span', { class: 'chip-file-says' }, h('span', { class: 'chip-file-name' }, p.name), h('span', { class: 'chip-file-size' }, p.id ? fileSize(p.size) : p.sent ? `${Math.round(p.sent * 100)}%` : 'uploading…')) : h('img', { src: p.url, alt: p.name }),
         h(
           'button',
           {
@@ -6124,7 +6392,7 @@ function pinNow() {
     break
   }
   // (nothing above the first row to belong to: a chat that isn't a window onto a longer one, at its top)
-  if (text !== null) text = text.replace(ATTACHMENT_NOTE, ' [photo]').trim()
+  if (text !== null) text = withoutNotes(text, ' [photo]', ' [file]').trim()
   bar.hidden = !text
   if (!text || bar.dataset.text === text) return
   bar.dataset.text = text

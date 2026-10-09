@@ -94,8 +94,9 @@ export function configure(opts, { home = HOME, env = process.env } = {}) {
   const spawn = folders(opts.spawn)
   config.spawn = { ...(config.spawn ?? {}), enabled: spawn.length > 0, folders: spawn }
   if (opts.mode?.length) config.spawn.modes = opts.mode
-  // The folders a file may be opened from, where they are not the ones sessions are started in (`"files": false`, written
-  // there by hand, opens none)
+  // The folders a file may be opened from, where they are not the ones sessions are started in (`"files": false`,
+  // written there by hand, opens none). Files are put into the folders sessions are started in, and into these as
+  // well only where `"upload": true` is written there by hand; `"upload": false` has none put anywhere.
   if (folders(opts.files).length) config.files = folders(opts.files)
   else if (config.files !== false) delete config.files
   if (opts.relay) config.relay = { port: RELAY_PORT, secret: config.relay?.secret ?? crypto.randomBytes(24).toString('hex') }

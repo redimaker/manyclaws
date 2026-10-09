@@ -13,12 +13,12 @@ import { Indexer } from './indexer.mjs'
 import { Transcript } from './transcript.mjs'
 import { Host, HostError, CARRY_MAX } from './host.mjs'
 import { Cswap } from './cswap.mjs'
-import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused } from './seal.mjs'
+import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused, WIRE } from './seal.mjs'
 import { historyRows } from './rows.mjs'
-import { find as findFile, read as readFile, FileError, fileRoots } from './files.mjs'
+import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, FILE_MAX } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '5.1.4'
+export const VERSION = '5.2.0'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
@@ -66,6 +66,29 @@ const CHAT_LEAD =
 const CARRY_PART = 2 * 1024 * 1024
 const CARRY_MS = 10 * 60_000
 const FILES_HELD = 4 // files held at once for their later pieces (see file.read)
+const WRITE_ASKED_MS = 5 * 60_000 // how long after it was asked a file is still written: what was held back on its way is not written later
+
+// A file's bytes, sealed and opened as seal.mjs seals and opens bytes (`MCS1 | iv | ciphertext | tag`, AES-256-GCM
+// under the account's key), by this machine's own AES. seal.mjs is written to run anywhere, in plain JavaScript, and
+// takes a second for every few megabytes, in which the agent hears nothing and the sessions it runs wait: a file of
+// 16 MB held it still for a quarter of a minute on a busy machine. This takes it in a blink. `key`: the key's 32 bytes.
+function sealFile(bytes, key) {
+  const iv = crypto.randomBytes(12)
+  const c = crypto.createCipheriv('aes-256-gcm', key, iv)
+  c.setAAD(WIRE.bytesAad)
+  return Buffer.concat([Buffer.from(WIRE.bytes), iv, c.update(bytes), c.final(), c.getAuthTag()])
+}
+function openFile(packed, key) {
+  if (!isSealedBytes(packed)) return null
+  try {
+    const d = crypto.createDecipheriv('aes-256-gcm', key, packed.subarray(4, 16))
+    d.setAAD(WIRE.bytesAad)
+    d.setAuthTag(packed.subarray(packed.length - 16))
+    return Buffer.concat([d.update(packed.subarray(16, packed.length - 16)), d.final()])
+  } catch {
+    return null
+  }
+}
 
 // Whether anything in what arrived is still sealed: this machine has no key for it, or not the right one
 const unopened = (value, depth = 0) => (typeof value === 'string' ? isSealed(value) || value === UNOPENED : !!value && typeof value === 'object' && depth < 8 && Object.values(value).some((v) => unopened(v, depth + 1)))
@@ -95,12 +118,15 @@ const OPEN_ANSWER = {
   // (a file is sealed where it is read: what it is, its name for its later pieces, and its bytes)
   'file.read': ['id', 'file', 'size', 'parts', 'data'],
   'file.part': ['data'],
+  // (and one written here says what it was written as, sealed; or, of one that comes in pieces, which piece is next)
+  'file.write': ['id', 'file', 'part'],
+  'file.write.part': ['file', 'part'],
 }
 // What a call came to, for the server: what it passes on by, and the rest sealed whole
 function closed(method, value, key) {
   const open = Object.fromEntries((OPEN_ANSWER[method] ?? []).filter((k) => value?.[k] !== undefined).map((k) => [k, value[k]]))
   // (a transcript's piece, or a file's, is its own sealed bytes: there is nothing beside it to seal)
-  if (method.endsWith('.part') || method === 'file.read') return open
+  if (method.endsWith('.part') || method === 'file.read' || method === 'file.write') return open
   return { ...open, r: seal(value ?? null, key) }
 }
 // What this machine takes as it came, in the open, and of it these and nothing else: a
@@ -150,10 +176,20 @@ export async function run(config, flags = {}) {
   // (as those folders really are on disk: a file is one of theirs by where it really is, links followed. files.mjs)
   const filesFrom = config.files === false ? null : fileRoots(Array.isArray(config.files) ? config.files : host.spawnConfig.enabled ? host.spawnConfig.folders : [])
   const servesFiles = !!filesFrom?.length
+  // And files are taken from the account's own devices: one sent to a session's folder, or one that was opened from here
+  // and is written back changed. Into the folders sessions may be started in, where those devices can have anything
+  // done already by asking a session; and into the folders named only for opening files (`"files": [...]`) where the
+  // machine's owner says so too, `"upload": true`: a machine set up to be read is not written to because its agent
+  // was brought up to date. `"upload": false` takes none anywhere, and so does a machine that opens none.
+  const takesInto = config.upload === false || !servesFiles ? null : fileRoots([...(host.spawnConfig.enabled ? host.spawnConfig.folders : []), ...(config.upload === true && Array.isArray(config.files) ? config.files : [])])
+  const takesFiles = !!takesInto?.length
+  const ownHome = process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws')
   const transcripts = new Map() // path -> Transcript, most recently used last
   // Transcripts on their way to or from another machine, held for the minutes that takes
   const outgoing = new Map() // id -> { bytes, at }
   const incoming = new Map() // id -> { parts, size, at }
+  // Files on their way here, in pieces: each was signed for before any of it was held
+  const arriving = new Map() // id -> { want, parts, size, at }
   const held = (map) => {
     for (const [id, x] of map) if (Date.now() - x.at > CARRY_MS) map.delete(id)
     return map
@@ -217,6 +253,32 @@ export async function run(config, flags = {}) {
     transcripts.set(file, t)
     if (transcripts.size > OPEN_TRANSCRIPTS) transcripts.delete(transcripts.keys().next().value)
     return t.sync()
+  }
+
+  // A file that has arrived whole (`pieces`, sealed bytes): opened, held against what its order said of it, and written
+  const mb = (n) => (n / 1024 / 1024).toFixed(1)
+  const pieceOf = (data, parts) => {
+    const piece = Buffer.from(typeof data === 'string' ? data : '', 'base64')
+    if (parts && (!piece.length || piece.length > CARRY_PART)) throw new HostError('a part of the file did not arrive')
+    return parts ? piece : null
+  }
+  const written = async (want, pieces) => {
+    const packed = Buffer.concat(pieces)
+    // (a file is taken sealed, by a device that has the account's key, or not at all)
+    const bytes = want.size ? openFile(packed, keys.key) : Buffer.alloc(0)
+    // (its order opened with this machine's key, so bytes that do not are not what the device that signed it sealed)
+    if (want.size && !isSealedBytes(packed)) throw new HostError('the file did not come sealed, so nothing was written')
+    if (!bytes || bytes.length !== want.size || digest(bytes) !== want.sha) throw new HostError('what arrived is not the file that was signed for, so nothing was written')
+    const made = await writeFile(want.where, bytes, { was: want.was })
+    // (with the asking's own mark: an answer to another asking, kept and handed back in this one's place, is seen to be)
+    return { file: seal({ ...made, sep: path.sep, ask: want.ask }, sealKey) }
+  }
+  // (why not, where that is to be said: what else went wrong may name what is on this machine, which is for the log here)
+  const notWritten = (err) => {
+    if (err instanceof HostError) return err
+    if (err instanceof FileError) return new HostError(err.message)
+    log('file.write failed:', err?.stack ?? err)
+    return new HostError('that file could not be written')
   }
 
   const methods = {
@@ -289,7 +351,7 @@ export async function run(config, flags = {}) {
         const file = seal({ ...where, name: path.basename(found.path), sep: path.sep }, sealKey)
         // (an empty file is nothing to seal: that it is empty is said with the rest of what it is)
         if (bytes && !bytes.length) return { file, size: 0, parts: 0, data: '' }
-        const packed = Buffer.from(sealBytes(new Uint8Array(bytes ?? Buffer.from(JSON.stringify(listing))), sealKey))
+        const packed = sealFile(bytes ?? Buffer.from(JSON.stringify(listing)), keys.key)
         const id = crypto.randomUUID()
         const parts = Math.ceil(packed.length / CARRY_PART)
         if (parts > 1) {
@@ -314,6 +376,57 @@ export async function run(config, flags = {}) {
       out.at = Date.now()
       if (part === parts - 1) outgoing.delete(id)
       return { data: out.bytes.subarray(part * CARRY_PART, (part + 1) * CARRY_PART).toString('base64') }
+    },
+    // A file written on this machine (files.mjs): one a device of the account's sends to a
+    // session's folder or to that folder's uploads, or one that was opened from here and
+    // comes back changed. It is taken only on an order (see ORDERED), which says where it
+    // goes, how long it is and the SHA-256 of what is in it: so what is written is what
+    // that device signed for, and bytes handed over in their place are not written,
+    // sealed with the account's key or not. Where it is to go is settled before any of it
+    // is held. Its first piece comes with the order, and one of more pieces hands the rest
+    // over after, as it is asked for them.
+    'file.write': async ({ path: target, name, into, cwd, sid, size, sha, was, parts, ask, data } = {}) => {
+      if (!takesFiles) throw new HostError(config.upload === false ? 'taking files is turned off on this machine (agent.json, "upload")' : 'this machine takes files only into the folders sessions may be started in (the installer\'s --spawn), and none are named; its agent.json can have them taken into the folders it opens files from as well ("upload": true)')
+      if (!Number.isInteger(size) || size < 0 || typeof sha !== 'string' || sha.length > 64 || !Number.isInteger(parts)) throw new HostError('what that file is was not said')
+      // (a file that was opened is written back over what was read, and over nothing else: which that was has to be said)
+      if (target && (typeof was !== 'string' || !was)) throw new HostError('which file that takes the place of was not said')
+      if (size > FILE_MAX) throw new HostError(`that file is too large to take: ${mb(size)} MB, and the most is ${mb(FILE_MAX)}`)
+      // (sealed, it is 32 bytes longer than it is; and an empty one is nothing to seal, and comes as nothing)
+      if (parts !== (size ? Math.ceil((size + 32) / CARRY_PART) : 0)) throw new HostError('what that file is was not said')
+      // (`ask`: what the device that asked will know the answer to this by, said back sealed with what was written)
+      const want = { size, sha, was: typeof was === 'string' ? was : undefined, parts, ask: typeof ask === 'string' && ask.length <= 64 ? ask : undefined }
+      try {
+        want.where = await placeFile(target ? { path: target } : { name, into }, { cwd: typeof cwd === 'string' && cwd ? cwd : (store.session(String(sid ?? ''))?.cwd ?? ''), within: takesInto, own: ownHome })
+        const piece = pieceOf(data, parts)
+        if (parts <= 1) return await written(want, piece ? [piece] : [])
+        const waiting = [...held(arriving)]
+        for (const [old] of waiting.slice(0, Math.max(0, waiting.length - FILES_HELD + 1))) arriving.delete(old)
+        const id = crypto.randomUUID()
+        arriving.set(id, { want, parts: [piece], size: piece.length, at: Date.now() })
+        return { id: seal(id, sealKey), part: 1 }
+      } catch (err) {
+        throw notWritten(err)
+      }
+    },
+    'file.write.part': async ({ id, part, data } = {}) => {
+      const got = held(arriving).get(id)
+      if (!got) throw new HostError('that file is no longer held here: send it again')
+      if (part !== got.parts.length) throw new HostError('a part of the file arrived out of turn')
+      const piece = pieceOf(data, got.want.parts)
+      got.size += piece.length
+      got.at = Date.now()
+      if (got.size > got.want.size + 32) {
+        arriving.delete(id)
+        throw new HostError('more arrived than the file that was signed for, so nothing was written')
+      }
+      got.parts.push(piece)
+      if (got.parts.length < got.want.parts) return { part: got.parts.length }
+      arriving.delete(id)
+      try {
+        return await written(got.want, got.parts)
+      } catch (err) {
+        throw notWritten(err)
+      }
     },
     'session.import.part': ({ id, part, data } = {}) => {
       if (typeof id !== 'string' || !id || id.length > 64) throw new HostError('whose part this is was not said')
@@ -366,8 +479,9 @@ export async function run(config, flags = {}) {
     const about = {
       roots: config.roots,
       spawn: host.spawnConfig.enabled ? { folders: host.spawnConfig.folders, modes: host.spawnConfig.modes } : null,
-      // (the folders a file may be opened from)
+      // (the folders a file may be opened from, and the ones a file is taken into)
       files: filesFrom ?? [],
+      upload: takesInto ?? [],
       stats: { ...store.stats(), pending: indexer.pending.length, bytesLeft: Math.max(0, indexer.bytesLeft) },
     }
     // What the machine is called and what its agent can do are the account's to see as a
@@ -380,7 +494,7 @@ export async function run(config, flags = {}) {
       ...machine,
       agent: VERSION,
       node: process.version,
-      capabilities: ['sessions', 'search', ...(host.spawnConfig.enabled ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), 'sealed', 'orders'],
+      capabilities: ['sessions', 'search', ...(host.spawnConfig.enabled ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
       sealed: 3,
       spawn: !!about.spawn,
       card: seal(about, sealKey),
@@ -548,6 +662,21 @@ export async function run(config, flags = {}) {
       if (!isSealed(raw.id)) throw new HostError('which file that is did not come sealed')
       return { id: a.id, part: a.part }
     },
+    // A file is written for whoever signed for it: where it goes, how long it is and what is in it (its SHA-256) are
+    // the order's to say, and of what came beside the order only the bytes themselves are taken, which are held to that
+    // It is written only while it is newly asked: an order is good for an hour, and one to write that was held back on
+    // its way would land over whatever the file had become since.
+    'file.write': (a) => {
+      const o = take(a.order, machine.id, ['write'])
+      if (Date.now() - o.at > WRITE_ASKED_MS) throw new HostError('this machine writes a file only where that was asked in the last five minutes, and by the clock of the device that asked this was longer ago: ask again')
+      const w = o.with
+      return { path: w.path, name: w.name, into: w.into, cwd: w.cwd, sid: w.sid, size: w.size, sha: w.sha, was: w.was, parts: w.parts, ask: w.ask, data: a.data }
+    },
+    // (and the rest of one comes from whoever was told, sealed, which it is)
+    'file.write.part': (a, raw) => {
+      if (!isSealed(raw.id)) throw new HostError('which file that is did not come sealed')
+      return { id: a.id, part: a.part, data: a.data }
+    },
   }
 
   // ---- The server
@@ -682,11 +811,13 @@ export async function run(config, flags = {}) {
         taken = null
         const args = asked(method, c.args)
         const order = taken
-        // (what did not run after all may be asked again with the order it had: the server falls back from one way of making a session to another)
+        // (what did not run after all may be asked again with the order it had: the server falls back from one way of making a session to another.
+        // Not an order to write a file: that is good for one try, and one that was refused, since the file had changed
+        // here or what came was not the file, is not run later by whoever kept it. The page signs each try anew.)
         const value = await Promise.resolve()
           .then(() => fn(args))
           .catch((err) => {
-            if (order) orders.forget(order)
+            if (order && method !== 'file.write') orders.forget(order)
             throw err
           })
         body = { machine: machine.id, id: c.id, ok: true, value: closed(method, value, sealKey) }
