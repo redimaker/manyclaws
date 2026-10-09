@@ -34,6 +34,7 @@ These are the owner's standing instructions (2026-10-08). They have no exception
   `MANYCLAWS_RELEASE_KEY=<the release key> node release.mjs --sign`
 
   and the two files are committed with the change. `node release.mjs --check` says whether it is done. The key is not here: the server's repository says where it is kept, and who may use it.
+- **A change to the plugin is not pushed to main without the owner's say.** His standing instruction (2026-10-09): "Do not automatically publish a change that contains a fix in the plugin." A change that touches anything under `mod/` is finished, tested and committed on a branch, and waits there, with whatever else belongs to the same change, until he has said so for that change.
 - The keys a release may be signed by are `SIGNERS` in `agent/install.sh`. A key is replaced by a release, signed with the old one, whose installer names the new one: never by a release signed with a key no installed agent knows.
 - A change that the server has to match (what is sent, what is refused as too old) is pushed here and deployed there together: the server's repository says how.
 
