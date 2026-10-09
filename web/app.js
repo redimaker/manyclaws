@@ -2080,6 +2080,17 @@ const whereLabel = (name, mid) => {
 // Things said of a session on one line, a dot between each (one of them may be such a label)
 const dotted = (...parts) => parts.filter(Boolean).flatMap((part, i) => (i ? [' · ', part] : [part]))
 
+// What started a session that is running, for its tile: the computer's own agent, which runs it itself (one started or
+// taken up again from this page: the ones Exit ends), or its person, there, in a terminal or an editor. A word, with
+// the rest for whoever points at it. Of a session that is not running there is nothing to say.
+function startedBy(s) {
+  if (!s || s.ended || !s.online) return null
+  if (s.hosted) return h('span', { class: 'row-by agent', title: 'Started from this page: the ManyClaws agent on its computer runs it, and Exit ends it' }, 'agent')
+  const e = s.entrypoint ?? ''
+  const [word, says] = /vscode/.test(e) ? ['VS Code', 'in VS Code'] : /desktop/.test(e) ? ['Desktop app', 'in the Desktop app'] : s.interactive === false ? ['headless', 'by a script or claude -p, with nobody at it'] : ['terminal', 'in a terminal']
+  return h('span', { class: 'row-by', title: 'Started on its computer, ' + says }, word)
+}
+
 // How many subagents a session has running, for a row of the list
 const agentsMark = (s) => (s?.agents?.length ? h('span', { class: 'agents-mark', title: s.agents.map(agentLabel).join('\n') }, count(s.agents.length, 'subagent')) : null)
 const agentLabel = (a) => [a.description || a.type || 'subagent', a.description && a.type ? `(${a.type})` : '', a.background ? 'in the background' : ''].filter(Boolean).join(' ')
@@ -3071,8 +3082,8 @@ function typedHere(sid, rows) {
 // heard from. What it is waiting for is always said.
 function renderRow(s, { favorite = false, due = false } = {}) {
   const tile = app.tile
-  // The project it's in, and the machine: what it's about is its title, or the name it was given here
-  const sub = tile.where ? dotted(s.project !== s.title ? s.project : null, whereLabel(whereOf(s), s.machine)) : []
+  // The project it's in, the machine, and what started it: what it's about is its title, or the name it was given here
+  const sub = tile.where ? dotted(s.project !== s.title ? s.project : null, whereLabel(whereOf(s), s.machine), startedBy(s)) : []
   const mark = markOf(s.id)
   const soon = !due && remindSoon(mark)
   const name = nameOf(s)
@@ -3152,6 +3163,9 @@ const TILE_SAMPLE = {
   title: 'Fix the flaky login test',
   project: 'ios-app',
   host: 'Mac Studio',
+  // (running, and started there in a terminal: its tile says so with the project and the computer)
+  online: true,
+  entrypoint: 'cli',
   lastPrompt: 'Find out why the login test is flaky on CI and fix it. Run the suite fifty times before you call it done, and tell me what the cause was.',
   lastReply: 'Reproduced it: the test taps before the keyboard has finished animating. Waiting on the field’s focus fixes it, and fifty runs in a row pass now where one in six failed before.',
 }
