@@ -18,7 +18,7 @@ import { historyRows } from './rows.mjs'
 import { find as findFile, read as readFile, FileError, fileRoots } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '5.1.1'
+export const VERSION = '5.1.2'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
@@ -136,6 +136,7 @@ export async function run(config, flags = {}) {
     platform: `${os.type()} ${os.arch()}`,
   }
   let announce = () => {}
+  let tokenRefused = false // the server would not take this machine's token (401): the plugin's is taken in its place
   const host = new Host(config, { store, log, onChange: () => announce() })
   const cswap = new Cswap(config, { fail: (text) => new HostError(text) })
   // What it signs in with and what it seals with. With all three it is this account's
@@ -567,6 +568,8 @@ export async function run(config, flags = {}) {
         try {
           const r = await post('/api/machine/hello', { machine: describe() })
           if (!r.ok) log('hello refused:', r.status, r.text.slice(0, 400))
+          // (a token the server will not take is one to be replaced by the plugin's: see takeFromPlugin)
+          tokenRefused = r.status === 401
         } catch (err) {
           log('server unreachable:', err.message, err.cause?.message ?? '')
         }
@@ -753,7 +756,7 @@ export async function run(config, flags = {}) {
   setInterval(() => {
     let changed = []
     try {
-      changed = takeFromPlugin()
+      changed = takeFromPlugin({ tokenStands: ready && !tokenRefused })
     } catch (err) {
       log('what the plugin left could not be taken:', err.message)
     }

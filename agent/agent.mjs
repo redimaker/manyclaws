@@ -151,7 +151,15 @@ export async function keyOfPassphrase(server, token, given) {
 // gone. Only what is whole is taken, and only from a plugin that reports to the server
 // this machine does. Answers what changed ('token', 'key'), for the service to start
 // again with; nothing where the note said nothing new, or there was none.
-export function takeFromPlugin({ home = HOME, env = process.env } = {}) {
+//
+// `tokenStands`: the agent has a token and the server has not refused it, so another
+// token is not put in its place. A token only signs the machine in, and any of the
+// account's does; sessions on one computer can hold different ones (one started before
+// the plugin was given a new token, and one after), and each would hand the agent its
+// own every half minute, the agent starting again each time. A key that differs is
+// another passphrase's and is always taken, and so is a token where the agent has none
+// or the server has refused the one it has.
+export function takeFromPlugin({ home = HOME, env = process.env, tokenStands = false } = {}) {
   const note = path.join(home, 'from-plugin.json')
   let given
   try {
@@ -174,7 +182,7 @@ export function takeFromPlugin({ home = HOME, env = process.env } = {}) {
   // what the plugin has: the plugin leaves a note only where the fingerprint here is not of its own two)
   const has = secretsOf(config, { env })
   const changed = []
-  if (typeof given.token === 'string' && /^\S{8,400}$/.test(given.token) && given.token !== has.token) {
+  if (typeof given.token === 'string' && /^\S{8,400}$/.test(given.token) && given.token !== has.token && !(tokenStands && has.token)) {
     has.token = given.token
     changed.push('token')
   }
@@ -346,7 +354,8 @@ async function main() {
   // (what the plugin left for this machine while the agent was not running is taken first, and what it signs in and
   // seals with is put where this machine keeps it)
   if (command === 'run') {
-    takeFromPlugin()
+    // (a token it has stands until the server refuses it, which it has yet to be asked: see takeFromPlugin)
+    takeFromPlugin({ tokenStands: true })
     const said = []
     try {
       said.push(settle(path.join(HOME, 'agent.json')))
