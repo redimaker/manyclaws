@@ -952,11 +952,14 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .md > :last-child { margin-bottom: 0; }
 .md p { white-space: pre-wrap; margin: .1em 0 .2em; }
 .md ul, .md ol { padding-inline-start: 2em; }
+/* (a code block and, over its corner, its button: named alone, so that the first and the last thing in a reply
+   still lose their margin, as the rules above have it) */
+.code-block { position: relative; margin: 8px 0; }
 .md pre {
   background: var(--code-bg);
   border-radius: 4px;
   padding: 8px;
-  margin: 8px 0;
+  margin: 0;
   max-width: 100%;
   overflow-x: auto;
   white-space: pre;
@@ -970,6 +973,25 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
   word-break: break-word;
 }
 .md pre code { color: inherit; background: none; padding: 0; }
+/* At a code block's top right corner, the button that copies what is in it (app.js, copyBlock), as VS Code has one
+   there: in sight while the block is pointed at or the keys are on it, and for the moment it says it has copied.
+   A reply still being written has none: it is drawn again with every word of it that comes. */
+.code-copy { position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--input-border); border-radius: 4px; background: var(--bg); color: var(--muted); opacity: 0; user-select: none; -webkit-user-select: none; }
+.code-copy svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.code-copy:hover { color: var(--text); }
+.code-copy:focus-visible, .code-copy.copied { opacity: 1; }
+.code-copy path + path, .code-copy.copied path:first-child { display: none; }
+.code-copy.copied path + path { display: inline; }
+.streaming .code-copy { display: none; }
+@media (hover: hover) {
+  .code-block:hover > .code-copy { opacity: 1; }
+}
+/* (nothing points with a finger: it is there to be tapped, whole, so that a line it is over does not show through
+   it; and the block's lines end short of it, so that one scrolled to its end is not left with that end under it) */
+@media (hover: none) {
+  .code-copy { width: 30px; height: 30px; opacity: 1; }
+  .md pre code { display: inline-block; padding-right: 40px; }
+}
 .md a, .md .ref { color: var(--link); text-decoration: none; }
 .md a:hover { text-decoration: underline; }
 .md table { display: block; width: max-content; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 8px 0; }
@@ -1395,7 +1417,18 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 [data-view="terminal"] .md li > :is(ul, ol) { margin: 0; }
 [data-view="terminal"] .md li.task { margin-left: 0; }
 [data-view="terminal"] .md pre { background: none; border-radius: 0; padding: 0; white-space: pre-wrap; overflow: visible; }
-[data-view="terminal"] .md li > pre { margin: 0; }
+[data-view="terminal"] .md li > .code-block { margin: 0; }
+/* A code block has no box here and its lines wrap: the button that copies it is one line high, over the end of the
+   block's first line while the block is pointed at. Where nothing points it is always there, and the first line
+   wraps short of it. */
+[data-view="terminal"] .code-copy { top: 0; right: 0; width: calc(3 * var(--cell-w)); height: calc(var(--line) * 1em); border: 0; border-radius: 0; }
+[data-view="terminal"] .code-copy svg { width: 1em; height: 1em; }
+@media (hover: none) {
+  [data-view="terminal"] .code-copy { position: relative; float: right; margin-left: var(--cell-w); }
+  /* (a finger has more to land on than the line's height) */
+  [data-view="terminal"] .code-copy::after { content: ""; position: absolute; inset: -8px -6px; }
+  [data-view="terminal"] .md pre code { display: inline; padding-right: 0; }
+}
 [data-view="terminal"] .md code { background: none; border-radius: 0; padding: 0; font-size: inherit; }
 [data-view="terminal"] .md pre code { color: inherit; }
 [data-view="terminal"] .md th, [data-view="terminal"] .md td { border-color: var(--text); padding: 0 var(--cell-w); }

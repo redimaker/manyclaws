@@ -4339,6 +4339,9 @@ const ICONS = {
   // (the eye in the passphrase's box: open where pressing it shows what is typed, struck through where it hides it)
   eye: 'M2.25 10S5 4.75 10 4.75 17.75 10 17.75 10 15 15.25 10 15.25 2.25 10 2.25 10Zm7.75-2.4a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8Z',
   eyeOff: 'M2.25 10S5 4.75 10 4.75 17.75 10 17.75 10 15 15.25 10 15.25 2.25 10 2.25 10Zm7.75-2.4a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8ZM4 3.5l12 13',
+  // (at the corner of a code block: two sheets, one over the other, and the tick that takes their place once it is copied)
+  copy: 'M5.5 6.5H11A1.5 1.5 0 0 1 12.5 8v7a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 15V8a1.5 1.5 0 0 1 1.5-1.5ZM7.5 6.5V5A1.5 1.5 0 0 1 9 3.5h5.5A1.5 1.5 0 0 1 16 5v7a1.5 1.5 0 0 1-1.5 1.5h-2',
+  copied: 'M4.5 10.5 8 14l7.5-8',
 }
 function icon(name) {
   const NS = 'http://www.w3.org/2000/svg'
@@ -5352,7 +5355,8 @@ function startsBlock(lines, i) {
   return FENCE.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line) || ITEM.test(line) || (line.includes('|') && TABLE_RULE.test(lines[i + 1] ?? ''))
 }
 
-// A code block; one still being written has no closing fence yet
+// A code block; one still being written has no closing fence yet. With it is the button that copies what is in it
+// (copyBlock), before it so that where the block has no box of its own the first line can make room for it
 function fenced(lines, i) {
   const [, indent, marks] = FENCE.exec(lines[i])
   const close = new RegExp('^\\s*' + marks[0] + '{' + marks.length + ',}\\s*$')
@@ -5360,7 +5364,23 @@ function fenced(lines, i) {
   i++
   while (i < lines.length && !close.test(lines[i])) body.push(lines[i++])
   const cut = new RegExp('^\\s{0,' + indent.length + '}')
-  return ['<pre><code>' + escape(body.map((l) => l.replace(cut, '')).join('\n')) + '</code></pre>', i + 1]
+  const copy = `<button type="button" class="code-copy" title="Copy" aria-label="Copy"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="${ICONS.copy}"/><path d="${ICONS.copied}"/></svg></button>`
+  return ['<div class="code-block">' + copy + '<pre><code>' + escape(body.map((l) => l.replace(cut, '')).join('\n')) + '</code></pre></div>', i + 1]
+}
+
+// A code block's button puts what is in the block where it can be pasted from, as the one VS Code shows at a block's
+// corner does, and for a moment is a tick that says so
+const saysCopied = new WeakMap() // a button that says it has copied, and the timer that ends its saying so
+async function copyBlock(button) {
+  await copyText(button.parentNode.querySelector('code').textContent)
+  const say = (word) => {
+    button.title = word
+    button.setAttribute('aria-label', word)
+    button.classList.toggle('copied', word === 'Copied')
+  }
+  say('Copied')
+  clearTimeout(saysCopied.get(button))
+  saysCopied.set(button, setTimeout(() => say('Copy'), 1500))
 }
 
 function tabled(lines, i) {
@@ -5503,6 +5523,8 @@ const filesNear = () => [...new Set([...el('messages').querySelectorAll('.tool-a
 
 document.addEventListener('click', (ev) => {
   if (ev.target.matches?.('.thumb[src]')) return void openPhoto(ev.target)
+  const copy = ev.target.closest?.('.code-copy')
+  if (copy) return void copyBlock(copy)
   const link = ev.target.closest?.('[data-file]')
   if (!link) return
   ev.preventDefault()
