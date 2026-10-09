@@ -18,7 +18,7 @@ import { historyRows } from './rows.mjs'
 import { find as findFile, read as readFile, FileError, fileRoots } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '5.1.0'
+export const VERSION = '5.1.1'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request

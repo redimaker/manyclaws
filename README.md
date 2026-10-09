@@ -112,10 +112,10 @@ It checks the signature on the list the agent was installed by, that the agent's
 The page can be checked by hand, from any computer. Every script and style sheet the page loads is named in its HTML with the hash of the file, and a browser does not run one that is anything else; so the HTML is the one file to compare:
 
 ```
-curl -s https://manyclaws.dev/app | shasum -a 256
+curl -s -H 'Accept: text/html' https://manyclaws.dev/app | shasum -a 256
 ```
 
-against `web/index.html` in `release.json` (the server hands out the same list at `/release.json`, with `/release.json.sig`). The page shows the same hashes under Account, as your browser has the files: that is the page's own word, and a page that had been changed could say anything, so it is there for convenience and the checks above are the ones that count. What neither can see is a server that hands one page to whoever checks and another to you.
+against `web/index.html` in `release.json` (the server hands out the same list at `/release.json`, with `/release.json.sig`). The header asks as a browser asks for a page: a proxy in front of a server that adds a script of its own to pages adds it to what is asked for so, and to nothing else, and `verify` asks both ways for the same reason. The page shows the same hashes under Account, as your browser has the files: that is the page's own word, and a page that had been changed could say anything, so it is there for convenience and the checks above are the ones that count. What neither can see is a server that hands one page to whoever checks and another to you.
 
 What ends up on your computer is these files, so you can also compare them yourself:
 

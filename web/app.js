@@ -7345,13 +7345,25 @@ function codePart() {
     const list = await fetch('/release.json').then((r) => (r.ok ? r.json() : null)).catch(() => null)
     const read = await Promise.all(files.map(async ([name, address]) => ({ name, hash: await kept(address), listed: list?.files?.[name] ?? '' })))
     const same = !!list && read.every((f) => f.hash && f.hash === f.listed)
+    // The page's HTML alone is not the listed file, and is when a script asks for it: it was changed on its way to this
+    // browser as a page, which is what a proxy in front of the server does that adds a script of its own to pages
+    const html = read[0]
+    const others = !!list && read.slice(1).every((f) => f.hash && f.hash === f.listed)
+    const onTheWay =
+      others && html.hash && html.hash !== html.listed
+        ? await fetch(files[0][1], { cache: 'no-store' })
+            .then(async (r) => r.ok && hex(await crypto.subtle.digest('SHA-256', await r.arrayBuffer())) === html.listed)
+            .catch(() => false)
+        : false
     fill(
       box,
       !list
         ? h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'unlisted' }, 'This server did not say which release its page is of, so there is nothing here to hold the files against. Their hashes as this browser has them:')
         : same
           ? h('p', { class: 'guide-status connected', 'data-part': 'code-says', 'data-same': 'yes' }, `✓ The ${read.length} files this page is made of are as release ${list.release} lists them (${list.made}).`)
-          : h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'no' }, `Some of this page’s files are not as release ${list.release} lists them. That is so for a few moments while the server is being brought up to date: load the page again. If it stays so, do not type your passphrase here, and check from outside the page, as below.`),
+          : onTheWay
+            ? h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'html-changed' }, `The page’s HTML reached this browser changed: it is not the file release ${list.release} lists, though the server hands that file to a plain request. Something between the server and this browser adds to pages on their way, as a proxy’s own analytics script is added. This page lets no script from elsewhere run, and every script and style sheet it did run is as listed. It should not be so all the same: whoever runs this server can turn it off there.`)
+            : h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'no' }, `Some of this page’s files are not as release ${list.release} lists them. That is so for a few moments while the server is being brought up to date: load the page again. If it stays so, do not type your passphrase here, and check from outside the page, as below.`),
       ...read.map((f) =>
         h(
           'div',
@@ -7369,8 +7381,8 @@ function codePart() {
     h('p', { 'data-part': 'code-outside' }, 'What is shown above is this page’s own word, and a page that had been changed could say anything. To check from outside it, on a computer that has the ManyClaws agent:'),
     codeBox('node ~/.manyclaws/agent/agent.mjs verify'),
     h('p', null, 'That holds what this server hands out against the signed list, with the key the agent was installed with, and the agent and the plugin on that computer too. Or by hand, anywhere: compare the output of'),
-    codeBox(`curl -s ${origin}/app | shasum -a 256`),
-    h('p', null, 'with web/index.html in ', h('a', { href: origin + '/release.json', target: '_blank', rel: 'noopener' }, 'release.json'), ', and that file with the one in the repository.'),
+    codeBox(`curl -s -H 'Accept: text/html' ${origin}/app | shasum -a 256`),
+    h('p', null, 'with web/index.html in ', h('a', { href: origin + '/release.json', target: '_blank', rel: 'noopener' }, 'release.json'), ', and that file with the one in the repository. (Asked for as a browser asks for a page, which is what the header says: what is added to pages on their way to a browser is added to what is asked for so.)'),
   ]
 }
 

@@ -15,9 +15,12 @@
 //
 // It is a check from outside the page, by code that came signed: a page that had been
 // changed could say anything of itself, and nothing here asks it. What it cannot see is
-// a server that hands this computer one page and a browser another. What a browser does
-// about that itself: the page's HTML names each script and style sheet by its hash, and
-// the browser runs none that is anything else, so the HTML is the one file to compare.
+// a server that hands this computer one page and a browser another. So the page's HTML is
+// asked for twice, plainly and as a browser asks for a page (a proxy in front of a server
+// that adds a script of its own to pages adds it to what is asked for so, and to nothing
+// else): what it can tell apart, it does. What a browser does itself: the page's HTML
+// names each script and style sheet by its hash, and the browser runs none that is
+// anything else, so the HTML is the one file to compare.
 import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -56,6 +59,15 @@ function under(dir, skip = () => false, at = '') {
 
 // Where the server hands out a file of the page's: the page itself at /app, the rest by their names
 const addressOf = (file) => (file === 'web/index.html' ? '/app' : '/' + file.slice(4))
+// How a browser asks for a page: what is added to pages on their way to a browser is added to what is asked for so
+const AS_A_BROWSER = { accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' }
+const hostOf = (address) => {
+  try {
+    return new URL(address).host
+  } catch {
+    return address
+  }
+}
 // What of the page is written per visitor as it is served (the front door, the small print, the guide): not compared
 const WRITTEN_AS_SERVED = new Set(['web/home.html', 'web/legal.html', 'web/setup.html', 'web/setup.md'])
 
@@ -123,8 +135,9 @@ export async function verify({ home, roots = [], server = '', fetched = fetch } 
 
   // ---- The page, as the server hands it out
   if (server && fs.existsSync(signers)) {
-    const get = async (p) => {
-      const r = await fetched(server + p, { cache: 'no-store' }).catch(() => null)
+    const get = async (p, headers = {}) => {
+      // (a server that does not answer is one that handed nothing over: not waited for without end)
+      const r = await fetched(server + p, { cache: 'no-store', headers, signal: AbortSignal.timeout(30_000) }).catch(() => null)
       return r?.ok ? Buffer.from(await r.arrayBuffer()) : null
     }
     const [theirs, sig] = [await get('/release.json'), await get('/release.json.sig')]
@@ -140,6 +153,13 @@ export async function verify({ home, roots = [], server = '', fetched = fetch } 
       }
       if (wrong.length) bad(`the page: ${server} hands out what release ${of.release} does not list: ${wrong.join(', ')}`)
       else good(`the page: release ${of.release} (${of.made}), signed, and the ${files.length} files ${server} hands out are as the list has them`)
+      // The page's HTML once more, asked for as a browser asks for a page
+      const asked = await get('/app', AS_A_BROWSER)
+      if (asked && of.files['web/index.html'] && sha256(asked) !== of.files['web/index.html']) {
+        const plain = (await get('/app'))?.toString('utf8') ?? ''
+        const from = [...new Set([...asked.toString('utf8').matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]).filter((src) => !plain.includes(src)).map(hostOf))]
+        bad(`the page: its HTML is not the listed file when it is asked for as a browser asks for a page: something between ${server} and a browser changes it on the way${from.length ? ` (it adds a script from ${from.join(', ')})` : ''}. The page's own rules keep a script from elsewhere from running, but what a browser is handed is not what was released`)
+      }
     }
   }
   return { ok, lines }
