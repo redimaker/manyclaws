@@ -2190,6 +2190,29 @@ const doneButton = (s) =>
     },
     '✓',
   )
+// On a session's row: the pencil that opens the box its mark is set in, for that session, without opening it.
+// (`key`: the row's own, which the box opens under: a session can have two rows, among the favorites and under
+// its machine. `past`: a row of a machine's list, which is of the session as it is now only while that is reporting.)
+const editButton = (s, key, past = false) =>
+  h(
+    'button',
+    {
+      type: 'button',
+      class: 'row-edit',
+      'aria-haspopup': 'dialog',
+      'aria-expanded': String(app.marking?.row === key),
+      'aria-label': `Name, label, color and reminder for ${markOf(s.id)?.name || s.title || 'this session'}`,
+      title: 'Edit: its name, label, color and reminder',
+      onclick: (ev) => {
+        // (in a row it sits in the row's link, which isn't followed)
+        ev.preventDefault()
+        ev.stopPropagation()
+        // (the session as it is now: the row may have been drawn before it was last heard from)
+        openMarkBox((past && !isReporting(s.id) ? null : app.sessions.get(s.id)) ?? s, key)
+      },
+    },
+    icon('pencil'),
+  )
 
 // Whether this device can put something on a session: it seals what it writes with the
 // account's key, and the server takes it no other way
@@ -2367,6 +2390,8 @@ function drawMarkBox() {
   el('mk-notify-hint').textContent = k.devices === null ? '' : k.devices ? `Sent to ${k.devices === 1 ? 'the device' : `the ${k.devices} devices`} you have notifications on for, whether this page is open or not.` : 'None of your devices has notifications on yet. Turn them on under the list of sessions, on each device that should get it.'
   el('mk-clear').hidden = !m
   el('mk-save').disabled = !canMark()
+  // (asked for from a row, it is where all of it shows: as what is in it grows, so it is put again)
+  if (k.row && el('mk-box').open) placeMarkBox()
 }
 
 // A label pressed is the session's; pressed again, the session has none. What was being typed is dropped.
@@ -2400,8 +2425,31 @@ function markNote(text, error = true) {
   note.classList.toggle('error', error)
 }
 
-function openMarkBox() {
-  const s = openOne()
+// The button the box was asked for by: the one in the open session's head, or a row's pencil (the row as it
+// stands now: the list is drawn again behind the box)
+const markFrom = () => (app.marking?.row ? document.querySelector(`.row[data-key="${CSS.escape(app.marking.row)}"] .row-edit`) : el('mark-open'))
+const markFromSays = (open) => {
+  for (const b of document.querySelectorAll('#mark-open, .row-edit[aria-expanded="true"]')) b.setAttribute('aria-expanded', 'false')
+  if (open) markFrom()?.setAttribute('aria-expanded', 'true')
+}
+// The box opens under the button it was asked for by; asked for by a row's pencil, under the row, which is
+// still there to be seen. Under a row low in the list there is not the room for it: there it is as far up as
+// shows all of it.
+function placeMarkBox() {
+  const box = el('mk-box')
+  const from = markFrom()
+  // (a row that has left the list since: the box stays where it is)
+  if (!from) return
+  placeUnder(box, from)
+  if (!app.marking?.row) return
+  const under = Math.round(from.closest('.row').getBoundingClientRect().bottom + 4)
+  // (how tall it is with all the room there is, which is what it is measured by)
+  box.style.setProperty('--ns-top', '12px')
+  box.style.setProperty('--ns-top', Math.max(12, Math.min(under, innerHeight - box.offsetHeight - 12)) + 'px')
+}
+
+// (`s`: the session it is for, the open one unless a row's pencil asked for it; `row`: that row's key)
+function openMarkBox(s = openOne(), row = '') {
   if (!s) return
   const m = markOf(s.id)
   let notify = app.pushOn
@@ -2409,11 +2457,12 @@ function openMarkBox() {
     notify = { 1: true, 0: false }[localStorage.getItem('mc.remindNotify')] ?? notify
   } catch {}
   // Where its prompts are answered, by the name of what it runs in: asked of a session that is running and takes answers from here
-  const answers = !app.past && !s.ended && !!s.capabilities?.includes('approve')
+  // (as the server has it now, which one read from its machine's transcript is not)
+  const answers = app.sessions.get(s.id) === s && !s.ended && !!s.capabilities?.includes('approve')
   el('mk-answer-row').hidden = !answers
   for (const o of el('mode').options) o.textContent = { auto: `Answer: here + ${appName(s)}`, remote: 'Answer: always here', local: `Answer: ${appName(s)} only` }[o.value] ?? o.textContent
   el('mode').value = s.policy?.overrides?.approvals ?? s.policy?.approvals ?? 'auto'
-  app.marking = { s, color: m?.color ?? '', label: m?.label ?? '', adding: false, when: m?.remind ? 'keep' : 'none', at: m?.remind ?? 0, devices: null, answer: answers ? el('mode').value : null }
+  app.marking = { s, row, color: m?.color ?? '', label: m?.label ?? '', adding: false, when: m?.remind ? 'keep' : 'none', at: m?.remind ?? 0, devices: null, answer: answers ? el('mode').value : null }
   el('mk-title').textContent = s.title || 'This session'
   el('mk-title').title = s.title ?? ''
   el('mk-name').value = m?.name ?? ''
@@ -2425,8 +2474,8 @@ function openMarkBox() {
   markNote(canMark() ? '' : NO_KEY_MARK)
   drawMarkBox()
   if (!el('mk-box').open) el('mk-box').showModal()
-  el('mark-open').setAttribute('aria-expanded', 'true')
-  placeUnder(el('mk-box'), el('mark-open'))
+  markFromSays(true)
+  placeMarkBox()
   if (!matchMedia('(pointer: coarse)').matches) el('mk-name').focus()
   // How many of the account's devices a notification would reach
   fetch('/api/push')
@@ -2472,7 +2521,7 @@ async function setAnswer(s, mode) {
   return (await r?.json().catch(() => null))?.error ?? 'Where its prompts are answered could not be saved: the server did not answer.'
 }
 
-el('mark-open').addEventListener('click', openMarkBox)
+el('mark-open').addEventListener('click', () => openMarkBox())
 el('mk-close').addEventListener('click', closeMarkBox)
 el('mk-clear').addEventListener('click', () => saveMarkBox(true))
 el('mk-at').addEventListener('input', drawMarkBox)
@@ -2487,10 +2536,10 @@ el('mk-box').addEventListener('close', () => {
   // (a browser says a box was shut with its next frame: by then it may be open again, on what is being chosen now)
   if (el('mk-box').open) return
   app.marking = null
-  el('mark-open').setAttribute('aria-expanded', 'false')
+  markFromSays(false)
 })
 window.addEventListener('hashchange', closeMarkBox)
-window.addEventListener('resize', () => el('mk-box').open && placeUnder(el('mk-box'), el('mark-open')))
+window.addEventListener('resize', () => el('mk-box').open && placeMarkBox())
 
 // ---- A new session from the one that's open: an empty one, a clone of it, or one that
 // starts from a handoff it writes; on the device it's on or another that's online, in
@@ -2921,7 +2970,7 @@ async function orderFavorites(ids) {
     putDown(false)
     settling?.()
     const row = ev.target.closest('.row.favorite')
-    if (!row || ev.button !== 0 || ev.target.closest('.star')) return
+    if (!row || ev.button !== 0 || ev.target.closest('.star, .row-edit')) return
     const byGrip = !!ev.target.closest('.grip')
     if (!byGrip && ev.pointerType !== 'mouse') return
     drag = { id: row.dataset.favorite, row, pointer: ev.pointerId, y: ev.clientY, moved: false }
@@ -3003,11 +3052,12 @@ function renderRow(s, { favorite = false, due = false } = {}) {
   // last thing said in it, unless that is its user's own last words
   // (nor a prompt with Claude in Chrome's instructions in front of it, which is how an older plugin had one)
   const said = !tile.reply ? '' : (s.lastReply ?? (s.preview !== prompt && !s.preview.startsWith('<browser_instruction>') ? s.preview : ''))
+  const key = (due ? 'due:' : favorite ? 'favorite:' : 'open:') + s.id
   return h(
     'a',
     {
       class: ['row', s.id === app.current && 'active', (s.state === 'ended' || s.state === 'offline') && 'dim', favorite && 'favorite', due && 'due'].filter(Boolean).join(' '),
-      'data-key': (due ? 'due:' : favorite ? 'favorite:' : 'open:') + s.id,
+      'data-key': key,
       href: '#/s/' + encodeURIComponent(s.id),
       ...(favorite ? { 'data-favorite': s.id, draggable: 'false' } : {}),
       ...(mark?.color ? { 'data-color': mark.color } : {}),
@@ -3023,6 +3073,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
       s.state === 'attention' ? h('div', { class: 'row-preview' }, '⚠ ' + (s.detail || 'Needs your attention')) : said && h('div', { class: 'row-preview' }, said),
     ),
     due && doneButton(s),
+    editButton(s, key),
     starButton(s),
     favorite && gripButton(s.id, nameOf(s)),
   )
@@ -3076,9 +3127,9 @@ function markTile() {
   for (const box of document.querySelectorAll('[data-tile]')) box.checked = !!app.tile[box.dataset.tile]
   for (const b of document.querySelectorAll('[data-tile-lines]')) b.setAttribute('aria-pressed', String(Number(b.dataset.tileLines) === app.tile.lines))
   const row = renderRow({ ...TILE_SAMPLE, lastActivity: Date.now() - 3 * 60_000 })
-  // (it is a picture of a tile: it goes nowhere, and has no star to press)
+  // (it is a picture of a tile: it goes nowhere, and has no pencil or star to press)
   row.removeAttribute('href')
-  row.querySelector('.star')?.remove()
+  for (const b of row.querySelectorAll('.row-edit, .star')) b.remove()
   fill(el('tile-sample'), row)
 }
 for (const box of document.querySelectorAll('[data-tile]')) box.addEventListener('change', () => setTile({ [box.dataset.tile]: box.checked }))
@@ -3390,12 +3441,13 @@ function pastRow(s, { inProject = false, favorite = false, due = false } = {}) {
   const soon = !due && remindSoon(mark)
   // (among the favorites it says which machine it's on: there it isn't under its machine's name)
   // (which project and which computer, where this device has its tiles say so: the settings)
+  const key = due ? 'due:' + s.id : favorite ? 'favorite:' + s.id : `past:${s.machine}/${s.id}`
   const sub = dotted(inProject || !app.tile.where ? '' : s.project, app.tile.where && (favorite || due) ? (app.machines.has(s.machine) ? whereLabel(machineName(app.machines.get(s.machine)), s.machine) : s.where) : '', s.messages ? s.messages + ' messages' : '', live ? 'live' : s.open ? 'open on the machine' : '')
   return h(
     'a',
     {
       class: 'row past' + (live ? ' live' : '') + (active ? ' active' : '') + (inProject ? ' in-project' : '') + (favorite ? ' favorite' : '') + (due ? ' due' : '') + (reachable ? '' : ' dim'),
-      'data-key': due ? 'due:' + s.id : favorite ? 'favorite:' + s.id : `past:${s.machine}/${s.id}`,
+      'data-key': key,
       ...(reachable ? { href: live ? '#/s/' + encodeURIComponent(s.id) : `#/m/${s.machine}/${encodeURIComponent(s.id)}` } : { title: 'The computer this session is on is not connected' }),
       ...(favorite ? { 'data-favorite': s.id, draggable: 'false' } : {}),
       ...(mark?.color ? { 'data-color': mark.color } : {}),
@@ -3409,6 +3461,7 @@ function pastRow(s, { inProject = false, favorite = false, due = false } = {}) {
       due && remindLine(mark),
     ),
     due && doneButton(s),
+    editButton(s, key, true),
     starButton(s),
     favorite && gripButton(s.id, name),
   )
@@ -4233,6 +4286,8 @@ const ICONS = {
   // (the settings' own, under the list)
   gear: 'M8.61 4.42 8.86 2.38 11.14 2.38 11.39 4.42 12.96 5.07 14.58 3.81 16.19 5.42 14.93 7.04 15.58 8.61 17.62 8.86 17.62 11.14 15.58 11.39 14.93 12.96 16.19 14.58 14.58 16.19 12.96 14.93 11.39 15.58 11.14 17.62 8.86 17.62 8.61 15.58 7.04 14.93 5.42 16.19 3.81 14.58 5.07 12.96 4.42 11.39 2.38 11.14 2.38 8.86 4.42 8.61 5.07 7.04 3.81 5.42 5.42 3.81 7.04 5.07ZM12.5 10a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
   autoApprove: 'M10 3.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 3.25V10l2.25 1.5',
+  // (on a session's row, the way to the box its mark is set in: the pencil the open session's head has, in index.html)
+  pencil: 'M4 16l.9-3.6 8.4-8.4a1.5 1.5 0 0 1 2.1 0l.6.6a1.5 1.5 0 0 1 0 2.1l-8.4 8.4zM11.9 5.4l2.7 2.7',
   // (the eye in the passphrase's box: open where pressing it shows what is typed, struck through where it hides it)
   eye: 'M2.25 10S5 4.75 10 4.75 17.75 10 17.75 10 15 15.25 10 15.25 2.25 10 2.25 10Zm7.75-2.4a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8Z',
   eyeOff: 'M2.25 10S5 4.75 10 4.75 17.75 10 17.75 10 15 15.25 10 15.25 2.25 10 2.25 10Zm7.75-2.4a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8ZM4 3.5l12 13',

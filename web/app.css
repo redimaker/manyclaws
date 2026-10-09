@@ -388,11 +388,16 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .unread { font-weight: 700; }
 
 /* Favorites: the star that keeps a session at the top of the list, and the grip one is moved by */
-.star, .grip { background: none; border: 0; padding: 0; margin: 0; color: var(--muted); font: inherit; line-height: 1; flex-shrink: 0; align-self: center; cursor: pointer; }
+.star, .grip, .row-edit { background: none; border: 0; padding: 0; margin: 0; color: var(--muted); font: inherit; line-height: 1; flex-shrink: 0; align-self: center; cursor: pointer; }
 .star { font-size: 1.15em; width: 1.4em; height: 1.6em; }
 .star:hover { color: var(--text); }
 .star.on { color: var(--star); }
 .grip { width: 1.1em; height: 1.6em; cursor: grab; touch-action: none; }
+/* The pencil on a session's row: the way to the box its mark is set in (app.js, editButton), without opening the
+   session. Small, and close to the star it is beside: the row's name keeps its room. */
+.row-edit { display: grid; place-items: center; width: 1.4em; height: 1.6em; margin-right: -4px; }
+.row-edit:hover { color: var(--text); }
+.row-edit .menu-icon { width: 1.05em; height: 1.05em; color: inherit; }
 /* Beside the star of the session that's open: a new session from it. The button says
    so in the colour of the page's own mark, and its box opens under it, in the site's
    style (fonts.css: its serif, its warm dark or its paper, by the device's own scheme). */
@@ -457,13 +462,14 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
   .ns-open[aria-expanded="true"] .ns-plus { background: color-mix(in srgb, var(--n-accent) 84%, #fff); }
   .ns-words { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 }
-/* In the list a star shows as its row is pointed at, and stays on a favorite; so does the grip */
-.row .star, .row .grip { opacity: 0; }
-.row .star.on, .row .star:focus-visible, .row .grip:focus-visible { opacity: 1; }
+/* In the list a star shows as its row is pointed at, and stays on a favorite; so does the grip, and so does the
+   pencil, which stays while the box it opened is open */
+.row .star, .row .grip, .row .row-edit { opacity: 0; }
+.row .star.on, .row .star:focus-visible, .row .grip:focus-visible, .row .row-edit:focus-visible, .row .row-edit[aria-expanded="true"] { opacity: 1; }
 @media (hover: hover) {
-  .row:hover .star, .row:hover .grip { opacity: 1; }
+  .row:hover .star, .row:hover .grip, .row:hover .row-edit { opacity: 1; }
 }
-.row.active .star:not(.on), .row.active .grip { color: inherit; }
+.row.active .star:not(.on), .row.active .grip, .row.active .row-edit { color: inherit; }
 .row.favorite { user-select: none; -webkit-user-select: none; }
 /* A favorite in hand, by its grip or being dragged: (the grip held with the keys is in hand too) */
 .session-list .row.dragging, .session-list .row:has(.grip:focus-visible) { background: color-mix(in srgb, var(--accent) 22%, var(--bg)); color: var(--active-text); outline: 2px solid var(--accent); outline-offset: -2px; opacity: 1; }
@@ -477,8 +483,10 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .session-list.reordering .row.favorite.settling { position: relative; z-index: 2; transition: transform .12s ease; }
 /* (nothing points with a finger: they are there to be tapped) */
 @media (hover: none) {
-  .row .star, .row .grip { opacity: .75; }
+  .row .star, .row .grip, .row .row-edit { opacity: .75; }
   .row .star { width: 1.8em; height: 2.2em; }
+  .row .row-edit { width: 2em; height: 2.5em; margin-right: -6px; }
+  .row .row-edit .menu-icon { width: 1.15em; height: 1.15em; }
   .row .grip { width: 1.6em; height: 2.2em; }
 }
 /* Marks: what an account puts on a session of its own. A colour behind its row and along
