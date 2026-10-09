@@ -3063,10 +3063,14 @@ function renderRow(s, { favorite = false, due = false } = {}) {
   // (nor a prompt with Claude in Chrome's instructions in front of it, which is how an older plugin had one)
   const said = !tile.reply ? '' : (s.lastReply ?? (s.preview !== prompt && !s.preview.startsWith('<browser_instruction>') ? s.preview : ''))
   const key = (due ? 'due:' : favorite ? 'favorite:' : 'open:') + s.id
+  // Dimmed: one that has ended or is not heard from. Not among the favorites (or at the top for its reminder) where
+  // its computer is connected, though: there it opens and is resumed from its row, as from its row under its
+  // computer's name, which is not dimmed either. Under either heading a dimmed row is one not to be had back from here.
+  const away = (s.state === 'ended' || s.state === 'offline') && !((favorite || due) && app.machines.has(s.machine))
   return h(
     'a',
     {
-      class: ['row', s.id === app.current && 'active', (s.state === 'ended' || s.state === 'offline') && 'dim', favorite && 'favorite', due && 'due'].filter(Boolean).join(' '),
+      class: ['row', s.id === app.current && 'active', away && 'dim', favorite && 'favorite', due && 'due'].filter(Boolean).join(' '),
       'data-key': key,
       href: '#/s/' + encodeURIComponent(s.id),
       ...(favorite ? { 'data-favorite': s.id, draggable: 'false' } : {}),
