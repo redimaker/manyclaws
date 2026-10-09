@@ -2,7 +2,11 @@
 # Installs the ManyClaws agent on this machine and starts it as a service of your
 # own user (launchd on macOS, systemd --user on Linux).
 #
-#   curl -fsS https://<server>/agent/install.sh | bash -s -- --server https://<server> [options]
+#   curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/agent/install.sh | bash -s -- [options]
+#
+# The agent's files are fetched from the public repository they are kept in, as its main
+# branch stands (github.com/redimaker/manyclaws): what runs here is what anyone can read
+# there, and no server hands it out.
 #
 # The agent signs in with an API token of your account's and seals with a key made from
 # your encryption passphrase: the same two the ManyClaws plugin in Claude Code is given.
@@ -13,6 +17,10 @@
 # yourself, it asks for both on the terminal, without showing what is typed, and gives
 # the plugin the same. Neither goes in the command.
 #
+#   --server URL        the ManyClaws server this machine reports to (default: what it was set
+#                       up with, else https://manyclaws.dev)
+#   --from TGZ          take the agent's files from this .tgz, by its address or its path, where
+#                       they are not to come from the repository (or MANYCLAWS_AGENT_FROM)
 #   --label NAME        what the page calls this machine (default: its host name)
 #   --root DIR          a Claude Code config dir to index; repeat for several (default: ~/.claude)
 #   --spawn DIR         let the page start and resume sessions in DIR; repeat for several.
@@ -49,11 +57,14 @@ LABEL="com.manyclaws.agent"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 UNIT="$HOME/.config/systemd/user/manyclaws-agent.service"
 
+REPO="redimaker/manyclaws"
+from="${MANYCLAWS_AGENT_FROM:-https://codeload.github.com/$REPO/tar.gz/refs/heads/main}"
 server="" token="" label="" relay=0 uninstall=0 rekey=0 typed=0 update=0 end_sessions=0
 roots=() spawn=() modes=() key=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --server) server="${2%/}"; shift 2 ;;
+    --from) from="$2"; shift 2 ;;
     --token) token="$2"; shift 2 ;;
     --label) label="$2"; shift 2 ;;
     --root) roots+=("$2"); shift 2 ;;
@@ -112,9 +123,6 @@ fi
 
 if [ "$update" = 1 ]; then
   [ -f "$HOME_DIR/agent.json" ] || { echo "There is no ManyClaws agent on this machine to update: $HOME_DIR/agent.json is not there. Install it as the guide's step 3 has it." >&2; exit 2; }
-  # (where it reports is what it was set up with)
-  [ -n "$server" ] || server="$(sed -n 's/^[[:space:]]*"server"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' "$HOME_DIR/agent.json" | head -1)"
-  server="${server%/}"
   # Starting it again ends the sessions it is running: each a Claude Code the agent started, under it
   if [ -n "$running" ] && [ "$end_sessions" = 0 ]; then
     hosted="$(ps -axww -o ppid=,command= 2>/dev/null | awk -v agent="$running" '$1 == agent' | grep -c -- '--input-format stream-json' || true)"
@@ -124,7 +132,10 @@ if [ "$update" = 1 ]; then
     fi
   fi
 fi
-[ -n "$server" ] || { echo "--server is required" >&2; exit 2; }
+# Where it reports: what was named, else what this machine was set up with, else ManyClaws' own server
+[ -n "$server" ] || [ ! -f "$HOME_DIR/agent.json" ] || server="$(sed -n 's/^[[:space:]]*"server"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' "$HOME_DIR/agent.json" | head -1)"
+[ -n "$server" ] || server="https://manyclaws.dev"
+server="${server%/}"
 token="${token:-${MANYCLAWS_TOKEN:-}}"
 key="${key:-${MANYCLAWS_KEY:-}}"
 # What this machine was set up with before is kept: run again, it asks for nothing it has
@@ -172,9 +183,20 @@ node_bin="$(command -v node || true)"
 "$node_bin" -e "require('node:sqlite').DatabaseSync && require('node:sqlite') && new (require('node:sqlite').DatabaseSync)(':memory:').exec(\"CREATE VIRTUAL TABLE t USING fts5(x)\")" 2>/dev/null ||
   { echo "This Node ($("$node_bin" --version)) has no built-in SQLite with full-text search; 22.13 or later is needed" >&2; exit 1; }
 
+# The agent's files: fetched whole, and looked at, before anything that is here is replaced
+stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT
+if [ -f "$from" ]; then tar -xzf "$from" -C "$stage"
+else curl -fsSL "$from" | tar -xzf - -C "$stage" || { echo "The agent's files could not be fetched from $from" >&2; exit 1; }
+fi
+# (the repository's archive has them in its agent folder; a .tgz of the agent alone has them at its top)
+found="$(find "$stage" -maxdepth 3 -name agent.mjs | head -1)"
+[ -n "$found" ] && [ -f "$(dirname "$found")/service.mjs" ] || { echo "What $from gave is not the ManyClaws agent" >&2; exit 1; }
+src="$(dirname "$found")"
+for f in "$src"/*.mjs; do "$node_bin" --check "$f" || { echo "What $from gave does not read as the agent's files: nothing was changed" >&2; exit 1; }; done
 mkdir -p "$HOME_DIR/agent"
 chmod 700 "$HOME_DIR"
-curl -fsS "$server/agent/manyclaws-agent.tgz" | tar -xzf - -C "$HOME_DIR/agent"
+cp "$src"/*.mjs "$HOME_DIR/agent/"
 
 # agent.json: what's there is kept (the machine's id among it), and the options given replace their own.
 # An update writes nothing there: the machine is set up as it was.
@@ -235,7 +257,7 @@ EOF
 fi
 
 if [ "$update" = 1 ]; then
-  echo "The ManyClaws agent is $(sed -n "s/^export const VERSION = '\(.*\)'\$/\1/p" "$HOME_DIR/agent/service.mjs") now, the one $server hands out, and running, set up as it was. Its log: $HOME_DIR/agent.log"
+  echo "The ManyClaws agent is $(sed -n "s/^export const VERSION = '\(.*\)'\$/\1/p" "$HOME_DIR/agent/service.mjs") now, as $from has it, and running, set up as it was. Its log: $HOME_DIR/agent.log"
   exit 0
 fi
 echo "The ManyClaws agent is installed in $HOME_DIR and running. Its log: $HOME_DIR/agent.log"

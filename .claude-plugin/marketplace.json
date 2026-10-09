@@ -1,7 +1,7 @@
 {
-  "name": "redimaker",
+  "name": "manyclaws",
   "owner": { "name": "Deon Brewis" },
-  "description": "Redimaker's Claude Code plugins",
+  "description": "The ManyClaws plugin for Claude Code",
   "plugins": [
     {
       "name": "manyclaws",

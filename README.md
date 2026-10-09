@@ -53,11 +53,21 @@ Claude Code's plugin runtime has no crypto library, so every primitive (SHA-256,
 
 ## Installing
 
-Follow the guide at <https://manyclaws.dev/setup>. It installs the plugin and the agent from the ManyClaws server, which hands out packaged copies of the files in this repository, and it is the supported way: the server expects the versions it hands out.
+The guide at <https://manyclaws.dev/setup> walks through it, and Claude Code can follow it for you. It installs both parts from this repository, as its `main` branch stands:
+
+```
+claude plugin marketplace add redimaker/manyclaws
+claude plugin install manyclaws@manyclaws
+curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/agent/install.sh | bash -s -- --spawn ~/code
+```
+
+The first two install the plugin; the third installs the agent as a service of your own user and lets sessions be started in `~/code` (leave `--spawn` out and they can only be read and searched). Then give the plugin your API token and your encryption passphrase in its own dialog (`/plugin` in Claude Code), and start a new session.
+
+To update: `claude plugin marketplace update manyclaws`, `claude plugin update manyclaws@manyclaws`, and the installer again with `--update`.
 
 The plugin needs Claude Code 2.1.287 or later. The agent needs Node.js 22.13 or later and nothing else; it is for macOS and Linux.
 
-What ends up on your computer is these files, by version, so you can compare them:
+What ends up on your computer is these files, so you can compare them:
 
 - the agent, in `~/.manyclaws/agent/`, against `agent/` here (its version is `VERSION` in `agent/service.mjs`);
 - the plugin, in Claude Code's plugin cache under `manyclaws/`, against `mod/` here (its version is in `mod/.claude-plugin/plugin.json`).

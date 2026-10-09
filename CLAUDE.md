@@ -20,8 +20,12 @@ These are the owner's standing instructions (2026-10-08). They have no exception
 - `mod/hooks/seal.js` and `agent/seal.mjs` are one file in two places, and the server's page has a third copy. A test with the server compares all three: change them together.
 - `mod/hooks/rows.js` and `agent/rows.mjs` likewise.
 
+## What is on main is what people run
+
+- Computers install and update the plugin and the agent from this repository, as its `main` branch stands: the plugin through Claude Code's marketplace (`claude plugin marketplace add redimaker/manyclaws`), the agent through `agent/install.sh`, which fetches this repository's archive. **A push to main is a release to every computer that next updates.** Nothing half done goes to main, and nothing that the server it reports to would refuse.
+- A change that the server has to match (what is sent, what is refused as too old) is pushed here and deployed there together: the server's repository says how.
+
 ## Versions
 
-- The plugin's version is in `mod/.claude-plugin/plugin.json` and again as `PLUGIN_VERSION` in `mod/hooks/lib.js`: the two must agree.
-- The agent's is `VERSION` in `agent/service.mjs`.
-- The server hands out packaged copies of what is here, and refuses a plugin or an agent older than it expects. A release is made from the server's repository, which packages this checkout.
+- The plugin's version is in `mod/.claude-plugin/plugin.json` and again as `PLUGIN_VERSION` in `mod/hooks/lib.js`: the two must agree. Claude Code takes an update only where the version has changed: a change to the plugin comes with a new one.
+- The agent's is `VERSION` in `agent/service.mjs`. The server tells its pages which plugin and agent are the newest by what its own repository packaged from this one at its last deploy, and refuses a plugin or an agent older than it can hear.
