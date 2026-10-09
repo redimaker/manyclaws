@@ -267,6 +267,23 @@ function deviceOf(m) {
   }
 }
 
+// A session whose Claude Code was shut or killed without its plugin's last word reaching the server is, to the server,
+// only one it does not hear from, for as long as it keeps it: it cannot tell that from a computer that is asleep. The
+// computer's agent can: it says which sessions a Claude Code there has open, and which it runs itself. So a session
+// that is not heard from, on a computer whose agent is connected and says neither of it, has ended though nothing said
+// so (`unsaid`): here it reads as one that is not running, is among the inactive ones in the list, and a reply starts
+// it again where it ran. What the server said of it is kept (`told`), and this is looked at again whenever the session
+// or its computer is told of: an agent says hello again when what is open on its computer changes.
+function settle(s) {
+  if (!s?.shaped) return s
+  s.told ??= { state: s.state, ended: s.ended }
+  const m = app.machines.get(s.machine)
+  s.unsaid = !s.told.ended && !s.online && !!m?.online && !!m.open && !(s.id in m.open) && !(m.hosted ?? []).some((h) => h.sid === s.id)
+  s.ended = s.told.ended || s.unsaid
+  s.state = s.unsaid ? 'ended' : s.told.state
+  return s
+}
+
 // A session from a machine's index, in this page's terms: `open` is what the machine says
 // is open in a Claude Code process there, `hosted` what its agent runs itself
 function catalogOf(mid, row, open = {}, hosted = []) {
@@ -1324,6 +1341,7 @@ function connect() {
     app.tellings++
     app.told = new Map(snapshot.sessions.map((s) => [s.id, app.tellings]))
     app.machines = new Map((snapshot.machines ?? []).map((m) => [m.id, m]))
+    for (const s of app.sessions.values()) settle(s)
     autoApprove()
     snapshotCame()
     seeToUpgrade()
@@ -1354,6 +1372,7 @@ function connect() {
     const s = JSON.parse(ev.data)
     // (the account's own small session, made or made again, here or on another device)
     if (s.id === app.firstId) return void ((app.first = s), lookAgain())
+    settle(s)
     const before = app.sessions.get(s.id)
     // Alert when a session starts waiting for an answer
     // (not for what this browser says yes to by itself: nobody is needed for that)
@@ -1389,6 +1408,8 @@ function connect() {
     const m = JSON.parse(ev.data)
     if (m.removed) app.machines.delete(m.id)
     else app.machines.set(m.id, m)
+    // (what it says is open on it, and whether it is there to say, is what its quiet sessions are read by)
+    for (const s of app.sessions.values()) if (s.machine === m.id) settle(s)
     lookAgain()
     seeToUpgrade()
     // Its sessions are read again when it comes online, and when what it runs changes
@@ -1824,7 +1845,7 @@ async function loadMessages(id, { fromEnd = 0 } = {}) {
   // How the session is, as the server had it when it answered: unless the stream has said
   // since this was asked for, which is how it is now. The answer can come after a word of
   // the stream's that was sent after it, and would put the session back as it was before.
-  if ((app.told.get(id) ?? 0) <= asOf) app.sessions.set(id, data.session)
+  if ((app.told.get(id) ?? 0) <= asOf) app.sessions.set(id, settle(data.session))
   renderHeader()
   renderListSoon()
   // The rows drawn were renumbered on the server: what came back is the latest window, drawn afresh
@@ -6097,7 +6118,11 @@ async function send() {
     node.querySelector('.from').textContent = 'not sent: ' + NO_KEY
     return
   }
-  const r = await fetch('/api/sessions/' + encodeURIComponent(sid) + '/prompt', {
+  // (one that ended with nothing said is, to the server, a session still to be heard from, and a reply to it would wait
+  // there for a plugin that is gone: it goes to its computer the way a reply to a session read from that computer
+  // does, which asks the server nothing of the session)
+  const restart = to?.unsaid && to.machine ? `/api/machines/${to.machine}/sessions/${encodeURIComponent(sid)}/resume` : null
+  const r = await fetch(restart ?? '/api/sessions/' + encodeURIComponent(sid) + '/prompt', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     // (its computer runs what the order says, and nothing goes beside it but which photos are its own; and, for a session
@@ -6107,6 +6132,7 @@ async function send() {
   })
   if (r.status === 401) return showLogin()
   const data = await r.json().catch(() => ({}))
+  if (restart && r.ok) data.resumed = true
   if (!r.ok) {
     node.querySelector('.from').textContent = 'not sent: ' + (data.error ?? r.status)
     if (!m) return
