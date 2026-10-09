@@ -21,6 +21,8 @@ const rendered = (src) => (trusted ? trusted.createHTML(src) : markdown(src))
 // and computer it is on, the last thing its user typed, the last thing Claude said, when it was last heard
 // from, and how many lines each thing said may take
 const TILE = { where: true, prompt: true, reply: true, time: true, lines: 1 }
+// How long a session this page saw go quiet stays among the active ones in the list (renderList)
+const QUIET_MS = 30_000
 // A phone's one pane at a time; and the page kept on a home screen as an app of its own
 const phoneLayout = () => matchMedia('(max-width: 760px)').matches
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true
@@ -56,6 +58,7 @@ const app = {
   rowKeys: new Set(), // the rows of a transcript drawn so far, so reading it again adds only what's new
   views: new Map(), // the chats looked at lately, kept as they were drawn: "s:<session>" or "m:<machine>/<session>/<subagent>" -> view
   listTimer: 0,
+  quietTimer: 0, // draws the list again when a session that went quiet has had its time among the active ones
   unread: new Set(),
   showEnded: false,
   tile: { ...TILE }, // what a session's tile in the list shows, as this device has it (the settings)
@@ -274,8 +277,13 @@ function deviceOf(m) {
 // so (`unsaid`): here it reads as one that is not running, is among the inactive ones in the list, and a reply starts
 // it again where it ran. What the server said of it is kept (`told`), and this is looked at again whenever the session
 // or its computer is told of: an agent says hello again when what is open on its computer changes.
-function settle(s) {
+// (An agent can say a session is open that is not: Claude Code's record of one outlasts its process where it was
+// killed, and the process's number is soon another's. Such a session is only not heard from, which the list goes by:
+// see renderList.) `was`: what this page had of the session until now, which says when it went quiet (`quietAt`): not
+// at all while it is heard from, now where it was heard from until this, and long ago where this page never knew it to be.
+function settle(s, was = app.sessions.get(s?.id)) {
   if (!s?.shaped) return s
+  s.quietAt = s.online ? null : was && was !== s ? (was.online ? Date.now() : (was.quietAt ?? 0)) : (s.quietAt ?? 0)
   s.told ??= { state: s.state, ended: s.ended }
   const m = app.machines.get(s.machine)
   s.unsaid = !s.told.ended && !s.online && !!m?.online && !!m.open && !(s.id in m.open) && !(m.hosted ?? []).some((h) => h.sid === s.id)
@@ -1337,11 +1345,12 @@ function connect() {
     // (the account's own small session is none of its conversations: kept apart, and out of the list)
     app.first = snapshot.sessions.find((s) => s.id === app.firstId) ?? null
     snapshot.sessions = snapshot.sessions.filter((s) => s.id !== app.firstId)
+    const had = app.sessions
     app.sessions = new Map(snapshot.sessions.map((s) => [s.id, s]))
     app.tellings++
     app.told = new Map(snapshot.sessions.map((s) => [s.id, app.tellings]))
     app.machines = new Map((snapshot.machines ?? []).map((m) => [m.id, m]))
-    for (const s of app.sessions.values()) settle(s)
+    for (const s of app.sessions.values()) settle(s, had.get(s.id) ?? null)
     autoApprove()
     snapshotCame()
     seeToUpgrade()
@@ -2014,7 +2023,17 @@ function renderList() {
   const first = new Set(due.map((m) => m.id))
   const kept = new Set([...first, ...app.favorites.map((f) => f.id)])
   const all = [...app.sessions.values()].filter((s) => !kept.has(s.id))
-  const visible = all.filter((s) => app.showEnded || !s.ended || s.id === app.current)
+  // A session that is not heard from is not among the active ones, whatever the reason (its Claude Code gone with
+  // nothing said, or its computer asleep: this page cannot tell which): it is with the inactive ones, and back by
+  // itself when it is heard from again. One this page saw go quiet stays, dimmed, for half a minute first: a server
+  // that is started again hears from nothing for a moment, and the list would empty and fill again each time.
+  const quiet = (s) => !s.ended && !s.online
+  const gone = (s) => quiet(s) && Date.now() - (s.quietAt ?? 0) >= QUIET_MS
+  const visible = all.filter((s) => app.showEnded || !(s.ended || gone(s)) || s.id === app.current)
+  // (and the list is drawn again when the first of those has had its half minute)
+  clearTimeout(app.quietTimer)
+  const next = Math.min(...all.filter((s) => quiet(s) && !gone(s)).map((s) => s.quietAt + QUIET_MS - Date.now()))
+  if (Number.isFinite(next)) app.quietTimer = setTimeout(renderListSoon, next + 50)
   const nodes = []
   if (due.length || app.favorites.length) {
     nodes.push(h('div', { class: 'group-head', 'data-key': 'favorites' }, h('span', null, 'Favorites')))
