@@ -417,8 +417,11 @@ test('the mod makes the key from the passphrase typed into its options and whose
   // Nothing of the key is in the mod's own store, which is a file anyone who can read this user's files can read
   expect(kept.has('kept-key')).toBe(false)
   expect(JSON.stringify([...kept]).includes(toB64(keys.key))).toBe(false)
-  // (all it said is that the key was being made)
-  expect(said.length).toBe(1)
+  // What it said: that the key was being made; and, once it was in the passphrase's place, that the passphrase is no
+  // longer kept on this computer, so that whoever typed it knows to keep it somewhere of their own
+  expect(said.length).toBe(2)
+  expect(said[1]).toMatch(/is now kept on this computer in place of your passphrase, which is no longer kept here\. Keep the passphrase somewhere of your own/)
+  expect(said.join(' ').includes(WORDS)).toBe(false)
   // Asking for its calls, it says that it seals and not with what
   expect(polled(sent).length).toBeGreaterThan(0)
   expect(polled(sent).every((s) => s.url.includes('&sealed=3') && !s.url.includes('key='))).toBe(true)
@@ -435,8 +438,8 @@ test('another account\'s computer makes another key from the same passphrase: wh
   expect(JSON.parse(configured[0].stdin)).toEqual({ key: keysText(MADE.u_other) })
   expect(MADE.u_other).not.toEqual(MADE.u_test)
   expect(events().meta).toEqual({ protocol: 2, sealed: 3, orders: true })
-  // (all it said is that the key was being made)
-  expect(said.length).toBe(1)
+  // (all it said is that the key was being made, and then that it is kept in the passphrase's place)
+  expect(said.length).toBe(2)
 })
 
 test('where the key cannot be put in the passphrase\'s place the session is sealed all the same, and it is said: that the passphrase is still kept, that the key is made again each time, and what puts it right', { timeoutMs: 120_000, ...TYPED }, async ($, on) => {

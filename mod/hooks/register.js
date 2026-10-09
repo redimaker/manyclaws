@@ -586,7 +586,11 @@ async function keyInPlace($, keys) {
   try {
     const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
     const r = await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ key: keysText(keys) }), timeoutMs: 60_000 })
-    if (r.exitCode === 0) return true
+    if (r.exitCode === 0) {
+      // (said once, as it is done: from here on this computer cannot give the passphrase back to whoever typed it)
+      $.ui.log('ManyClaws: your encryption key is made, and is now kept on this computer in place of your passphrase, which is no longer kept here. Keep the passphrase somewhere of your own, a password manager for one: it is asked for when you add a browser or a phone, and nobody can give a forgotten one back.')
+      return true
+    }
     why = String(r.stderr || r.stdout || '').trim().split('\n').pop().slice(0, 200)
   } catch (err) {
     why = String(err?.message ?? err).slice(0, 200)
