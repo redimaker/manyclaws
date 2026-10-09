@@ -68,8 +68,8 @@ const hostOf = (address) => {
     return address
   }
 }
-// What of the page is written per visitor as it is served (the front door, the small print, the guide): not compared
-const WRITTEN_AS_SERVED = new Set(['web/home.html', 'web/legal.html', 'web/setup.html', 'web/setup.md'])
+// What of the page is written per visitor as it is served (the front door, the small print, the guides): not compared
+const WRITTEN_AS_SERVED = new Set(['web/home.html', 'web/legal.html', 'web/setup.html', 'web/setup.md', 'web/upgrade.md'])
 
 // Answers { ok, lines }: `ok` false where anything is other than a signed release says
 export async function verify({ home, roots = [], server = '', fetched = fetch } = {}) {

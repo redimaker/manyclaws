@@ -1326,6 +1326,7 @@ function connect() {
     app.machines = new Map((snapshot.machines ?? []).map((m) => [m.id, m]))
     autoApprove()
     snapshotCame()
+    seeToUpgrade()
     app.favorites = snapshot.favorites ?? []
     for (const s of app.sessions.values()) favoriteKept(s)
     app.marks = new Map((snapshot.marks ?? []).map((m) => [m.id, markRead(m)]))
@@ -1389,6 +1390,7 @@ function connect() {
     if (m.removed) app.machines.delete(m.id)
     else app.machines.set(m.id, m)
     lookAgain()
+    seeToUpgrade()
     // Its sessions are read again when it comes online, and when what it runs changes
     if (m.online && Date.now() - (app.catalog.get(m.id)?.at ?? 0) > 3000) {
       loadCatalog(m.id)
@@ -1482,7 +1484,11 @@ function showNotices() {
   // (with no key, the way to where the passphrase is typed; with one, to what does not open with it, whose that is and what to do there)
   el('locked-link').textContent = locked === 'other' ? 'What to do' : 'Type it in'
   el('locked-link').setAttribute('href', locked === 'other' ? '#/account/unopened' : '#/account')
-  document.body.classList.toggle('noticed', !el('offline').hidden || !el('update').hidden || !el('locked').hidden)
+  // (computers of the account's that are to be upgraded, once: said for as long as there is one, but on the page that says all of it)
+  const old = app.account ? toUpgrade() : []
+  el('upgrade-note').hidden = !old.length || location.hash.split('?')[0] === UPGRADE_PAGE
+  el('upgrade-says').textContent = old.length === 1 ? `${machineName(old[0])} needs a one-time upgrade, after a security change.` : `${old.length} of your computers need a one-time upgrade, after a security change.`
+  document.body.classList.toggle('noticed', !el('offline').hidden || !el('update').hidden || !el('locked').hidden || !el('upgrade-note').hidden)
   // (how far down the list starts, for when it's shown under a chat being swiped away)
   document.documentElement.style.setProperty('--notices-height', el('notices').offsetHeight + 'px')
 }
@@ -1708,13 +1714,15 @@ function watchCurrent() {
 window.addEventListener('hashchange', route)
 
 // The account's pages: the account itself, its password, and what does not open here with whose it is
-const ACCOUNT_PAGES = ['#/account', '#/account/password', '#/account/unopened']
+const ACCOUNT_PAGES = ['#/account', '#/account/password', '#/account/unopened', '#/account/upgrade']
 
 // #/s/<session> is a session as it reports; #/m/<machine>/<session> is one read from
 // its transcript on a machine; #/new/<machine> starts one there; #/computer/<machine> is a
 // computer's own page
 function route() {
   const [path, query = ''] = location.hash.split('?')
+  // (what the line across the top says depends on where the page is: the upgrade's own page says all of it itself)
+  if (app.account && !el('app').hidden) showNotices()
   const live = /^#\/s\/(.+)$/.exec(path)
   const past = /^#\/m\/([^/]+)\/([^/]+)$/.exec(path)
   const fresh = /^#\/new\/([^/]+)$/.exec(path)
@@ -3213,10 +3221,41 @@ function needsOf(c) {
   // still has and whose polls it does not; said here only while that hello is a recent one).
   const stalled = !!c.m?.stalled && !c.m.online && Date.now() - (c.m.lastSeen ?? 0) < 2 * AGENT_QUIET_MS
   if (c.m?.refused) needs.push({ kind: 'agent-refused', has: versionOf(c.m.agent) ? c.m.agent : '', newest: app.latest.agent ?? '' })
+  // (an agent from before releases were signed is not updated: it is upgraded, once, whatever else is so of it)
+  else if (c.m && behind(c.m.agent, UPGRADE_FROM)) needs.push({ kind: 'agent-upgrade', has: c.m.agent, heard: !!c.m.online })
   else if (stalled) needs.push({ kind: 'agent-stalled' })
   else if (down) needs.push({ kind: 'agent-down' })
   else if (c.m && behind(c.m.agent, app.latest.agent)) needs.push({ kind: 'agent-old', has: c.m.agent, newest: app.latest.agent, heard: !!c.m.online })
   return needs
+}
+
+// ---- The one-time upgrade. Since agent 5.1.0 the plugin and the agent are released
+// signed, and an agent installs nothing that is not: one from before that cannot check
+// what it installs, so it is not updated in place. It is removed and a new one installed,
+// the plugin's marketplace is removed and added again (which takes away what the old
+// plugin kept, the passphrase among it), and the computer is given an API token and the
+// passphrase again. Once, by hand, on the computer. The page says so of an account that
+// has such a computer: on a page of its own, brought up as the page comes in, and in a
+// line across the top that leads to it, for as long as there is one.
+const UPGRADE_FROM = '5.1.0'
+const UPGRADE_PAGE = '#/account/upgrade'
+// The account's computers that are to be upgraded: by what each agent says it is now, or last said, and any the server
+// would not hear at all for being too old
+const toUpgrade = () => [...app.machines.values()].filter((m) => m.refused || behind(m.agent, UPGRADE_FROM)).sort((a, b) => machineName(a).localeCompare(machineName(b)))
+// Seen to as the account's computers are heard of: the line, the page where it is open, and the page brought up, once
+// in a tab, where the page has come in at its list (someone who came for a session is at it, with the line above)
+function seeToUpgrade() {
+  showNotices()
+  const at = location.hash.split('?')[0]
+  if (at === UPGRADE_PAGE && !el('account').hidden && app.account) return renderUpgrade()
+  if (!toUpgrade().length || (at !== '' && at !== '#')) return
+  try {
+    if (sessionStorage.getItem('mc.upgradeShown') === signInName()) return
+    sessionStorage.setItem('mc.upgradeShown', signInName() ?? '')
+  } catch {
+    return
+  }
+  location.hash = UPGRADE_PAGE
 }
 // Each said in a few words, for where the mark is pointed at
 const needSays = (n) =>
@@ -3224,6 +3263,7 @@ const needSays = (n) =>
     'plugin-old': `its plugin is ${n.has}, and ${n.newest} is the newest`,
     'agent-old': n.heard === false ? `its agent was ${n.has} when it was last heard from, and ${n.newest} is the newest` : `its agent is ${n.has}, and ${n.newest} is the newest`,
     'agent-refused': `its agent is ${n.has ? n.has + ', ' : ''}too old for the server to hear`,
+    'agent-upgrade': `its agent is ${n.has}, from before a security change: it needs a one-time upgrade`,
     'agent-down': 'its agent is not running: no session can be started on it',
     'agent-stalled': 'its agent has stopped answering, and wants starting again',
   })[n.kind]
@@ -6303,6 +6343,7 @@ async function openGuide(which) {
   if (which === 'setup') renderSetup()
   else if (which === 'account/password') renderPassword()
   else if (which === 'account/unopened') renderUnopened()
+  else if (which === 'account/upgrade') renderUpgrade()
   else renderAccount()
 }
 
@@ -6438,10 +6479,14 @@ function needsPart(c) {
           ],
     'agent-refused': (n) => [
       h('b', null, `The agent on ${name} is ${n.has ? n.has + ', ' : ''}too old for this server to hear.`),
-      `${n.newest ? ` The newest is ${n.newest}.` : ''} Until it is updated, no session can be started on ${name} from here, and its past sessions cannot be opened or searched.`,
-      c.live.length ? '' : ` No session on ${name} is heard from either, so its plugin may be as old: the line below updates both.`,
+      `${n.newest ? ` The newest is ${n.newest}.` : ''} Until it is upgraded, no session can be started on ${name} from here, and its past sessions cannot be opened or searched. It is from before a change to how ManyClaws is secured, and is upgraded once, by hand, on the computer: the line below does it, its plugin with it. Sorry for the trouble.`,
     ],
     'plugin-old': (n) => [h('b', null, `The plugin on ${name} is ${n.has}, and ${n.newest} is the newest.`), ' A session that is already open keeps the plugin it started with: once the plugin is updated, this is gone as soon as a new session starts there.'],
+    'agent-upgrade': (n) => [
+      h('b', null, `The agent on ${name} ${n.heard === false ? 'was' : 'is'} ${n.has}, from before a change to how ManyClaws is secured.`),
+      ' It is not updated in place: it is upgraded once, by hand, on the computer, and is given an API token and your passphrase again. Sorry for the trouble. ',
+      h('a', { href: UPGRADE_PAGE, 'data-part': 'needs-upgrade' }, 'What the upgrade is, and how it is done'),
+    ],
   }
   // (what the line asks for: what is old is updated, and an agent that is not running is got running)
   const has = (kind) => needs.some((n) => n.kind === kind)
@@ -6450,13 +6495,16 @@ function needsPart(c) {
   const down = has('agent-down')
   const stalled = has('agent-stalled')
   const tasks = [old.length ? `update the ManyClaws ${old.join(' and ')}` : '', down ? (old.length ? 'get its agent running' : 'get the ManyClaws agent running') : '', stalled ? (old.length ? 'start its agent again' : 'start the ManyClaws agent again') : ''].filter(Boolean)
+  // (a computer that is to be upgraded is upgraded, which sees to the rest: by the guide for that, which is another)
+  const upgrade = has('agent-upgrade') || has('agent-refused')
+  const upgradeGuide = (app.account?.server ?? location.origin) + '/upgrade'
   return accountPart(
     'Needs attention',
     { id: 'computer-needs', 'data-key': 'needs' },
     h('div', { class: 'needs' }, ...needs.map((n) => h('p', { 'data-need': n.kind }, ...said[n.kind](n)))),
-    h('p', { 'data-part': 'needs-say' }, `On ${name}, start Claude Code and paste this:`),
-    codeBox(`Read ${guide}.md and ${tasks.join(' and ')} on this computer.`),
-    h('p', null, h('a', { href: guide + '#keeping-it-up-to-date-and-running', target: '_blank', rel: 'noopener', id: 'computer-guide' }, down || stalled ? 'How to get the agent running' : 'Or update it by hand')),
+    h('p', { 'data-part': 'needs-say' }, upgrade ? `On ${name}, start Claude Code in a terminal or in VS Code and paste this:` : `On ${name}, start Claude Code and paste this:`),
+    codeBox(upgrade ? `Read ${upgradeGuide}.md and upgrade ManyClaws on this computer.` : `Read ${guide}.md and ${tasks.join(' and ')} on this computer.`),
+    h('p', null, upgrade ? h('a', { href: UPGRADE_PAGE, id: 'computer-guide' }, 'Or upgrade it by hand') : h('a', { href: guide + '#keeping-it-up-to-date-and-running', target: '_blank', rel: 'noopener', id: 'computer-guide' }, down || stalled ? 'How to get the agent running' : 'Or update it by hand')),
   )
 }
 
@@ -7671,6 +7719,92 @@ function renderAccount() {
     el('passphrase').scrollIntoView({ block: 'start' })
     el('passphrase').querySelector('[data-part=passphrase-new]')?.focus({ preventScroll: true })
   }
+}
+
+// The one-time upgrade, on a page of its own: which of the account's computers it is for,
+// why, and what is done on each: the one line for Claude Code there, which follows the
+// guide written for it (upgrade.md), and the same by hand. It says sorry, once, and that it
+// is not needed again. Drawn again as the computers are heard of: one that has been
+// upgraded is gone from it.
+function renderUpgrade() {
+  const a = app.account
+  if (!a) return
+  el('account-sub').textContent = accountSays(a.user)
+  const old = toUpgrade()
+  const origin = a.server ?? location.origin
+  const guide = origin + '/upgrade'
+  const body = el('account-body')
+  const at = body.querySelector('[data-part=upgrade]') ? body.scrollTop : 0
+  const these = old.length === 1 ? 'this computer' : 'each of these computers'
+  const step = (n, title, ...says) => h('div', { class: 'upgrade-step', 'data-step': String(n) }, h('h3', null, `${n}. ${title}`), ...says)
+  fill(
+    body,
+    accountHead(
+      'One-time upgrade',
+      !old.length ? 'No computer needs upgrading' : old.length === 1 ? 'One of your computers needs upgrading' : `${old.length} of your computers need upgrading`,
+      old.length ? 'A one-time step, after a change to how ManyClaws is secured.' : 'Every computer of yours that has the agent has one that was released signed.',
+    ),
+    ...(old.length
+      ? [
+          accountPart(
+            old.length === 1 ? 'The computer' : 'The computers',
+            { id: 'upgrade-computers', 'data-part': 'upgrade' },
+            // (said here, in the page's own words, and not only over it: the heading is not shown in every look)
+            h('p', { 'data-part': 'upgrade-sorry' }, h('b', null, 'Sorry for the trouble.'), ' This is a one-time step, after a change to how ManyClaws is secured: it is done once on a computer and is not needed again.'),
+            h('p', null, `The agent on ${these} is old, and needs upgrading:`),
+            ...old.map((m) =>
+              h(
+                'div',
+                { class: 'person', 'data-machine': m.id },
+                h('div', null, h('b', null, machineName(m)), h('div', { class: 'muted' }, [m.refused ? `agent ${versionOf(m.agent) ? m.agent + ', ' : ''}too old for this server to hear` : `agent ${m.agent}`, m.online ? 'connected now' : 'not connected now'].join(' · '))),
+                h('a', { href: '#/computer/' + encodeURIComponent(m.id) }, 'Its page'),
+              ),
+            ),
+            h('p', { class: 'muted' }, 'A computer is gone from this list once it has been upgraded and its new agent has connected.'),
+          ),
+          accountPart(
+            'Why',
+            { id: 'upgrade-why' },
+            h('p', null, 'The plugin and the agent are now released signed, from a public repository, and an agent installs nothing that is not signed. An agent from before that cannot check what it installs, so it is not updated in place: the old one is removed and a new one is installed.'),
+            h('p', null, 'Your passphrase is no longer kept on your computers once your key is made from it. Removing the old plugin takes away what it kept, your passphrase among it. So each computer is signed in again, with an API token and your passphrase: that is the part that is yours.'),
+          ),
+          accountPart(
+            'The short way',
+            { id: 'upgrade-short' },
+            h('p', null, `On ${these}, start Claude Code in a terminal or in VS Code (not a session started from this page, which the old agent itself is running) and paste this:`),
+            codeBox(`Read ${guide}.md and upgrade ManyClaws on this computer.`),
+            h('p', null, 'Claude removes the old plugin and agent and installs the new ones. Then it asks you for the one step that is yours: step 3, below.'),
+          ),
+          accountPart(
+            'By hand',
+            { id: 'upgrade-by-hand' },
+            step(1, 'Remove the old marketplace and add the new one', h('p', null, 'In a terminal on the computer. The first line removes the old plugin with the marketplace it came from, and the API token and passphrase it was given with them; the other two install the plugin from the public repository.'), codeBox('claude plugin marketplace remove manyclaws\nclaude plugin marketplace add redimaker/manyclaws\nclaude plugin install manyclaws@manyclaws')),
+            step(
+              2,
+              'Remove the old agent and install the new one',
+              h('p', null, 'One command does both. It removes the old agent with everything it kept, its API token and key among it, and installs the newest release in its place, checked against its signature and set up as the old one was: the same computer here, with the same name and folders.'),
+              codeBox('curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/agent/install.sh | bash -s -- --reinstall'),
+              h('p', { class: 'muted' }, 'It ends the sessions the old agent is running, the ones started from this page: while there are any it does nothing and says so. Add --end-sessions to end them.'),
+            ),
+            step(
+              3,
+              'Sign the computer in again',
+              h('p', null, 'This step is yours. In Claude Code on the computer, type /plugin configure manyclaws@manyclaws (in the VS Code extension: /plugin, then the gear beside manyclaws), and give the plugin two things:'),
+              h(
+                'ul',
+                null,
+                h('li', null, h('b', null, 'A new API token. '), h('a', { href: '#/setup', 'data-part': 'upgrade-token' }, 'Make one here'), ': it is shown once, as it is made. The one the computer had can be taken back under Account once every computer has a new one.'),
+                h('li', null, h('b', null, 'Your encryption passphrase'), ': the one your account already has, which you typed into this browser.'),
+              ),
+              h('p', null, 'Then start a new Claude Code session. The plugin makes your key and gives the new agent the same token and key: there is nothing to type into the agent.'),
+            ),
+            h('p', null, h('a', { href: guide, target: '_blank', rel: 'noopener', 'data-part': 'upgrade-guide' }, 'The whole guide'), ', which says what each step does.'),
+          ),
+        ]
+      : [accountPart('Up to date', { id: 'upgrade-computers', 'data-part': 'upgrade' }, h('p', { class: 'guide-status connected' }, '✓ None of your computers needs the one-time upgrade.'))]),
+    h('p', { class: 'upgrade-later' }, h('a', { href: '#', 'data-part': 'upgrade-later' }, old.length ? 'Not now: back to my sessions' : 'Back to my sessions')),
+  )
+  body.scrollTop = at
 }
 
 // The password, set or changed: on a page of its own, which the account's page leads to

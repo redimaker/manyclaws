@@ -1767,6 +1767,10 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 .guide-form .form-note.error { color: var(--error); }
 .invite-form { grid-template-columns: 1fr auto; gap: 8px; max-width: 560px; align-items: center; }
 .token-row, .person { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+/* (the one-time upgrade's steps, each under its number; and the way out of that page) */
+.upgrade-step h3 { margin: 18px 0 6px; font-size: 1em; }
+.upgrade-step:first-child h3 { margin-top: 0; }
+.upgrade-later { margin: 24px 0; }
 /* (a file's hash, under its name: in the type a hash is read in, and broken wherever the line ends) */
 .code-hash { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
 .token-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

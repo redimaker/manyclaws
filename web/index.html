@@ -20,14 +20,14 @@
        and holding it against the public repository's is holding all of it. The modules the script goes on to
        import are named too, each fetched and checked before the script asks for it (seal.js before keys.js, which
        imports it). -->
-  <link rel="stylesheet" href="app.css" integrity="sha384-p+H5JG1vyT08ydBGjfEe3dYlRRPJ2Lge3D3ryjQcOzaCMMiB1Udrph5GkDOQpJYX">
+  <link rel="stylesheet" href="app.css" integrity="sha384-Y1tqllnPUffUbtyKatsyY1kHqKCs7zPj6ReaBSuCslMVtFfyd4Kjr8+ztkJnWv33">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-It05x/2EV39+9/HmQFKcu0xLy0Rs5ZCmqyt4XwhlEcW2mU87v/zjlyvqiIz2en0u">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-ULTJ89WZ9+4RXOW62G3TXOWdyHcpPmWFfDlj3HmZ+Ahz8jbBLag8JrNA8ow0fXmX">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-B1CvuHkwxxLe6VIx00ahJBtgg+SZDU3ZEzHKK/X9HRbSRG1z+ui5orsJIvJrtpnx">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-vjYD0/zLU+HzcLnhWRAepZlgvqGIWMy7uD1jWGWYGt58IbWv+uEbZfg1YMEjH1UB">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-w+/fVzQtEtgcqsDZth00TL3NiGQ8L7PE5ffHkCqrGaekGoOy5O6yNiwwkdLXXgzP">
-  <script src="app.js" defer integrity="sha384-5+rsPDKSkTUi/Ewt80+Oqg83BtfCR/bBpXnnGPpxLkzcZurybiZJX2T6Q1aNbLmm"></script>
+  <script src="app.js" defer integrity="sha384-DW3oD/mlIXhoEt7dJf+RUCds/pKSzlE0wzW5qpAVQ0dj+c4k7I7rdpRUrqEr4sQp"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -114,6 +114,7 @@
     <div id="notices" class="notices">
       <p id="offline" class="notice offline" role="status" hidden>Not connected: what's here may be out of date. Trying again…</p>
       <p id="update" class="notice update" role="status" hidden><span>A new version of ManyClaws is ready.</span> <button type="button" id="update-reload">Reload</button></p>
+      <p id="upgrade-note" class="notice locked" role="status" hidden><span id="upgrade-says"></span> <a id="upgrade-link" href="#/account/upgrade">What to do</a></p>
       <p id="locked" class="notice locked" role="status" hidden><span id="locked-says">Your sessions are encrypted, and this browser has not been given your passphrase.</span> <a id="locked-link" href="#/account">Type it in</a></p>
     </div>
     <aside id="list-pane">

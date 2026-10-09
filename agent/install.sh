@@ -64,7 +64,15 @@
 #                       agent reports is what it was set up with, unless --server names another.
 #                       Starting the agent again ends the sessions it is running (the ones
 #                       started from the page), so while there are any nothing is done
-#   --end-sessions      with --update: do it all the same, and end those sessions
+#   --end-sessions      with --update or --reinstall: do it all the same, and end those sessions
+#   --reinstall         remove the agent that is here, with everything it kept, and install the
+#                       newest release in its place, set up as the old one was (who the machine
+#                       is, its name, its folders and the rest of agent.json) but for its API
+#                       token and its key, which go with the old one: the new one waits for the
+#                       ManyClaws plugin to give it both again. The one-time upgrade of a machine
+#                       whose agent is from before releases were signed (before 5.1.0), which
+#                       cannot check what it installs. Like --update it does nothing while the
+#                       agent is running sessions, or from one of them
 #   --uninstall         stop the service and remove ~/.manyclaws
 #
 # Run again with new options to change them. The machine keeps its identity. Run again
@@ -83,7 +91,7 @@ from="${MANYCLAWS_AGENT_FROM:-https://codeload.github.com/$REPO/tar.gz/refs/head
 # release signed by one of these may bring an installer with others: that is how a key is
 # replaced, and it is why an installed agent is updated by its own copy of this script.
 SIGNERS='manyclaws namespaces="manyclaws-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMPeEfWVnYHahu/dRpMq7J+2eRNg67sQS+IJh/bH8PDD'
-server="" token="" label="" relay=0 uninstall=0 rekey=0 typed=0 update=0 end_sessions=0 keychain=1 signers=""
+server="" token="" label="" relay=0 uninstall=0 rekey=0 typed=0 update=0 end_sessions=0 keychain=1 signers="" reinstall=0
 roots=() spawn=() modes=() files=() key=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -102,6 +110,8 @@ while [ $# -gt 0 ]; do
     --new-passphrase) rekey=1; shift ;;
     --uninstall) uninstall=1; shift ;;
     --update) update=1; shift ;;
+    # (an update that first takes away what is here: nothing is asked, and nothing of the options is written)
+    --reinstall) reinstall=1; update=1; shift ;;
     --end-sessions) end_sessions=1; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
@@ -152,7 +162,7 @@ if [ "$uninstall" = 1 ]; then
 fi
 
 if [ "$update" = 1 ]; then
-  [ -f "$HOME_DIR/agent.json" ] || { echo "There is no ManyClaws agent on this machine to update: $HOME_DIR/agent.json is not there. Install it as the guide's step 3 has it." >&2; exit 2; }
+  [ -f "$HOME_DIR/agent.json" ] || { echo "There is no ManyClaws agent on this machine to $([ "$reinstall" = 1 ] && echo 'remove and install again' || echo update): $HOME_DIR/agent.json is not there. Install it as the guide's step 3 has it." >&2; exit 2; }
   # Starting it again ends the sessions it is running: each a Claude Code the agent started, under it
   if [ -n "$running" ] && [ "$end_sessions" = 0 ]; then
     hosted="$(ps -axww -o ppid=,command= 2>/dev/null | awk -v agent="$running" '$1 == agent' | grep -c -- '--input-format stream-json' || true)"
@@ -274,7 +284,15 @@ for (const f of listed) {
 }
 if (!listed.includes('agent/agent.mjs') || !listed.includes('agent/service.mjs') || !listed.includes('agent/install.sh')) no('the agent is not whole')
 CHECK
-for f in "$src"/*.mjs; do "$node_bin" --check "$f" || { echo "What $from gave does not read as the agent's files: nothing was changed" >&2; exit 1; }; done
+# Installed again: the agent that is here is stopped and taken away whole, with everything it kept (its files, its
+# index, what it remembered, its log), once the release that takes its place is in hand and checked. How the machine was
+# set up is kept and written back, but for what it signed in and sealed with: the new agent is given those again.
+kept=""
+if [ "$reinstall" = 1 ]; then
+  kept="$("$node_bin" -e 'const c = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); for (const k of ["token", "key", "has"]) delete c[k]; process.stdout.write(JSON.stringify(c, null, 2) + "\n")' "$HOME_DIR/agent.json")" || { echo "$HOME_DIR/agent.json does not read: nothing was changed" >&2; exit 1; }
+  stop_service
+  rm -rf "$HOME_DIR"
+fi
 mkdir -p "$HOME_DIR/agent"
 chmod 700 "$HOME_DIR"
 cp "$src"/*.mjs "$HOME_DIR/agent/"
@@ -298,6 +316,11 @@ if [ "$update" = 0 ]; then
   # (the key goes in the environment, not on a command line others can see)
   MANYCLAWS_HOME="$HOME_DIR" MANYCLAWS_TOKEN="$token" MANYCLAWS_KEY="$key" "$node_bin" "$HOME_DIR/agent/agent.mjs" configure "${configure[@]}" >/dev/null
 else
+  if [ "$reinstall" = 1 ]; then
+    (umask 077; printf '%s' "$kept" > "$HOME_DIR/agent.json")
+    # (and what the keychain had of the old one's goes too)
+    MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" forget 2>/dev/null || true
+  fi
   # (an agent brought up to date keeps its token and key where a new one does: on a Mac, in the keychain, unless this
   # machine was set up not to)
   MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" keychain || true
@@ -347,6 +370,12 @@ EOF
   loginctl enable-linger "$USER" 2>/dev/null || echo "Note: without 'loginctl enable-linger $USER' the agent stops when you log out."
 fi
 
+if [ "$reinstall" = 1 ]; then
+  echo "The old ManyClaws agent is removed, with its API token and its key and everything else it kept. Agent $(sed -n "s/^export const VERSION = '\(.*\)'\$/\1/p" "$HOME_DIR/agent/service.mjs") is installed in its place, as $from has it (a signed release, checked), and running, set up as the old one was. Its log: $HOME_DIR/agent.log"
+  echo "It has no API token or encryption key, and asked for none: it takes both from the ManyClaws plugin."
+  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: give the ManyClaws plugin the API token and the encryption passphrase (/plugin in Claude Code, the gear beside manyclaws), then start a new Claude Code session."
+  exit 0
+fi
 if [ "$update" = 1 ]; then
   echo "The ManyClaws agent is $(sed -n "s/^export const VERSION = '\(.*\)'\$/\1/p" "$HOME_DIR/agent/service.mjs") now, as $from has it (a signed release, checked), and running, set up as it was. Its log: $HOME_DIR/agent.log"
   # (what a machine set up before bypassPermissions had to be named would no longer start)

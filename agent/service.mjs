@@ -18,7 +18,7 @@ import { historyRows } from './rows.mjs'
 import { find as findFile, read as readFile, FileError, fileRoots } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '5.1.3'
+export const VERSION = '5.1.4'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
@@ -405,11 +405,23 @@ export async function run(config, flags = {}) {
   try {
     ordersKept = JSON.parse(fs.readFileSync(ordersFile, 'utf8'))
   } catch {}
+  // An agent that remembers no orders (one newly installed, or installed again in an old one's place as the same
+  // machine) cannot tell an order it has run from one it has not: so it runs none that was made before it started
+  // remembering, which is noted with the orders and outlasts them by as long as an order may be run.
+  const INSTALLED = 'remembering since'
+  const fresh = !ordersKept || typeof ordersKept !== 'object'
+  if (fresh) ordersKept = { [INSTALLED]: Date.now() }
+  const since = Number(ordersKept[INSTALLED]) || 0
   const orders = orderMemory(ordersKept, (now) => {
     try {
       fs.writeFileSync(ordersFile, JSON.stringify(now), { mode: 0o600 })
     } catch {}
   })
+  if (fresh) {
+    try {
+      fs.writeFileSync(ordersFile, JSON.stringify(ordersKept), { mode: 0o600 })
+    } catch {}
+  }
   const devicesFile = path.join(process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws'), 'devices')
   let devicesKept = null
   try {
@@ -449,6 +461,7 @@ export async function run(config, flags = {}) {
     try {
       const o = takeOrder(order, { key: sealKey, devices: devices.list, to, does, seen: orders })
       taken = o.n
+      if (o.at < since) throw new OrderRefused('it was asked before the agent on this machine was installed, which cannot tell whether it was run then: ask again (if it is refused again, the clock of the device you are asking from is behind this machine\'s)')
       return o
     } catch (err) {
       if (!(err instanceof OrderRefused)) throw err

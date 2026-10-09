@@ -70,7 +70,7 @@ The key reads what your sessions say. It cannot sign the list of your devices, s
 | `agent/secrets.mjs` | Where the agent keeps its token and your key: the keychain on a Mac |
 | `agent/verify.mjs` | Holds what is installed, and what a server hands a browser, against the signed release |
 | `agent/install.sh` | Installs the agent as a service of your own user (launchd on macOS, systemd on Linux), from a signed release and nothing else |
-| `web/` | The page: `index.html`, `app.js`, `keys.js`, `seal.js` and what they show |
+| `web/` | The page: `index.html`, `app.js`, `keys.js`, `seal.js` and what they show; and the two guides Claude Code can follow, `setup.md` and `upgrade.md` |
 | `release.json`, `release.json.sig` | The release: every file here with its SHA-256, and that list signed |
 | `release.mjs` | Makes a release, and writes the page's integrity values |
 | `.claude-plugin/marketplace.json` | Lets Claude Code install the plugin from this repository |
@@ -88,6 +88,8 @@ curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/agent/inst
 The first two install the plugin; the third installs the agent as a service of your own user and lets sessions be started in `~/code` (leave `--spawn` out and they can only be read and searched). Then give the plugin your API token and your encryption passphrase in its own dialog (`/plugin` in Claude Code), and start a new session.
 
 To update: `claude plugin marketplace update manyclaws`, `claude plugin update manyclaws@manyclaws`, and for the agent its own copy of the installer, `bash ~/.manyclaws/agent/install.sh --update`.
+
+**A computer set up before 9 October 2026** (its agent is older than 5.1.0) is upgraded once, by hand, and is not updated: <https://manyclaws.dev/upgrade> says how (`web/upgrade.md` here), and the page says so of an account that has such a computer. The old marketplace is removed and this repository's added (`claude plugin marketplace remove manyclaws`, which takes away the API token and the passphrase the old plugin kept), the old agent is removed and a new one installed in its place as the same computer (`install.sh --reinstall`), and the computer is given an API token and the passphrase again. It is a one-time step, after the change to signed releases: an agent from before cannot check what it installs.
 
 The plugin needs Claude Code 2.1.287 or later. The agent needs Node.js 22.13 or later and `ssh-keygen` (which comes with OpenSSH), and nothing else; it is for macOS and Linux.
 
