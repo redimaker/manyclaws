@@ -431,9 +431,40 @@ export class Host {
       const did = setListing(file, h.listed, { whole: whole && !this.open()[h.sid] })
       if (did === 'ok') h.marked = true
       if (did === 'ok' || whole) this.log(`${h.sid} ${did === 'ok' ? 'is marked to be ' + (h.listed ? 'shown in' : 'left out of') + " Claude Code's own lists" : 'could not be marked (' + did + ')'}`)
+      // (marked to be shown while it runs: a list that is open now is given cause to read again)
+      if (did === 'ok' && h.listed && !whole) this.haveListsRead(h)
     } catch (err) {
       this.log(`${h.sid} could not be marked: ${err.message}`)
     }
+  }
+
+  // A list of sessions already open in VS Code reads again (see saysTerminal): the
+  // session's record says for a moment that a terminal has it, and then what it said
+  haveListsRead(h) {
+    try {
+      const record = this.recordOf(h)
+      if (!record || !saysTerminal(record, true)) return
+      this.log(`${h.sid} says for a moment that a terminal has it, so that a list of sessions open in VS Code reads again`)
+      setTimeout(() => {
+        try {
+          saysTerminal(record, false)
+        } catch {} // (the session has gone, and its record with it)
+      }, LISTS_READ_MS).unref()
+    } catch (err) {
+      this.log(`${h.sid} is marked, and a list that is open was not given cause to read again: ${err.message}`)
+    }
+  }
+
+  // Claude Code's own record of a session the agent runs, among those of its open sessions
+  recordOf(h) {
+    for (const root of [h.root, ...this.config.roots, path.join(os.homedir(), '.claude')]) {
+      if (!root) continue
+      const file = path.join(root, 'sessions', h.proc.pid + '.json')
+      try {
+        if (JSON.parse(fs.readFileSync(file, 'utf8')).sessionId === h.sid) return file
+      } catch {}
+    }
+    return null
   }
 
   // Where Claude Code writes a session's transcript: as the index has it, else where one in that folder goes
@@ -539,6 +570,38 @@ export function relabelled(lines, listed) {
   if (!row || typeof row !== 'object' || Array.isArray(row)) return lines[0]
   const { entrypoint, ...rest } = row
   return JSON.stringify({ entrypoint: listed ? 'cli' : 'sdk-cli', ...rest })
+}
+
+// ---- Having a list that is already open read again. VS Code's list of a project's
+// sessions reads when it is opened, and after that of itself only for a session of its
+// own or for one in that project, not in the list, that is open in a terminal: which is
+// what it takes a session to be whose record among Claude Code's open sessions has cli
+// for its "entrypoint". It does not read for one a program runs (sdk-cli), as the agent
+// runs these, since it would leave that out. So a session just marked to be shown was
+// in no list that was open until something else had the list read. The session's own
+// record is made to say cli for a moment, in place and to the same length, as the
+// transcript's word is; the list reads, and has the session from then on; and the
+// record says what it said. VS Code reads within a quarter of a second of the change.
+
+const AS_STARTED = Buffer.from('"entrypoint":"sdk-cli"')
+const AS_A_TERMINAL = Buffer.from('"entrypoint":"cli"    ')
+const LISTS_READ_MS = 3000
+
+// Has the record of an open session say that a terminal has it (`on`), or what Claude
+// Code wrote of it. False, and nothing written, where it does not say the other.
+export function saysTerminal(file, on) {
+  const [from, to] = on ? [AS_STARTED, AS_A_TERMINAL] : [AS_A_TERMINAL, AS_STARTED]
+  const fd = fs.openSync(file, 'r+')
+  try {
+    const head = Buffer.alloc(8192)
+    const n = fs.readSync(fd, head, 0, head.length, 0)
+    const at = head.subarray(0, n).indexOf(from)
+    if (at < 0) return false
+    fs.writeSync(fd, to, 0, to.length, at)
+    return true
+  } finally {
+    fs.closeSync(fd)
+  }
 }
 
 // The largest transcript carried to another machine, packed (one with many screenshots in it packs to tens of megabytes)
