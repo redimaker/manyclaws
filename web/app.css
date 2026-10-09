@@ -331,7 +331,12 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
   background: var(--panel);
   min-height: 44px;
 }
-.brand { font-size: 11px; font-weight: 400; text-transform: uppercase; letter-spacing: .04em; margin: 0; flex: 1; }
+.brand { display: flex; align-items: center; gap: .6em; font-size: 11px; font-weight: 400; text-transform: uppercase; letter-spacing: .04em; margin: 0; flex: 1; min-width: 0; }
+/* (the two claws beside the name, as the icon has them, in the site's red: the lighter of its two on a dark page) */
+.brand svg { width: auto; height: 1.35em; flex: none; fill: #e2664a; }
+@media (prefers-color-scheme: light) {
+  .brand svg { fill: #c6452c; }
+}
 .conn { width: 8px; height: 8px; border-radius: 50%; background: var(--offline); flex-shrink: 0; }
 .conn.live { background: var(--idle); }
 .empty { margin: auto; color: var(--muted); padding: 16px; text-align: center; }

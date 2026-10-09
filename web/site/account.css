@@ -25,7 +25,7 @@
 [data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-name { color: var(--s-text); font-family: var(--s-serif); font-size: 20px; font-weight: 500; letter-spacing: -.01em; }
 [data-site] :is(#account, #setup, #new, #computer, #settings-page) .chat-sub { display: none; }
 [data-site] :is(#account, #setup, #new, #computer, #settings-page) .acct-mark { display: none; align-items: center; gap: 8px; margin-right: auto; color: var(--s-text); font-family: var(--s-serif); font-size: 24px; font-weight: 500; letter-spacing: -.01em; text-decoration: none; }
-[data-site] :is(#account, #setup, #new, #computer, #settings-page) .acct-mark svg { width: 22px; height: 22px; fill: var(--s-accent); transform: rotate(-18deg); }
+[data-site] :is(#account, #setup, #new, #computer, #settings-page) .acct-mark svg { width: auto; height: 20px; flex: none; fill: var(--s-accent); }
 [data-site] #account #logout { order: 1; padding: 8px 12px; border: 0; border-radius: 6px; background: none; color: var(--s-muted); font: inherit; white-space: nowrap; }
 [data-site] #account #logout:hover { color: var(--s-text); }
 [data-site] :is(#account, #setup, #new, #computer, #settings-page) .back { order: 2; display: none; align-items: center; min-height: 36px; margin-left: 8px; padding: 8px 16px; border-radius: 8px; background: var(--s-btn); color: var(--s-btn-text); font-size: 15px; font-weight: 500; line-height: 1; text-decoration: none; white-space: nowrap; transition: opacity .15s ease; }
