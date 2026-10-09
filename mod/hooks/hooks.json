@@ -1,0 +1,4 @@
+{
+  "description": "ManyClaws session relay",
+  "modules": ["./register.js"]
+}

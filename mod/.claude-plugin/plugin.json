@@ -1,0 +1,32 @@
+{
+  "name": "manyclaws",
+  "version": "5.0.1",
+  "description": "Connects this session to a ManyClaws server: its chat, state and approvals on one web page for every machine and account, with replies from anywhere",
+  "author": {
+    "name": "Deon Brewis"
+  },
+  "userConfig": {
+    "token": {
+      "type": "string",
+      "title": "API token",
+      "description": "An API token from your account page (Account, API tokens). It signs this computer in, and can be taken back there at any time",
+      "sensitive": true
+    },
+    "label": {
+      "type": "string",
+      "title": "Label (optional)",
+      "description": "A name for this machine or account on the web page, such as Work laptop"
+    },
+    "key": {
+      "type": "string",
+      "title": "Encryption passphrase",
+      "description": "Your encryption passphrase: the same one you type on your account page. Your key is made from it on this computer, and everything this computer's sessions say is sealed with that key before it is sent, so only your own devices can read it. Without it nothing is sent: no session of this computer shows on the page. It is hidden as you type, and stays on this computer: the server is told nothing of it, so nothing checks it for you. Type the same one on every computer and browser: where they differ, what this computer sends cannot be opened on the page, which says so",
+      "sensitive": true
+    },
+    "capabilities": {
+      "type": "string",
+      "title": "Capabilities (optional)",
+      "description": "What the server may do here: default, all, or changes such as +files,+exec. Default: inspect, chat, notify, message, approve"
+    }
+  }
+}

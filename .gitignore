@@ -1,0 +1,9 @@
+# Written by Claude Code each time it loads the plugin from --plugin-dir
+mod/.claude-plugin/types/
+mod/tsconfig.json
+
+# Credentials kept beside the code, never in it
+*.tok
+
+node_modules/
+.DS_Store

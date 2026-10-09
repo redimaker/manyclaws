@@ -1,0 +1,12 @@
+{
+  "name": "redimaker",
+  "owner": { "name": "Deon Brewis" },
+  "description": "Redimaker's Claude Code plugins",
+  "plugins": [
+    {
+      "name": "manyclaws",
+      "source": "./mod",
+      "description": "Connects each Claude Code session to a ManyClaws server: its chat, state, approvals and questions on one web page for every machine and account"
+    }
+  ]
+}
