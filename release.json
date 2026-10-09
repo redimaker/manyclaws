@@ -1,5 +1,5 @@
 {
-  "release": 12,
+  "release": 13,
   "made": "2026-10-09",
   "plugin": "5.1.1",
   "agent": "5.2.0",
@@ -77,6 +77,6 @@
     "web/site/site.css": "c57a8bdc37f68b69b211c5f5294e8cfb5dda15dfa0f804a5bdc99f5c5627e6e0",
     "web/site/site.js": "ba06d01c737fb403f85403b4630763779878946b47b03fe19630a0e5b74600d8",
     "web/sw.js": "a9366407691d9801213ec914454a039b112d4b7c73a280e61b7a4d5b8528e7bf",
-    "web/upgrade.md": "0582ef2e896caaf33d03f66898ea1fbdb90a1699d3fd599c52aa0d7230f5062d"
+    "web/upgrade.md": "e9369c9ea1999521520f68d8e1917f0c65f94d2b5739d92f831ea7cccb956933"
   }
 }
