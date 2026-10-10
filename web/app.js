@@ -807,14 +807,41 @@ function showLogin() {
   return signupMode()
 }
 
+// ---- A person, not a script. Where the server asks for it (it says where its check is, with how it takes
+// accounts), whoever makes an account passes Cloudflare's check first. Cloudflare's script is not run here, where a
+// password and a passphrase are typed: the check is in a frame from an address of its own, another origin to the
+// browser, which reads nothing of this page. The frame tells this page one thing, a token (good once, for five
+// minutes), and the token goes with the form.
+const human = { at: '', token: '', frame: null }
+function showCheck() {
+  el('signup-check').hidden = !human.at
+  if (!human.at || human.frame) return
+  human.frame = document.createElement('iframe')
+  human.frame.title = 'A check that you are a person'
+  human.frame.src = human.at + '/'
+  el('signup-check').append(human.frame)
+}
+window.addEventListener('message', (ev) => {
+  if (!human.frame || ev.origin !== human.at || ev.source !== human.frame.contentWindow || ev.data?.manyclaws !== 'check') return
+  if ('token' in ev.data) human.token = typeof ev.data.token === 'string' ? ev.data.token : ''
+  // (the frame says how tall its widget is: on a narrow phone it is the small, taller one)
+  if (Number.isFinite(ev.data.height)) human.frame.style.height = Math.min(Math.max(ev.data.height, 40), 200) + 'px'
+})
+// A token is good once: when it has been sent, the frame is asked for another
+function checkAgain() {
+  human.token = ''
+  human.frame?.contentWindow?.postMessage({ manyclaws: 'check-again' }, human.at)
+}
+
 // How this server takes new accounts: from anyone ('open'), by an invite's link ('invite'),
 // or not at all ('closed'). Making one is offered where anyone may; an invite's link opens the form itself.
 async function signupMode() {
-  const mode = await fetch('/api/signup')
+  const can = await fetch('/api/signup')
     .then((r) => r.json())
-    .then((can) => can.mode)
-    .catch(() => '')
+    .catch(() => null)
+  const mode = can?.mode ?? ''
   if (!mode) return ''
+  human.at = typeof can.check === 'string' ? can.check : ''
   el('login-new').hidden = mode !== 'open'
   return mode
 }
@@ -834,6 +861,7 @@ async function showSignup(invite = '') {
   if (mode === 'closed') return say('login-error', 'This server is not taking new accounts.')
   if (mode === 'invite' && !invite) return say('login-error', "An account here is made with an invite: open the link you were sent by whoever runs this server.")
   el('signup-invite').value = invite
+  showCheck()
   showCard('signup-form')
   if (!invite) return
   const can = await fetch('/api/signup?invite=' + encodeURIComponent(invite))
@@ -888,8 +916,10 @@ async function signUp({ email, password, invite }) {
   const K = await keys()
   // (the server never has the password, so it's the page that holds it to a length)
   if (password.length < K.MIN_PASSWORD) return 'The password needs at least 8 characters.'
+  if (human.at && !human.token) return 'The check that you are a person is not done yet. Give it a moment, or tick its box, then try again.'
   const made = await K.newPassword(password)
-  const r = await sendJson('/api/signup', { email, password: made.auth, invite, kdf: made.kdf })
+  const r = await sendJson('/api/signup', { email, password: made.auth, invite, kdf: made.kdf, ...(human.at ? { check: human.token } : {}) })
+  if (human.at) checkAgain()
   if (r.ok) await markPassword(K, made.auth)
   return r.ok ? '' : r.error
 }

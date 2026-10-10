@@ -262,6 +262,9 @@ pre, code { font-family: var(--mono); }
   padding: 8px 10px;
   font-size: 16px;
 }
+/* The check that whoever makes an account is a person: a frame from another address, as wide as the card's fields
+   (its height is the widget's, which the frame says) */
+.signup-check iframe { display: block; width: 100%; height: 65px; border: 0; color-scheme: normal; }
 /* API tokens and the passphrase (Account, and Set up a computer) */
 .token-new, .passphrase-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
 .token-new input, .passphrase-box input { flex: 1; min-width: 180px; }

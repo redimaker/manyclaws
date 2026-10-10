@@ -1,6 +1,6 @@
 {
-  "release": 16,
-  "made": "2026-10-09",
+  "release": 17,
+  "made": "2026-10-10",
   "plugin": "5.1.1",
   "agent": "5.2.0",
   "files": {
@@ -26,8 +26,8 @@
     "mod/hooks/seal.js": "960c2c831c656765adee123e955bac2ea28f81cfe40ba0a671db2e0db5cbde2c",
     "mod/tests/lib.test.ts": "240f855a5719c769f9789de48af0ba42beb578d0b7401659c3c8fb52a0d5a9bc",
     "mod/tests/mod.test.ts": "97fb521e1e11f0d5bd20bc79a3cab346df496cbe4b857e0e1b13fb3e7094e3d7",
-    "web/app.css": "a8e3beabc078ace0a2cfcf832a01396f3dae00cf24d5cf5280ef5e63f3d17a3e",
-    "web/app.js": "e978fc57ccd695d85d204f28b1898fae88e59b1ae3804cbc230b7b0431bf8a68",
+    "web/app.css": "2a1d03a5aa2ea75cc631af91a0ccb514686338f70ce6f81ea603459326f799e7",
+    "web/app.js": "22d66e5b12e3857783a540206241cc7fbcf794ccac75d05bb78a31c64af7b46c",
     "web/home.html": "9c50fb90537d324632a78bf3d8de6aef50627c3a9256f0a6a5c8606caed7d6d9",
     "web/icons/apple-touch-icon.png": "112c3e38c33ebbc48af0e34e32e611a3c5764543883176201f434d2ffae97044",
     "web/icons/badge-96.png": "d2144540484405c14a48d6456bd030b9f8a0d685ea2595728bf8709409b2a9f0",
@@ -35,7 +35,7 @@
     "web/icons/icon-512.png": "68210fa4a61d9536b2f840ac4841a569f1972c86e412c383794ee3aa54e38135",
     "web/icons/icon-maskable-512.png": "6d67517211466100180fb453856ce78e65512dda3e614b02537aa83c5fefe77a",
     "web/icons/tab-64.png": "af273af0b387c9db6c071c1210afcf003e1ce641428a5c3a34d3e92202f43761",
-    "web/index.html": "5177e9ece040f52dc79ca0a1fc660b4c04c9c1afb6d7c3a6f22bca45130b0ea0",
+    "web/index.html": "d9c6bd3db136ef9b497792361097272dbfbbc945008b117f529edffa6dd0efb4",
     "web/keys.js": "521342822f1b11ce79f5c0515b08d10eb93802ded25154a0988c75d3b11cbaca",
     "web/legal.html": "c2e599c483448395ad7d87dbf16388ff44db9bbe857f086c81e24098db1c0d04",
     "web/manifest.webmanifest": "2beffc6e8cb380634e3d25072b23fdfaf4794b559c2ba519d3427a14cd321c3a",
