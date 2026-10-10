@@ -1581,7 +1581,10 @@ addEventListener('pageshow', (ev) => ev.persisted && checkStream({ now: true }))
 // While the page is open it can say so itself. Once this device has subscribed (below),
 // the server sends the notifications, and they arrive whether the page is open or not.
 function alertUser(title, body, sid) {
-  if (app.pushOn || !('Notification' in window) || Notification.permission !== 'granted' || (!document.hidden && sid === app.current)) return
+  // (the page shows one itself only where it says it does, "on while this page is open": where this device takes
+  // none with the page shut. Where they are on, the server sends them. And where they are off, nothing shows any: a
+  // device that had turned them off went on being shown them by the open page, for as long as it was allowed to.)
+  if (alertsState() !== 'open' || (!document.hidden && sid === app.current)) return
   const url = '/#/s/' + encodeURIComponent(sid)
   try {
     // A phone's browser only lets its service worker show one
@@ -1650,9 +1653,24 @@ const keyBytes = (key) => Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_
 
 // This device's subscription with its push service, handed to the server. `ask`: make
 // one if there's none (a tap on the button); without it, only what's there is kept in step.
+// This device taken off the server's list, by what its browser holds of the subscription or, where it holds none
+// now, by the name the server gave it; and the browser's own let go. One left with the server goes on being sent to.
+async function dropAlerts() {
+  const sub = await app.worker?.pushManager?.getSubscription().catch(() => null)
+  const which = sub ? { endpoint: sub.endpoint } : app.pushId ? { id: app.pushId } : null
+  if (which) await fetch('/api/push/unsubscribe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(which) }).catch(() => {})
+  await sub?.unsubscribe().catch(() => {})
+  app.pushOn = false
+  app.pushId = null
+}
+
 async function syncAlerts({ ask = false } = {}) {
   try {
     if (!canPush() || Notification.permission !== 'granted') return
+    // (turned off on this device: it stays off when the page is opened again, and a subscription the browser kept
+    // all the same is not handed back to the server. Turned on here, it is on again.)
+    if (ask) localStorage.removeItem('mc.alertsOff')
+    else if (localStorage.getItem('mc.alertsOff') === '1') return void (await dropAlerts())
     const { key } = await (await fetch('/api/push')).json()
     let sub = await app.worker.pushManager.getSubscription()
     // One made for another server's key is no use to this one
@@ -1677,11 +1695,17 @@ async function syncAlerts({ ask = false } = {}) {
   }
 }
 
+// How notifications stand on this device: none to be had, to be had from the Home Screen, blocked in the browser, on
+// (the server sends them), shown by the page while it is open (they could not be set up to arrive otherwise), or off
+function alertsState() {
+  const has = 'Notification' in window
+  return !has ? (needsHomeScreen() ? 'home' : 'none') : Notification.permission === 'denied' ? 'blocked' : app.pushOn ? 'on' : Notification.permission === 'granted' && !canPush() ? 'open' : Notification.permission === 'granted' && app.pushError ? 'open' : 'off'
+}
+
 function renderAlertsButton() {
   const button = el('alerts')
   const note = el('alerts-note')
-  const has = 'Notification' in window
-  const state = !has ? (needsHomeScreen() ? 'home' : 'none') : Notification.permission === 'denied' ? 'blocked' : app.pushOn ? 'on' : Notification.permission === 'granted' && !canPush() ? 'open' : Notification.permission === 'granted' && app.pushError ? 'open' : 'off'
+  const state = alertsState()
   button.hidden = state === 'none'
   button.dataset.state = state
   // (it is called Notifications whatever the state, with on or off beside it: its title says the rest)
@@ -1723,12 +1747,9 @@ async function alertsPressed({ fromList = false } = {}) {
   }
   if (state === 'on') {
     if (!(await ask('Turn notifications off on this device?', { yes: 'Turn off' }))) return
-    const sub = await app.worker.pushManager.getSubscription().catch(() => null)
-    if (sub) {
-      await fetch('/api/push/unsubscribe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {})
-      await sub.unsubscribe().catch(() => {})
-    }
-    app.pushOn = false
+    // (kept on the device: off is off until it is turned on here again, whatever the browser still holds)
+    localStorage.setItem('mc.alertsOff', '1')
+    await dropAlerts()
     return renderAlertsButton()
   }
   if (state === 'blocked') return
