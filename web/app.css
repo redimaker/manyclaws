@@ -450,6 +450,8 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 /* Three ways, one under another: each is all button */
 .ns-ways { display: grid; margin: 14px -12px 0; }
 .ns-ways button { position: relative; display: grid; gap: 1px; padding: 13px 44px 14px 12px; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; }
+/* (a way that is not offered for the device chosen: one is only the session's own computer's) */
+.ns-ways button[hidden] { display: none; }
 .ns-ways button + button::before { content: ""; position: absolute; top: 0; left: 12px; right: 12px; border-top: 1px solid var(--n-line); }
 .ns-ways button b { font-family: var(--s-serif, Georgia, serif); font-weight: 500; font-size: 20px; line-height: 1.25; letter-spacing: -.005em; }
 .ns-ways button span { font-size: 14px; line-height: 1.4; color: var(--n-muted); }

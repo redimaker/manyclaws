@@ -311,6 +311,8 @@ function catalogOf(mid, row, open = {}, hosted = []) {
     firstActivity: row.first_ts ?? 0,
     lastActivity: row.last_ts ?? 0,
     branch: row.branch ?? '',
+    // (where its transcript is on that machine, as the machine says: what a session made with a reference to this one is told)
+    path: typeof row.path === 'string' ? row.path : '',
     gone: !!row.gone,
     open: running ? { status: running.status, entrypoint: running.entrypoint, kind: running.kind } : null,
     hosted: (hosted ?? []).some((h) => h.sid === row.sid) || !!running?.mine,
@@ -2653,13 +2655,37 @@ el('mk-box').addEventListener('close', () => {
 window.addEventListener('hashchange', closeMarkBox)
 window.addEventListener('resize', () => el('mk-box').open && placeMarkBox())
 
-// ---- A new session from the one that's open: an empty one, a clone of it, or one that
-// starts from a handoff it writes; on the device it's on or another that's online, in
-// the project it's in or another of that device's
+// ---- A new session from the one that's open: an empty one, an empty one that is told
+// where this one's transcript is, a clone of it, or one that starts from a handoff it
+// writes; on the device it's on or another that's online, in the project it's in or
+// another of that device's. It can be named and made a favorite as it is asked for.
 
 // What the session is asked for a handoff. It goes to it as any prompt does: in an order.
 const HANDOFF_ASK =
   'Write a handoff document for a new Claude Code session that will take over this work from you. It will not have this conversation: only what you write now. Say what the goal is, what has been done and decided and why, the state things are in now (the files, branches and commands that matter), what is left to do, and anything that would trip up someone new to it. Reply with the document only: do not write it to a file, and do nothing else.'
+
+// What a session made with a reference to another is first told: where that one's transcript is, on the computer both
+// are on, and the time on the last line of it then, which is where the new one leaves it. It knows nothing of the
+// first but this, and reads what it needs of it when it needs it. It goes as its first prompt, in the order that
+// starts it (a computer's agent starts a session with a prompt or with nothing), so the session answers it, shortly.
+const referAsk = ({ title, path, at }) =>
+  [
+    `Forked from ${title ? `the session "${title}"` : 'another Claude Code session'}. You are a new session, and that conversation is not in your context. Its transcript is on this computer:`,
+    path,
+    `We are forking from it as it stood at ${new Date(at).toISOString()}, the timestamp of its last line then: lines with a later "timestamp" were written after the fork. It is JSON Lines, one message or tool call to a line, and may be large: search it or read parts of it when you need what was said, done or decided there, rather than reading it whole.`,
+    'Do nothing with it yet. Reply with one short line saying you have this, and wait for my next prompt.',
+  ].join('\n\n')
+
+// Where a session's transcript is on its computer, and the time on its last line: asked of the computer, whose agent
+// says both with any page of the transcript it reads out (the last few lines of it, here). Or why it could not be had.
+const REFER_ROWS = 20
+async function transcriptOf(mid, sid) {
+  const r = await fetch(`/api/machines/${mid}/sessions/${encodeURIComponent(sid)}/messages?` + (await askOf({ sid, limit: REFER_ROWS }))).catch(() => null)
+  const page = (await r?.json().catch(() => null)) ?? {}
+  if (!r?.ok || page.error) return { error: (page.error ?? 'the server did not answer') + whyOf(page) }
+  if (!page.session?.path) return { error: `${machineName(app.machines.get(mid))} no longer has it` }
+  return { path: page.session.path, at: Math.max(page.session.lastActivity || 0, ...page.messages.map((m) => m.ts || 0)) || Date.now() }
+}
 
 // The session the chat shows, as what a new one is made from
 function newFrom() {
@@ -2687,6 +2713,7 @@ function drawNewDevices(keep = true) {
   select.value = chosen?.id ?? ''
   const busy = el('ns-box').dataset.busy === '1'
   newBusy(busy)
+  drawNewWays()
   drawNewProjects()
   drawNewListed()
   if (busy) return
@@ -2763,6 +2790,21 @@ function drawNewListed() {
   el('ns-listed-hint').textContent = LISTED_HINT
 }
 
+// One with a reference to this session is offered on this session's own computer alone: it is told of a file there
+function drawNewWays() {
+  const on = newFrom()?.machine
+  el('ns-box').querySelector('[data-how="refer"]').hidden = !on || el('ns-device').value !== on
+}
+
+// What the new one is to be called here, and whether it is a favorite from the first: asked with the rest, and put
+// on it the moment it is made (dressNew)
+const NAME_ASKS = 'Optional: a name of your own for it'
+const newDress = () => ({ name: el('ns-name').value.trim(), favorite: el('ns-favorite').checked })
+function drawNewDress({ name = '', favorite = false } = {}) {
+  el('ns-name').value = name
+  el('ns-favorite').checked = favorite
+}
+
 function newNote(text, error = false) {
   const note = el('ns-note')
   note.textContent = text
@@ -2776,9 +2818,7 @@ function newBusy(on) {
   if (on) box.dataset.busy = '1'
   else delete box.dataset.busy
   const none = !el('ns-device').value
-  el('ns-device').disabled = on
-  el('ns-project').disabled = on
-  el('ns-listed').disabled = on
+  for (const id of ['ns-device', 'ns-project', 'ns-name', 'ns-favorite', 'ns-listed']) el(id).disabled = on
   for (const b of box.querySelectorAll('[data-how]')) b.disabled = on || none
 }
 
@@ -2806,6 +2846,8 @@ function openNewBox() {
   if (waiting) el('ns-box').dataset.busy = '1'
   else delete el('ns-box').dataset.busy
   delete el('ns-project').dataset.machine
+  // (nothing is asked of the next one yet; of one being waited for, what was asked)
+  drawNewDress(waiting?.dress)
   drawNewDevices(false)
   if (waiting && app.machines.get(waiting.mid)?.online) {
     el('ns-device').value = waiting.mid
@@ -2836,6 +2878,7 @@ async function newSession(how) {
   // (the project chosen, if its device's projects were read and it's that device's still)
   const cwd = el('ns-project').dataset.machine === mid ? el('ns-project').value : ''
   const listed = { listed: el('ns-listed').checked }
+  const dress = newDress()
   // Signed: for the computer the new session is to be on, all that it is to be (in the
   // mode the first is in, where that one allows it); and for the session asked to write
   // a handoff, the asking
@@ -2843,6 +2886,7 @@ async function newSession(how) {
   const was = modeOf(asking)
   const mode = m.spawn?.modes?.includes(was) ? was : undefined
   const there = app.machines.get(from.machine)
+  if (how === 'refer') return newReferring(from, m, { cwd: cwd || from.cwd, mode, ...listed }, dress)
   // (that machine's own copy of a session, in the project it is in: anything else is its transcript carried, to another machine or another project)
   const fork = from.machine === mid && (!cwd || folderKey(cwd) === folderKey(from.cwd))
   const carried = how === 'clone' && !fork && !!from.machine
@@ -2876,14 +2920,46 @@ async function newSession(how) {
   // A handoff takes the session a while to write, and a long transcript a while to
   // carry to another device: the server says how it goes, and when the new session is there
   if (data.pending) {
-    app.branching = { id: data.id, from: from.id, mid, how, at: Date.now() }
+    app.branching = { id: data.id, from: from.id, mid, how, at: Date.now(), dress }
     newNote(waitingNote(app.branching))
     // (word of how it ended can get here before the answer that it was begun)
     const ended = branchEnds.get(data.id)
     if (ended) branchTold(ended)
     return
   }
+  dressNew(data.sid, mid, dress)
   openBranched(data.sid, mid)
+}
+
+// An empty session on this one's own computer that is told where this one's transcript is (referAsk): the computer
+// is asked where that is, and for the time on its last line, and then to start a session with that for its first prompt.
+// Signed for that computer like any session started with a prompt, with the prompt in the order alone.
+async function newReferring(from, m, where, dress) {
+  if (!app.key) return newNote(NO_KEY, true)
+  newBusy(true)
+  newNote(`Starting on ${machineName(m)}…`)
+  const failed = (why) => {
+    newBusy(false)
+    newNote(why, true)
+  }
+  const file = await transcriptOf(m.id, from.id)
+  if (file.error) return failed(`Where this session's transcript is could not be read from ${machineName(m)}: ${file.error}.`)
+  const order = await orderFor(m.id, 'start', { ...where, prompt: referAsk({ title: (markOf(from.id)?.name || from.title).replace(/\s+/g, ' ').trim().slice(0, 80), ...file }) })
+  const r = await fetch(`/api/machines/${m.id}/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order }) }).catch(() => null)
+  const data = (await r?.json().catch(() => ({}))) ?? {}
+  if (!r?.ok) return failed((data.error ?? 'The session could not be started.') + whyOf(data))
+  dressNew(data.sid, m.id, dress)
+  openBranched(data.sid, m.id)
+}
+
+// What a new session was asked to be called, and that it is a favorite, put on it the moment it is made, before it
+// has said a word: both are the account's own, kept under the session's id as the pencil and the star keep them
+// (setMark, toggleFavorite), and neither is said to its computer. What the session is called itself, and where it is,
+// are kept with them when it first reports (markKept, favoriteKept).
+async function dressNew(sid, mid, { name = '', favorite = false } = {}) {
+  const s = { id: sid, machine: mid, title: '', project: '' }
+  if (name) await setMark(s, { name, label: '', color: '', remind: 0, notify: false })
+  if (favorite && !isFavorite(sid)) await toggleFavorite(await favoriteOf(s))
 }
 
 // On to the new session, which takes a moment to report
@@ -2907,11 +2983,14 @@ function branchTold(b) {
   const here = newFrom()?.id === b.from
   if ('progress' in b) return void (el('ns-box').open && here && newNote(waitingNote({ ...mine, progress: b.progress })))
   app.branching = null
+  // (named and kept as it was asked to be, wherever this page is by now)
+  if (b.ok) dressNew(b.sid, b.machine, mine.dress)
   // Still with the session it was made from: on to the new one
   if (b.ok) return void (here && openBranched(b.sid, b.machine))
   if (!here) return
-  // (said in the box, opened again if it was closed meanwhile)
+  // (said in the box, opened again if it was closed meanwhile, with what was asked of the new one still in it)
   openNewBox()
+  drawNewDress(mine.dress)
   newNote((mine.how === 'handoff' ? 'No handoff: ' : 'Not copied: ') + (b.error ?? 'the new session could not be started') + whyOf(b), true)
 }
 
@@ -2921,9 +3000,13 @@ el('ns-close').addEventListener('click', closeNewBox)
 el('ns-box').addEventListener('click', (ev) => ev.target === el('ns-box') && closeNewBox())
 el('ns-box').addEventListener('close', () => el('ns-open').setAttribute('aria-expanded', 'false'))
 el('ns-device').addEventListener('change', () => {
+  drawNewWays()
   drawNewProjects()
   drawNewListed()
 })
+// (Enter in the name is not a way chosen: the box stays as it is)
+el('ns-name').addEventListener('keydown', (ev) => ev.key === 'Enter' && !ev.isComposing && ev.preventDefault())
+for (const id of ['ns-name', 'new-name']) el(id).placeholder = NAME_ASKS
 el('ns-listed').addEventListener('change', () => keepListed(el('ns-listed').checked))
 el('ns-form').addEventListener('click', (ev) => {
   const how = ev.target.closest('[data-how]')?.dataset.how
@@ -4171,6 +4254,8 @@ async function openNew(mid) {
   fill(el('new-effort'), EFFORTS, last.effort)
   el('new-listed').checked = wantsListed()
   el('new-listed-row').title = LISTED_HINT
+  el('new-name').value = ''
+  el('new-favorite').checked = false
   const project = el('new-project')
   project.replaceChildren(h('option', { value: '' }, 'Reading the projects…'))
   renderList()
@@ -4242,6 +4327,8 @@ el('new-form').addEventListener('submit', async (ev) => {
   } catch {}
   buzz()
   el('new-prompt').value = ''
+  // (what it is to be called here, and whether it is a favorite from the first: put on it now that it is made)
+  dressNew(data.sid, mid, { name: el('new-name').value.trim(), favorite: el('new-favorite').checked })
   app.expect = { sid: data.sid, mid, until: Date.now() + 40_000 }
   location.hash = '#/s/' + encodeURIComponent(data.sid)
 })
@@ -6773,7 +6860,7 @@ function closeComputer() {
 
 async function openComputer(mid) {
   closeComputer()
-  const c = (app.computer = { mid, known: false, said: '', cwd: '', mode: '', read: false, reading: false, starting: false, error: '', colorError: '' })
+  const c = (app.computer = { mid, known: false, said: '', cwd: '', mode: '', name: '', favorite: false, read: false, reading: false, starting: false, error: '', colorError: '' })
   leaveChat()
   renderComputer()
   // (which computers the account has, and what each allows, is known once the stream has said)
@@ -6819,6 +6906,8 @@ async function startOnComputer() {
   }
   const cwd = c.cwd
   const mode = m.spawn?.modes?.includes(c.mode) ? c.mode : undefined
+  // (what it is to be called here, and whether it is a favorite from the first: put on it when it is made, as the box over a chat does)
+  const dress = { name: c.name.trim(), favorite: c.favorite }
   // (signed for that computer: where this device cannot sign, nothing is sent)
   const order = await orderFor(c.mid, 'branch', { how: 'new', cwd, mode, listed: wantsListed() })
   if (!order) return say(NO_KEY_MACHINE)
@@ -6834,6 +6923,9 @@ async function startOnComputer() {
     localStorage.setItem('mc.new', JSON.stringify({ ...last, ...(mode ? { mode } : {}), cwd: { ...last.cwd, [c.mid]: cwd } }))
   } catch {}
   c.starting = false
+  // (the next one asked for here is asked nothing of yet)
+  Object.assign(c, { name: '', favorite: false })
+  dressNew(data.sid, c.mid, dress)
   // (someone who has gone elsewhere meanwhile is left there: the session is in the list)
   if (app.computer === c) openBranched(data.sid, c.mid)
 }
@@ -6971,10 +7063,12 @@ function renderComputer() {
   const set = (id, value) => el(id) && el(id).value !== value && (el(id).value = value)
   set('computer-project', c.cwd)
   set('computer-mode', c.mode)
+  set('computer-session-name', c.name)
+  if (el('computer-favorite')) el('computer-favorite').checked = c.favorite
   if (el('computer-listed')) el('computer-listed').checked = wantsListed()
 }
 
-// A new session on it: the project, what it may do without asking, and New
+// A new session on it: the project, what it may do without asking, what it is to be called and whether it is a favorite, and New
 function newPart(c, m) {
   const name = machineName(m)
   const part = (...body) => accountPart('New session', { id: 'computer-new', 'data-key': 'new' }, ...body)
@@ -7015,6 +7109,8 @@ function newPart(c, m) {
       },
       h('label', { class: 'guide-field' }, 'Project', h('select', { id: 'computer-project', disabled: c.starting, onchange: (ev) => (c.cwd = ev.target.value) }, ...projects)),
       h('label', { class: 'guide-field' }, 'Permissions', h('select', { id: 'computer-mode', disabled: c.starting, onchange: (ev) => (c.mode = ev.target.value) }, ...modes.map((mode) => h('option', { value: mode }, PERMISSION_MODES[mode]?.[0] ?? mode)))),
+      h('label', { class: 'guide-field' }, 'Name', h('input', { id: 'computer-session-name', maxlength: '80', autocomplete: 'off', spellcheck: 'false', placeholder: NAME_ASKS, disabled: c.starting, oninput: (ev) => (c.name = ev.target.value) })),
+      h('label', { class: 'guide-check' }, h('input', { type: 'checkbox', id: 'computer-favorite', disabled: c.starting, onchange: (ev) => (c.favorite = ev.target.checked) }), 'Favorite: kept at the top of the list'),
       h('label', { class: 'guide-check', title: LISTED_HINT }, h('input', { type: 'checkbox', id: 'computer-listed', disabled: c.starting, onchange: (ev) => keepListed(ev.target.checked) }), "Show in VS Code's resume list"),
       h('div', { class: 'guide-end' }, h('button', { type: 'submit', class: 'primary', id: 'computer-start', disabled: c.starting || !all.length }, c.starting ? `Starting on ${name}…` : 'New')),
       c.error && h('p', { class: 'form-note error', role: 'alert', id: 'computer-error' }, c.error),

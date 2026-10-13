@@ -20,14 +20,14 @@
        and holding it against the public repository's is holding all of it. The modules the script goes on to
        import are named too, each fetched and checked before the script asks for it (seal.js before keys.js, which
        imports it). -->
-  <link rel="stylesheet" href="app.css" integrity="sha384-4IYF1g+NFlO1SjgQfUZDn1GP0VFsk5qdN8gg2t2pnZymw4EIub1L4FC81g4t495v">
+  <link rel="stylesheet" href="app.css" integrity="sha384-4szHY7iJTwtJYX61m/etVzN/de6517S1sFhhyKKBsOKcAQV2L+NMxpPuQTyIZTs8">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-It05x/2EV39+9/HmQFKcu0xLy0Rs5ZCmqyt4XwhlEcW2mU87v/zjlyvqiIz2en0u">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-iXNtiv6ROo1bs7A2jUQm6Ywq/IiiKm95WzhXkd7YrD6eOSprO2PAF4iMWvLTGBeZ">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-B1CvuHkwxxLe6VIx00ahJBtgg+SZDU3ZEzHKK/X9HRbSRG1z+ui5orsJIvJrtpnx">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-vjYD0/zLU+HzcLnhWRAepZlgvqGIWMy7uD1jWGWYGt58IbWv+uEbZfg1YMEjH1UB">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-w+/fVzQtEtgcqsDZth00TL3NiGQ8L7PE5ffHkCqrGaekGoOy5O6yNiwwkdLXXgzP">
-  <script src="app.js" defer integrity="sha384-5Tn0Ik0ZnvMhABHWbrY+/aURFqvlFqXWsaLi7m+suYTKGPX2NL1ecO6TO5UYAaiv"></script>
+  <script src="app.js" defer integrity="sha384-5skecZwuQEVT/tHs3usQ2lLAYKeF2sX0Xa3OqUteN0ZKcHGb6+RYMDW3v2FOhPaQ"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -248,6 +248,10 @@
               </label>
               <label class="check"><input id="new-create" type="checkbox"> Make the folder if it isn't there</label>
             </div>
+            <label>Name
+              <input id="new-name" maxlength="80" autocomplete="off" spellcheck="false">
+            </label>
+            <label class="check"><input id="new-favorite" type="checkbox"> Favorite: kept at the top of the list</label>
             <label class="check" id="new-listed-row"><input id="new-listed" type="checkbox" checked> Show in VS Code's resume list</label>
             <div class="new-row">
               <label>Permissions <select id="new-mode"></select></label>
@@ -403,9 +407,14 @@
           <select id="ns-project"></select>
         </label>
       </div>
+      <label class="mk-field">Name
+        <input id="ns-name" maxlength="80" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="ns-listed"><input id="ns-favorite" type="checkbox"><span><b>Favorite</b><i>Kept at the top of the list.</i></span></label>
       <label class="ns-listed"><input id="ns-listed" type="checkbox" checked><span><b>Show in VS Code's resume list</b><i id="ns-listed-hint"></i></span></label>
       <div class="ns-ways">
         <button type="button" data-how="new"><b>New</b><span>An empty session in that project.</span></button>
+        <button type="button" data-how="refer" hidden><b>New with reference to this session</b><span>An empty one, told where this session's transcript is and how far it had got, to read what it needs of it.</span></button>
         <button type="button" data-how="clone"><b>Full context clone</b><span>A copy that knows all this one knows.</span></button>
         <button type="button" data-how="handoff"><b>Handoff</b><span>This session writes a handoff document, and a new session starts from it.</span></button>
       </div>
