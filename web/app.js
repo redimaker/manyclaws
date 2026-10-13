@@ -4090,13 +4090,30 @@ function textNodes() {
 // projects (where the transcripts are), and nothing else. It is told so, and a transcript that says otherwise to it
 // is answered the same. Its answer is a list of sessions, each with why; then it is stopped.
 
-const HAIKU_TOOLS = ['Read', 'Grep', 'Glob']
+const HAIKU_TOOLS = ['Read', 'Grep', 'Glob', 'Bash']
 const HAIKU_SAYS = 'Search the Claude Code transcripts on this computer for:'
+// The commands a search of its may run in Bash (Claude Code searches with Bash, and has no Grep or Glob tools now),
+// each with what it may not be given: a way to run something else, write a file, or read one from elsewhere
+const HAIKU_SHELL = {
+  grep: ['-f', '--file'],
+  egrep: ['-f', '--file'],
+  rg: ['-f', '--file', '--pre', '--pre-glob', '--hostname-bin', '-z', '--search-zip', '--ignore-file'],
+  find: ['-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprint0', '-fprintf', '-fls'],
+  ls: [],
+  head: [],
+  tail: [],
+  wc: [],
+  cut: [],
+  sort: ['-o', '--output', '-T', '--temporary-directory', '--compress-program', '--files0-from'],
+  uniq: [],
+  tr: [],
+  cat: [],
+}
 const haikuAsk = (q, folders) =>
   [
     `${HAIKU_SAYS} ${q}`,
-    `They are JSON Lines files under ${folders.join(' and ')}: a folder for each project, in which a session's transcript is <session id>.jsonl, and its subagents' are under <session id>/subagents/. Use the Grep, Glob and Read tools only, and only on files there: nothing else will be allowed. Grep for the words and for words that mean the same, and read around what you find to judge it. Leave out any session whose first message begins "${HAIKU_SAYS}": those are searches like this one.`,
-    'The transcripts are large: most are far more than Read takes at once (25,000 tokens), and a single line of one can be thousands of characters long. Never Read a whole transcript, and never Read one without offset and limit. Find what you need with Grep: first the files that match (files_with_matches), then the matching lines of a few of them (content, with a head_limit, and -C for a line or two around them). Read only a few lines at a time, with offset and limit, where Grep says the match is.',
+    `They are JSON Lines files under ${folders.join(' and ')}: a folder for each project, in which a session's transcript is <session id>.jsonl, and its subagents' are under <session id>/subagents/. Search them with Bash, and with nothing but ${Object.keys(HAIKU_SHELL).join(', ')}, joined by | where you need to, on paths under that folder written out in full (no ~, no ..), with no redirection but 2>/dev/null, and none of ; && $( ) or backticks. Read a part of one with the Read tool. Nothing else will be allowed. Search for the words and for words that mean the same, and read around what you find to judge it. Leave out any session whose first message begins "${HAIKU_SAYS}": those are searches like this one.`,
+    `The transcripts are large: most are far more than Read takes at once (25,000 tokens), and one line of one, a whole message, can be thousands of characters long. Never Read one whole, nor without offset and limit, and never print whole lines of one: first list the files that match (grep -l -r -i 'word' ${folders[0]} --include='*.jsonl'), then print only the few characters around each match (grep -o -i -E '.{0,120}word.{0,120}' <file> | head -20).`,
     'Reply with the sessions that match best, at most ten, the best first, one to a line, as: <session id> — <what in it matches, in a few words>. Reply with that list and nothing else. If none matches, reply: none',
   ].join('\n\n')
 const haikuSaid = new Set() // the prompts of its that were answered here
@@ -4128,12 +4145,81 @@ el('set-haiku-warn').addEventListener('change', (ev) => haikuKeep({ warn: ev.tar
 // The one of its searches a session is, while it searches
 const haikuRun = (sid) => app.haiku?.runs.find((r) => r.sid === sid && r.state === 'searching') ?? null
 
-// What it may do: one of those tools, on paths under the folders where the transcripts are, and no way out of them
+// What it may do: read and search the files under the folders where the transcripts are, and nothing else. With Read,
+// Grep or Glob, paths under them; with Bash, a command that only reads (haikuShell).
+const underFolders = (p, folders) => !/(^|[\\/])\.\.([\\/]|$)/.test(p) && folders.some((f) => p === f || p.startsWith(f + '/') || p.startsWith(f + '\\'))
 function haikuMay(r, folders) {
   if (r.kind !== 'approval' || !HAIKU_TOOLS.includes(r.tool)) return false
   const i = r.input ?? {}
+  if (r.tool === 'Bash') return i.run_in_background !== true && haikuShell(i.command, folders)
   const paths = [i.file_path, i.path, typeof i.pattern === 'string' && /^([\\/]|[A-Za-z]:)/.test(i.pattern) ? i.pattern : null].filter((p) => typeof p === 'string' && p)
-  return !!paths.length && paths.every((p) => !/(^|[\\/])\.\.([\\/]|$)/.test(p) && folders.some((f) => p === f || p.startsWith(f + '/') || p.startsWith(f + '\\')))
+  return !!paths.length && paths.every((p) => underFolders(p, folders))
+}
+
+// A command's words, one list for each part of it between |, as the shell would take them; or null where it has more
+// of the shell in it than words, quotes and pipes: another command after it, a substitution, a variable, a redirection
+// (but 2>/dev/null), a backslash, a comment, a background
+function shellWords(command) {
+  const s = String(command ?? '')
+  const parts = [[]]
+  let word = null
+  for (let i = 0; i < s.length; ) {
+    const c = s[i]
+    if (c === "'") {
+      const j = s.indexOf("'", i + 1)
+      if (j < 0) return null
+      word = (word ?? '') + s.slice(i + 1, j)
+      i = j + 1
+    } else if (c === '"') {
+      const j = s.indexOf('"', i + 1)
+      if (j < 0 || /[$`\\!]/.test(s.slice(i + 1, j))) return null
+      word = (word ?? '') + s.slice(i + 1, j)
+      i = j + 1
+    } else if (c === ' ' || c === '\t') {
+      if (word !== null) parts.at(-1).push(word)
+      word = null
+      i++
+    } else if (c === '|' && s[i + 1] !== '|') {
+      if (word !== null) parts.at(-1).push(word)
+      word = null
+      parts.push([])
+      i++
+    } else if (word === null && s.startsWith('2>/dev/null', i) && /^($|[ \t|])/.test(s.slice(i + 11, i + 12))) {
+      i += 11
+    } else if (/[;&<>`$(){}\n\r\\!#]/.test(c) || c === '|') {
+      return null
+    } else {
+      word = (word ?? '') + c
+      i++
+    }
+  }
+  if (word !== null) parts.at(-1).push(word)
+  return parts.every((p) => p.length) ? parts : null
+}
+
+// Whether a command only reads under those folders: each part one of the commands above, given none of what it may
+// not be, and every path in it (a word with a / in it, or after an option's =) under them, written out in full
+function haikuShell(command, folders) {
+  const parts = shellWords(command)
+  if (!parts) return false
+  return parts.every(([name, ...args]) => {
+    const not = HAIKU_SHELL[name]
+    if (!not) return false
+    // (uniq writes to a second file it is given: here it is given none, only options)
+    if (name === 'uniq' && args.some((a) => !a.startsWith('-'))) return false
+    return args.every((a) => {
+      // an option it may not have, alone, with =, or among others run together (-iz)
+      if (not.some((o) => a === o || a.startsWith(o + '=') || (o.length === 2 && /^-[A-Za-z]+$/.test(a) && a.slice(1).includes(o[1])))) return false
+      if (a.startsWith('~')) return false
+      // (tr is given characters, not files; cut a / to cut at, which is no path)
+      if (name === 'tr') return true
+      if (name === 'cut' && (a === '/' || /^-d\/$/.test(a))) return true
+      const at = a.indexOf('/')
+      if (at < 0) return !/(^|[\\/])\.\.([\\/]|$)/.test(a)
+      // (the path in it: the word itself, or what follows an option's = or a short option's letter)
+      return a.slice(0, at).replace(/^--?[A-Za-z-]*=?/, '') === '' && underFolders(a.slice(at), folders)
+    })
+  })
 }
 
 async function askHaiku() {
@@ -4193,7 +4279,7 @@ function haikuWatch() {
     for (const r of s.pendingRequests ?? []) {
       if ((r.status && r.status !== 'pending') || haikuSaid.has(r.rid)) continue
       haikuSaid.add(r.rid)
-      answer(r, haikuMay(r, run.folders) ? { decision: 'allow' } : { decision: 'deny', reason: `In this search only ${HAIKU_TOOLS.join(', ')} are allowed, and only on the files under ${run.folders.join(' and ')}.` }, { quiet: true })
+      answer(r, haikuMay(r, run.folders) ? { decision: 'allow' } : { decision: 'deny', reason: `In this search only reading and searching the files under ${run.folders.join(' and ')} is allowed: Bash with nothing but ${Object.keys(HAIKU_SHELL).join(', ')}, joined by | where needed, every path under that folder written out in full, no redirection but 2>/dev/null and none of ; && $( ) or backticks; or Read, with offset and limit.` }, { quiet: true })
     }
     if (s.state === 'idle' && s.lastReply) haikuRead(run)
   }
