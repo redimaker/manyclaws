@@ -20,7 +20,9 @@ const rendered = (src) => (trusted ? trusted.createHTML(src) : markdown(src))
 // What a session's tile shows beside its name, until this device says otherwise (the settings): the project
 // and computer it is on, the last thing its user typed, the last thing Claude said, when it was last heard
 // from, and how many lines each thing said may take
-const TILE = { where: true, prompt: true, reply: true, time: true, lines: 1 }
+const TILE = { where: true, prompt: true, reply: true, time: true, claws: true, star: true, grip: true, edit: true, lines: 1 }
+// (the three on a tile that are pressed: each can be left off, and brought back by a long press or a double click)
+const TILE_OPTIONS = ['star', 'grip', 'edit']
 // How long a session this page saw go quiet stays among the active ones in the list (renderList)
 const QUIET_MS = 30_000
 // A phone's one pane at a time; and the page kept on a home screen as an app of its own
@@ -84,7 +86,8 @@ const app = {
   past: null, // the open session when it's read from a machine's transcript: { mid, sid, at, sub, from, session }
   // The search: its words, the machines and projects with matches (`data`), which rows are
   // open ("m:<machine>", "p:<machine>|<folder>", "s:<machine>|<session>"), and what's been read under them
-  search: { q: '', seq: 0, data: null, open: new Set(), sessions: new Map(), hits: new Map() },
+  search: { q: '', seq: 0, data: null, open: new Set(), sessions: new Map(), hits: new Map(), by: 'title' },
+  haiku: null, // the last search Haiku was asked for, on each computer that could start one: { q, runs: [{ mid, sid, state, folders, found, why }] }
   drafts: {}, // what's typed and not sent, by session: { text, at }
   expect: null, // a session just started or resumed, not reporting yet: { sid, mid, until }
   computer: null, // the computer whose own page is showing: { mid, known, cwd, mode, read, reading, starting, error, colorError }
@@ -1345,6 +1348,7 @@ function connect() {
     app.streamTries = 0
     app.downSince = null
     el('conn').classList.add('live')
+    el('conn').classList.remove('down')
     showNotices()
     // (the list of the account's devices may have been put anew while nothing was heard: is this one still on it?)
     seeToDevice().catch(() => {})
@@ -1355,6 +1359,7 @@ function connect() {
   stream.addEventListener('error', async () => {
     if (stream !== app.stream) return
     el('conn').classList.remove('live')
+    el('conn').classList.add('down')
     app.downSince ??= Date.now()
     const closed = stream.readyState === EventSource.CLOSED
     // A signed-out page has to sign in again instead
@@ -1384,6 +1389,7 @@ function connect() {
     app.machines = new Map((snapshot.machines ?? []).map((m) => [m.id, m]))
     for (const s of app.sessions.values()) settle(s, had.get(s.id) ?? null)
     autoApprove()
+    haikuWatch()
     snapshotCame()
     seeToUpgrade()
     app.favorites = snapshot.favorites ?? []
@@ -1417,11 +1423,12 @@ function connect() {
     const before = app.sessions.get(s.id)
     // Alert when a session starts waiting for an answer
     // (not for what this browser says yes to by itself: nobody is needed for that)
-    const waits = (x) => (x?.pendingRequests ?? []).filter((r) => !autoTakes(s.id, r)).length
+    const waits = (x) => (haikuRun(s.id) ? [] : (x?.pendingRequests ?? []).filter((r) => !autoTakes(s.id, r))).length
     if (waits(s) > waits(before)) alertUser(nameOf(s) + (s.host ? ' · ' + s.host : ''), 'Needs you: ' + (s.detail || 'Claude is waiting'), s.id)
     const isNew = !before
     app.sessions.set(s.id, s)
     autoApprove()
+    haikuWatch()
     favoriteKept(s)
     markKept(s)
     app.told.set(s.id, ++app.tellings)
@@ -2141,7 +2148,7 @@ function startedBy(s) {
 }
 
 // ManyClaws' mark on the tile of a running session its computer's agent runs: the two claws beside the page's name,
-// small, at the end of the tile's first line, before the time. What it means is said to whoever points at it, or has it read out.
+// small, at the end of the tile's first line, before the time (unless this device's settings leave it off). What it means is said to whoever points at it, or has it read out.
 const BY_AGENT = 'Started from this page: the ManyClaws agent on its computer runs it, and Exit ends it'
 function agentMark(s) {
   if (!s || s.ended || !s.online || !s.hosted) return null
@@ -3250,7 +3257,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
     h(
       'div',
       { class: 'row-main' },
-      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.where && agentMark(s), tile.time && h('span', { class: 'row-time' }, ago(s.lastActivity))),
+      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.claws && agentMark(s), tile.time && h('span', { class: 'row-time' }, ago(s.lastActivity))),
       (sub.length || s.agents?.length || soon) && h('div', { class: 'row-sub' }, sub, sub.length && s.agents?.length ? ' · ' : '', agentsMark(s), (sub.length || s.agents?.length) && soon ? ' · ' : '', soon),
       due && remindLine(mark),
       typed && h('div', { class: 'row-prompt', title: 'The last thing you typed to it' }, h('span', { class: 'row-prompt-mark', 'aria-hidden': 'true' }, '❯'), h('span', { class: 'row-said' }, typed)),
@@ -3282,7 +3289,7 @@ function tileKept() {
     kept = JSON.parse(localStorage.getItem('mc.tile'))
   } catch {}
   const tile = { ...TILE }
-  for (const k of ['where', 'prompt', 'reply', 'time']) if (typeof kept?.[k] === 'boolean') tile[k] = kept[k]
+  for (const k of ['where', 'prompt', 'reply', 'time', 'claws', ...TILE_OPTIONS]) if (typeof kept?.[k] === 'boolean') tile[k] = kept[k]
   if ([1, 2, 3].includes(kept?.lines)) tile.lines = kept.lines
   return tile
 }
@@ -3311,6 +3318,9 @@ const TILE_SAMPLE = {
 // number of lines to the page (app.css clamps by it), and a tile drawn that way
 function markTile() {
   document.documentElement.dataset.tileLines = String(app.tile.lines)
+  // (the star, the grip and the pencil this device leaves off its tiles, and that it says how to have them back)
+  document.documentElement.dataset.tileOff = TILE_OPTIONS.filter((k) => !app.tile[k]).join(' ')
+  el('tile-options-note').hidden = TILE_OPTIONS.every((k) => app.tile[k])
   for (const box of document.querySelectorAll('[data-tile]')) box.checked = !!app.tile[box.dataset.tile]
   for (const b of document.querySelectorAll('[data-tile-lines]')) b.setAttribute('aria-pressed', String(Number(b.dataset.tileLines) === app.tile.lines))
   const row = renderRow({ ...TILE_SAMPLE, lastActivity: Date.now() - 3 * 60_000 })
@@ -3320,6 +3330,67 @@ function markTile() {
   fill(el('tile-sample'), row)
 }
 for (const box of document.querySelectorAll('[data-tile]')) box.addEventListener('change', () => setTile({ [box.dataset.tile]: box.checked }))
+
+// ---- The star, the grip and the pencil on a tile: each shown, or left off (the settings). Those left off are brought
+// back on every tile by a long press or a double click on one, and stay until a press on a tile that is not on one of
+// them, which goes on to do what it does.
+const LONG_PRESS_MS = 500
+const onOption = (node) => !!node.closest?.('.star, .grip, .row-edit')
+function tileOptions(on) {
+  if (on === document.documentElement.hasAttribute('data-tile-options')) return
+  if (on) document.documentElement.dataset.tileOptions = ''
+  else delete document.documentElement.dataset.tileOptions
+}
+{
+  const list = el('session-list')
+  let press = null // a press on a tile that may become a long one
+  let longAt = 0 // when a long press brought them back: the click it ends with is not a press on the tile
+  let finger = false
+  const forget = () => {
+    clearTimeout(press?.timer)
+    press = null
+  }
+  list.addEventListener('pointerdown', (ev) => {
+    finger = ev.pointerType !== 'mouse'
+    if (!ev.target.closest('.row') || onOption(ev.target) || ev.button > 0) return
+    forget()
+    press = {
+      x: ev.clientX,
+      y: ev.clientY,
+      timer: setTimeout(() => {
+        press = null
+        longAt = Date.now()
+        tileOptions(true)
+        buzz()
+      }, LONG_PRESS_MS),
+    }
+  })
+  list.addEventListener('pointermove', (ev) => press && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) > 10 && forget())
+  for (const type of ['pointerup', 'pointercancel', 'pointerleave']) list.addEventListener(type, forget)
+  // (a phone says a long press is one for its own menu: on a tile it is this)
+  list.addEventListener('contextmenu', (ev) => {
+    if (!finger || !ev.target.closest('.row')) return
+    ev.preventDefault()
+    forget()
+    longAt = Date.now()
+    tileOptions(true)
+  })
+  list.addEventListener('dblclick', (ev) => ev.target.closest('.row') && !onOption(ev.target) && tileOptions(true))
+  list.addEventListener(
+    'click',
+    (ev) => {
+      if (!ev.target.closest('.row') || onOption(ev.target)) return
+      if (Date.now() - longAt < 1000) {
+        longAt = 0
+        ev.preventDefault()
+        ev.stopPropagation()
+        return
+      }
+      tileOptions(false)
+    },
+    true,
+  )
+}
 for (const b of document.querySelectorAll('[data-tile-lines]')) b.addEventListener('click', () => setTile({ lines: Number(b.dataset.tileLines) }))
 
 const markPastBy = () => {
@@ -3686,9 +3757,52 @@ function pastRow(s, { inProject = false, favorite = false, due = false } = {}) {
   )
 }
 
-// ---- Search: every session on every machine that's online
+// ---- Search: every session on every machine that's online. While its box is in use, the head of the list gives way
+// to what is searched: the names the sessions go by here (Title, to begin with), what was typed to them (Prompt), or
+// all that was said and done in them (Text); and beside those, Haiku, which is asked once (see askHaiku).
+
+const SEARCH_BY = ['title', 'prompt', 'text']
+function searchOpen(on) {
+  if (el('list-pane').classList.contains('searching') === on) return
+  el('list-pane').classList.toggle('searching', on)
+  el('list-pane').querySelector(':scope > header.bar').hidden = on
+  el('search-by').hidden = !on
+  if (on) return
+  // (left empty: the list as it is, at once, and the next search begins with the names)
+  clearTimeout(searchTimer)
+  app.search = { ...app.search, q: '', seq: app.search.seq + 1, data: null }
+  setSearchBy('title', { run: false })
+  renderList()
+}
+// In use: the box has the focus, or one of the ways beside it, or has words in it
+const searchInUse = () => document.activeElement === el('search') || el('search-by').contains(document.activeElement) || !!el('search').value.trim()
+function setSearchBy(by, { run = true } = {}) {
+  if (SEARCH_BY.includes(by)) app.search.was = by
+  app.search.by = by
+  for (const b of document.querySelectorAll('#search-by [data-search-by]')) b.setAttribute('aria-pressed', String(b.dataset.searchBy === by))
+  el('search-haiku').setAttribute('aria-pressed', String(by === 'haiku'))
+  if (run) runSearch()
+}
+for (const ev of ['focus', 'pointerdown']) el('search').addEventListener(ev, () => searchOpen(true))
+// (gone from the box and from what is beside it, with nothing typed: the head is back)
+const searchLeft = () => setTimeout(() => searchInUse() || searchOpen(false), 0)
+el('search').addEventListener('blur', searchLeft)
+el('search-by').addEventListener('focusout', searchLeft)
+// (a press on one of the ways leaves the box in use, with what was typed in it)
+el('search-by').addEventListener('pointerdown', (ev) => ev.target.closest('button') && ev.preventDefault())
+for (const b of document.querySelectorAll('#search-by [data-search-by]'))
+  b.addEventListener('click', () => {
+    setSearchBy(b.dataset.searchBy)
+    el('search').focus()
+  })
+el('search-haiku').addEventListener('click', () => {
+  askHaiku()
+  el('search').focus()
+})
 
 el('search').addEventListener('input', () => {
+  // (what Haiku found is of the words it was asked for: other words are searched the way that was chosen before)
+  if (app.search.by === 'haiku') setSearchBy(app.search.was ?? 'title', { run: false })
   clearTimeout(searchTimer)
   searchTimer = setTimeout(runSearch, 200)
 })
@@ -3696,35 +3810,95 @@ el('search').addEventListener('keydown', (ev) => {
   if (ev.key !== 'Escape') return
   el('search').value = ''
   runSearch()
+  el('search').blur()
 })
 
-// The words are searched on every machine; what comes back first is which machines have
-// matches, and in which of their projects. The rest is read as it's opened.
+// The words are searched on every machine, the way chosen. For the text, what comes back first is which machines
+// have matches, and in which of their projects, and the rest is read as it's opened; the names and the prompts
+// come back as the sessions themselves.
 async function runSearch() {
   const q = el('search').value.trim()
   const seq = ++app.search.seq
+  searchOpen(searchInUse())
   if (!q) {
     app.search = { ...app.search, q: '', seq, data: null }
     return renderList()
   }
   app.search.q = q
+  if (app.search.by === 'haiku') return renderList()
   // One letter matches most of everything
   if (q.length < 2) {
-    app.search.data = { machines: [], short: true }
+    app.search.data = { machines: [], found: [], short: true, by: app.search.by }
     return renderList()
   }
+  const by = app.search.by
+  if (app.search.data?.by !== by) app.search.data = null
   renderList()
+  const data = { ...(await (by === 'title' ? titleSearch(q) : by === 'prompt' ? promptSearch(q) : textSearch(q))), by }
+  if (seq !== app.search.seq) return // a newer search is on its way
+  app.search.data = data
+  if (by === 'text' && data.machines?.length) followSearch()
+  renderList()
+}
+
+async function textSearch(q) {
   // The words go sealed, to every machine alike. (With nothing to seal them with they are not sent anywhere, and that is said.)
   const sealed = await sealFor({ q, subagents: true })
-  if (!sealed) {
-    app.search.data = { machines: [], locked: true }
-    return renderList()
-  }
+  if (!sealed) return { machines: [], locked: true }
   const r = await fetch('/api/search/machines?c=' + encodeURIComponent(sealed)).catch(() => null)
-  if (seq !== app.search.seq) return // a newer search is on its way
-  app.search.data = r?.ok ? await r.json() : { machines: [], failed: true }
-  followSearch()
-  renderList()
+  return r?.ok ? await r.json() : { machines: [], failed: true }
+}
+
+// Every word, in what a session is called here
+const searchWords = (q) => q.toLowerCase().split(/\s+/).filter(Boolean)
+const hasWords = (text, words) => words.every((w) => String(text ?? '').toLowerCase().includes(w))
+
+// The names: what the sessions reporting are called here, the names given to sessions, and what each computer's
+// sessions are called there, asked of each with the words (which it matches in a session's title, first prompt or
+// folder: the ones whose name has them all are kept here). A session called by a name of its own is found by that name.
+async function titleSearch(q) {
+  if (!app.key) return { found: [], locked: true }
+  const words = searchWords(q)
+  const found = new Map() // id -> { mid, s, live }
+  for (const s of app.sessions.values()) if (hasWords(nameOf(s), words)) found.set(s.id, { mid: s.machine ?? '', s, live: true })
+  for (const m of app.marks.values()) if (!found.has(m.id) && m.name && hasWords(m.name, words)) found.set(m.id, { mid: m.machine, s: { ...m, title: m.title || m.name, lastActivity: 0 } })
+  const unreachable = []
+  await Promise.all(
+    [...app.machines.values()]
+      .filter((m) => m.online)
+      .map(async (m) => {
+        const r = await fetch(`/api/machines/${m.id}/sessions?` + (await askOf({ q, limit: 500 }))).catch(() => null)
+        if (!r?.ok) return void unreachable.push(machineName(m))
+        for (const s of (await r.json()).sessions ?? []) {
+          const had = found.get(s.id)
+          if (had?.live) continue
+          if (had || hasWords(markOf(s.id)?.name || s.title, words)) found.set(s.id, { mid: m.id, s })
+        }
+      }),
+  )
+  return { found: [...found.values()].sort((a, b) => (b.s.lastActivity ?? 0) - (a.s.lastActivity ?? 0)), unreachable }
+}
+
+// What was typed to them: the words in their user's prompts alone, on every machine, each session with its matches
+async function promptSearch(q) {
+  const sealed = await sealFor({ q, roles: ['user'], limit: 30, subagents: false })
+  if (!sealed) return { found: [], locked: true }
+  const r = await fetch('/api/search?c=' + encodeURIComponent(sealed)).catch(() => null)
+  if (!r?.ok) return { found: [], failed: true }
+  const data = await r.json()
+  const found = []
+  let indexing = 0
+  for (const x of data.results ?? []) {
+    const mid = x.machine?.id
+    const m = app.machines.get(mid)
+    const got = x.r && typeof x.r === 'object' ? x.r : null
+    indexing += got?.indexing ?? 0
+    for (const g of got?.results ?? []) {
+      const live = isReporting(g.sid) ? app.sessions.get(g.sid) : null
+      found.push({ mid, s: live ?? catalogOf(mid, g.session ?? { sid: g.sid }, m?.open ?? {}, m?.hosted ?? []), live: !!live, hits: g.hits ?? [], last: g.hits?.[0]?.ts ?? 0 })
+    }
+  }
+  return { found: found.sort((a, b) => b.last - a.last), unreachable: data.unreachable ?? [], indexing }
 }
 
 // The way down that was open stays open, read again for the new words; and a level
@@ -3787,12 +3961,40 @@ const SEARCH_SESSIONS = 30
 const SEARCH_HITS = 20
 const count = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`
 
-// Machines with matches, then a machine's projects, a project's sessions, a session's matches
+// What a search found, the way it was asked
 function searchNodes() {
-  const { data, open, q } = app.search
-  if (!data) return [h('div', { class: 'list-empty' }, 'Searching…')]
+  const { data, by } = app.search
+  if (by === 'haiku') return haikuNodes()
+  // (what was found the way that was chosen before is not shown as what this way found)
+  if (!data || data.by !== by) return [h('div', { class: 'list-empty' }, 'Searching…')]
   if (data.short) return [h('div', { class: 'list-empty' }, 'Keep typing: a search takes two letters or more.')]
   if (data.locked) return [h('div', { class: 'list-empty' }, 'Your sessions are end-to-end encrypted, and so is what you search them for: type your passphrase under Account first.')]
+  return by === 'text' ? textNodes() : foundNodes(data.found, { empty: data.failed ? 'The search could not be run.' : 'Nothing found.', notes: searchNotes(data) })
+}
+
+// Sessions found, under the computer each is on: as the list shows them, with what was found in each where it says
+function foundNodes(found, { empty, notes = [] } = {}) {
+  const groups = new Map()
+  for (const f of found) groups.set(f.mid ?? '', [...(groups.get(f.mid ?? '') ?? []), f])
+  const nodes = []
+  for (const [mid, list] of groups) {
+    const m = app.machines.get(mid)
+    nodes.push(h('div', { class: 'group-head', 'data-key': 'found:' + mid }, h('span', { class: 'machine-name' }, m ? whereLabel(machineName(m), mid) : (whereOf(list[0].s) ?? 'Elsewhere'))))
+    for (const f of list) {
+      nodes.push(f.live ? renderRow(f.s) : pastRow(f.s))
+      for (const hit of f.hits ?? []) nodes.push(h('a', { class: 'hit', 'data-depth': 1, href: `#/m/${mid}/${encodeURIComponent(f.s.id)}?at=${encodeURIComponent(hit.uuid)}` }, h('span', { class: 'hit-role' }, HIT_ROLES[hit.role] ?? hit.role), ...marked(hit.snippet)))
+      if (f.why) nodes.push(h('div', { class: 'found-why' }, f.why))
+    }
+  }
+  if (!found.length && empty) nodes.push(h('div', { class: 'list-empty' }, empty))
+  for (const n of notes) nodes.push(h('div', { class: 'list-empty' }, n))
+  return nodes
+}
+const searchNotes = (data) => [data.unreachable?.length && 'Not searched (offline): ' + data.unreachable.join(', '), data.indexing && `Still indexing ${data.indexing} files; more may turn up.`, !app.machines.size && 'Search covers machines running the ManyClaws agent; none is connected.'].filter(Boolean)
+
+// Machines with matches, then a machine's projects, a project's sessions, a session's matches
+function textNodes() {
+  const { data, open } = app.search
   const nodes = []
   // A row that opens onto what's under it
   const branch = (depth, key, load, title, label, tally) => {
@@ -3839,11 +4041,143 @@ function searchNodes() {
     }
   }
   if (!data.machines.length) nodes.push(h('div', { class: 'list-empty' }, data.failed ? 'The search could not be run.' : 'Nothing found.'))
-  const notes = []
-  if (data.unreachable?.length) notes.push('Not searched (offline): ' + data.unreachable.join(', '))
-  if (data.indexing) notes.push(`Still indexing ${data.indexing} files; more may turn up.`)
-  if (!app.machines.size) notes.push('Search covers machines running the ManyClaws agent; none is connected.')
-  for (const n of notes) nodes.push(h('div', { class: 'list-empty' }, n))
+  for (const n of searchNotes(data)) nodes.push(h('div', { class: 'list-empty' }, n))
+  return nodes
+}
+
+// ---- Haiku: asked once, on each computer that is connected and can start a session, to look through the transcripts
+// there for what was typed. It is a session like any started from here, in the first folder that computer allows,
+// run by Claude Haiku, named for what it was asked, and left out of VS Code's list. What it asks to do is answered
+// here, by this page, while it searches: Read, Grep and Glob, on the files under that computer's Claude Code folders'
+// projects (where the transcripts are), and nothing else. It is told so, and a transcript that says otherwise to it
+// is answered the same. Its answer is a list of sessions, each with why; then it is stopped.
+
+const HAIKU_TOOLS = ['Read', 'Grep', 'Glob']
+const HAIKU_SAYS = 'Search the Claude Code transcripts on this computer for:'
+const haikuAsk = (q, folders) =>
+  [
+    `${HAIKU_SAYS} ${q}`,
+    `They are JSON Lines files under ${folders.join(' and ')}: a folder for each project, in which a session's transcript is <session id>.jsonl, and its subagents' are under <session id>/subagents/. Use the Grep, Glob and Read tools only, and only on files there: nothing else will be allowed. Grep for the words and for words that mean the same, and read around what you find to judge it. Leave out any session whose first message begins "${HAIKU_SAYS}": those are searches like this one.`,
+    'Reply with the sessions that match best, at most ten, the best first, one to a line, as: <session id> — <what in it matches, in a few words>. Reply with that list and nothing else. If none matches, reply: none',
+  ].join('\n\n')
+const haikuSaid = new Set() // the prompts of its that were answered here
+// The one of its searches a session is, while it searches
+const haikuRun = (sid) => app.haiku?.runs.find((r) => r.sid === sid && r.state === 'searching') ?? null
+
+// What it may do: one of those tools, on paths under the folders where the transcripts are, and no way out of them
+function haikuMay(r, folders) {
+  if (r.kind !== 'approval' || !HAIKU_TOOLS.includes(r.tool)) return false
+  const i = r.input ?? {}
+  const paths = [i.file_path, i.path, typeof i.pattern === 'string' && /^([\\/]|[A-Za-z]:)/.test(i.pattern) ? i.pattern : null].filter((p) => typeof p === 'string' && p)
+  return !!paths.length && paths.every((p) => !/(^|[\\/])\.\.([\\/]|$)/.test(p) && folders.some((f) => p === f || p.startsWith(f + '/') || p.startsWith(f + '\\')))
+}
+
+async function askHaiku() {
+  const q = el('search').value.trim()
+  setSearchBy('haiku', { run: false })
+  // (one still searching for other words is stopped: it is this search that is wanted now)
+  for (const run of app.haiku?.runs ?? []) if (run.state === 'searching' || run.state === 'starting') haikuStop(run, 'stopped')
+  if (q.length < 2) app.haiku = { q, short: true, runs: [] }
+  else if (!app.key) app.haiku = { q, locked: true, runs: [] }
+  else {
+    const able = [...app.machines.values()].filter((m) => m.online && m.spawn && (m.roots ?? []).length)
+    app.haiku = { q, runs: able.map((m) => ({ mid: m.id, state: 'starting', folders: m.roots.map((root) => root.replace(/[\\/]+$/, '') + (root.includes('\\') ? '\\' : '/') + 'projects') })) }
+  }
+  renderList()
+  const hk = app.haiku
+  await Promise.all(hk.runs.map((run) => haikuStart(hk, run)))
+}
+
+async function haikuStart(hk, run) {
+  const m = app.machines.get(run.mid)
+  const mode = m?.spawn?.modes?.includes('default') ? 'default' : undefined
+  const order = await orderFor(run.mid, 'start', { prompt: haikuAsk(hk.q, run.folders), model: 'haiku', mode, name: 'Haiku search', listed: false })
+  const r = order ? await fetch(`/api/machines/${run.mid}/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order }) }).catch(() => null) : null
+  const data = (await r?.json().catch(() => ({}))) ?? {}
+  if (run.state !== 'starting') return
+  if (!r?.ok) {
+    run.state = 'failed'
+    run.why = (data.error ?? 'Haiku could not be started there') + whyOf(data)
+    return haikuDrawn()
+  }
+  run.sid = data.sid
+  run.state = 'searching'
+  dressNew(data.sid, run.mid, { name: 'Haiku search: ' + hk.q.slice(0, 60) })
+  haikuDrawn()
+  haikuWatch()
+}
+
+// Looked at whenever a session is heard from: what one of its searches asks is answered, and one whose turn is over has its answer read
+function haikuWatch() {
+  if (!app.haiku || !app.key) return
+  for (const run of app.haiku.runs) {
+    if (run.state !== 'searching') continue
+    const s = app.sessions.get(run.sid)
+    if (!s) continue
+    for (const r of s.pendingRequests ?? []) {
+      if ((r.status && r.status !== 'pending') || haikuSaid.has(r.rid)) continue
+      haikuSaid.add(r.rid)
+      answer(r, haikuMay(r, run.folders) ? { decision: 'allow' } : { decision: 'deny', reason: `In this search only ${HAIKU_TOOLS.join(', ')} are allowed, and only on the files under ${run.folders.join(' and ')}.` }, { quiet: true })
+    }
+    if (s.state === 'idle' && s.lastReply) haikuRead(run)
+  }
+}
+
+// Its answer, the last thing it said, read from its chat (a session's card has only the start of it); and then it is stopped
+async function haikuRead(run) {
+  run.state = 'reading'
+  const r = await fetch('/api/sessions/' + encodeURIComponent(run.sid) + '/messages?limit=30').catch(() => null)
+  const rows = r?.ok ? ((await r.json()).messages ?? []) : []
+  const said = rows.findLast((m) => m.role === 'assistant' && m.text)?.text ?? ''
+  haikuStop(run, 'done')
+  const seen = new Set([run.sid, ...(app.haiku?.runs ?? []).map((x) => x.sid)])
+  run.found = []
+  for (const line of said.split('\n')) {
+    const m = /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b(?:\.jsonl)?\W*(.*)$/i.exec(line)
+    if (!m || seen.has(m[1].toLowerCase())) continue
+    seen.add(m[1].toLowerCase())
+    run.found.push({ mid: run.mid, sid: m[1].toLowerCase(), why: m[2].replace(/^[\s—–:|*_-]+|[*_\s]+$/g, '') })
+  }
+  run.found = run.found.slice(0, 10)
+  // (each as its computer has it: one it does not have is not a session there, whatever Haiku said)
+  await Promise.all(
+    run.found.map(async (f) => {
+      const page = await fetch(`/api/machines/${run.mid}/sessions/${encodeURIComponent(f.sid)}/messages?` + (await askOf({ sid: f.sid, limit: 1 }))).then((x) => (x.ok ? x.json() : null), () => null)
+      f.s = page?.session ?? null
+      f.live = isReporting(f.sid)
+      if (f.live) f.s = app.sessions.get(f.sid)
+    }),
+  )
+  run.found = run.found.filter((f) => f.s)
+  haikuDrawn()
+}
+
+function haikuStop(run, state) {
+  run.state = state
+  if (run.sid) fetch(`/api/machines/${run.mid}/sessions/${encodeURIComponent(run.sid)}/stop`, { method: 'POST' }).catch(() => {})
+}
+
+const haikuDrawn = () => app.search.by === 'haiku' && renderList()
+
+function haikuNodes() {
+  const hk = app.haiku
+  const note = (text) => h('div', { class: 'list-empty' }, text)
+  if (!hk || hk.short) return [note('Type what to look for first: two letters or more.')]
+  if (hk.locked) return [note('Your sessions are end-to-end encrypted, and so is what you search them for: type your passphrase under Account first.')]
+  if (!hk.runs.length) return [note('None of your computers that is connected can start a session, so Haiku cannot be asked to search there.')]
+  const nodes = [h('div', { class: 'haiku-note', 'data-key': 'haiku-asked' }, `Haiku was asked to look for: ${hk.q}`)]
+  for (const run of hk.runs) {
+    const m = app.machines.get(run.mid)
+    const name = machineName(m)
+    if (run.state !== 'done') {
+      nodes.push(h('div', { class: 'group-head', 'data-key': 'haiku:' + run.mid }, h('span', { class: 'machine-name' }, whereLabel(name, run.mid))))
+      const says = { starting: `Starting Haiku on ${name}…`, searching: `Haiku is reading the transcripts on ${name}…`, reading: `Reading what Haiku found on ${name}…`, failed: `Haiku could not search ${name}: ${run.why}.`, stopped: 'Stopped.' }[run.state]
+      nodes.push(h('div', { class: 'haiku-note' }, says, run.state === 'searching' ? [' ', h('a', { href: '#/s/' + encodeURIComponent(run.sid) }, 'Watch it')] : null))
+      continue
+    }
+    if (run.found.length) nodes.push(...foundNodes(run.found))
+    else nodes.push(h('div', { class: 'group-head', 'data-key': 'haiku:' + run.mid }, h('span', { class: 'machine-name' }, whereLabel(name, run.mid))), note(`Haiku found nothing on ${name}.`))
+  }
   return nodes
 }
 
@@ -7354,7 +7688,7 @@ async function startOver() {
   app.catalog.clear()
   app.projects.clear()
   app.projectOpen.clear()
-  app.search = { q: '', seq: 0, data: null, open: new Set(), sessions: new Map(), hits: new Map() }
+  app.search = { q: '', seq: 0, data: null, open: new Set(), sessions: new Map(), hits: new Map(), by: 'title' }
   app.sawSealed = false
   app.firstSeenTo = null
   if (await loadAccount()) enter()
