@@ -20,14 +20,14 @@
        and holding it against the public repository's is holding all of it. The modules the script goes on to
        import are named too, each fetched and checked before the script asks for it (seal.js before keys.js, which
        imports it). -->
-  <link rel="stylesheet" href="app.css" integrity="sha384-jPsni2Xi0gLcbaMxNWPmFjqNquu7LDfRyBa4K4RBi+e2NxeuD2V/+JfbRSE4yX9S">
+  <link rel="stylesheet" href="app.css" integrity="sha384-ZzD80Bk1iXbRz98WWY+Z4Vg+m9VHiZbTg3oU4nBk0QjzNkwjcq9ZPc4H8CltpCI2">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-It05x/2EV39+9/HmQFKcu0xLy0Rs5ZCmqyt4XwhlEcW2mU87v/zjlyvqiIz2en0u">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-iXNtiv6ROo1bs7A2jUQm6Ywq/IiiKm95WzhXkd7YrD6eOSprO2PAF4iMWvLTGBeZ">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-B1CvuHkwxxLe6VIx00ahJBtgg+SZDU3ZEzHKK/X9HRbSRG1z+ui5orsJIvJrtpnx">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-vjYD0/zLU+HzcLnhWRAepZlgvqGIWMy7uD1jWGWYGt58IbWv+uEbZfg1YMEjH1UB">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-w+/fVzQtEtgcqsDZth00TL3NiGQ8L7PE5ffHkCqrGaekGoOy5O6yNiwwkdLXXgzP">
-  <script src="app.js" defer integrity="sha384-R+3gTln9c1W1UT7kTsk8okuqJLaa9BRu5F/G0cwtr6Sqdixmc/h+GvEyYb9AYOek"></script>
+  <script src="app.js" defer integrity="sha384-2vnPIRdADO9nC+OkFFo9lhJDKxJ/U1PHGjpa+pmRRB58rEwykgcrjGSflDbPzVD9"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -123,30 +123,17 @@
     </div>
     <aside id="list-pane">
       <header class="bar">
-        <h1 class="brand"><svg viewBox="0 0 179.4 136.1" aria-hidden="true"><path d="M70.5 136.1C61.7 120.4 49.3 108.6 32.4 99.1C13.8 88.2 3.3 64.4 3.4 46.5C-1.8 29 -1.6 11.1 7.5 0C13.1 16.2 21.9 31.9 37 44.6C36.2 31.6 38.2 17.3 44.6 3C57 12.6 71.1 30.1 74.9 53.9C80.1 73.6 78 101.3 86.7 128.2ZM108.9 136.1C117.7 120.4 130.1 108.6 147 99.1C165.7 88.2 176.2 64.4 176 46.5C181.2 29 181 11.1 172 0C166.3 16.2 157.5 31.9 142.4 44.6C143.2 31.6 141.3 17.3 134.9 3C122.4 12.6 108.3 30.1 104.5 53.9C99.3 73.6 101.4 101.3 92.7 128.2Z"/></svg><span>ManyClaws</span></h1>
+        <!-- At the head of the list: ManyClaws' mark and the site's name, which are the way to the account; whether the page
+             hears the server; and the gear, the way to the settings, a page of their own -->
+        <h1 class="brand"><a id="account-link" class="brand-link" href="#/account" title="Account" aria-label="manyclaws.dev: your account"><svg viewBox="0 0 179.4 136.1" aria-hidden="true"><path d="M70.5 136.1C61.7 120.4 49.3 108.6 32.4 99.1C13.8 88.2 3.3 64.4 3.4 46.5C-1.8 29 -1.6 11.1 7.5 0C13.1 16.2 21.9 31.9 37 44.6C36.2 31.6 38.2 17.3 44.6 3C57 12.6 71.1 30.1 74.9 53.9C80.1 73.6 78 101.3 86.7 128.2ZM108.9 136.1C117.7 120.4 130.1 108.6 147 99.1C165.7 88.2 176.2 64.4 176 46.5C181.2 29 181 11.1 172 0C166.3 16.2 157.5 31.9 142.4 44.6C143.2 31.6 141.3 17.3 134.9 3C122.4 12.6 108.3 30.1 104.5 53.9C99.3 73.6 101.4 101.3 92.7 128.2Z"/></svg><span>manyclaws.dev</span></a></h1>
         <span id="conn" class="conn" title="Live updates"></span>
+        <a id="settings" class="head-link" href="#/settings" title="Settings" aria-label="Settings"><svg class="head-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M8.61 4.42 8.86 2.38 11.14 2.38 11.39 4.42 12.96 5.07 14.58 3.81 16.19 5.42 14.93 7.04 15.58 8.61 17.62 8.86 17.62 11.14 15.58 11.39 14.93 12.96 16.19 14.58 14.58 16.19 12.96 14.93 11.39 15.58 11.14 17.62 8.86 17.62 8.61 15.58 7.04 14.93 5.42 16.19 3.81 14.58 5.07 12.96 4.42 11.39 2.38 11.14 2.38 8.86 4.42 8.61 5.07 7.04 3.81 5.42 5.42 3.81 7.04 5.07Z"/><circle cx="10" cy="10" r="2.5"/></svg></a>
       </header>
       <div class="search-box">
         <input id="search" type="search" placeholder="Search every session" autocomplete="off" spellcheck="false" aria-label="Search every session on every machine">
       </div>
       <div id="pull" class="pull" aria-hidden="true"><span class="pull-mark">↓</span><span class="pull-text">Pull to refresh</span></div>
       <div id="session-list" class="session-list"></div>
-      <p id="alerts-note" class="alerts-note" hidden></p>
-      <!-- Under the list: the account on the left, this device's notifications in the middle, and on the right the way to the settings, a page of their own -->
-      <footer class="list-footer">
-        <a id="account-link" class="link foot-link" href="#/account">
-          <svg class="foot-icon" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="7" r="3.3"/><path d="M3.6 16.9c.7-3.1 3.2-4.9 6.4-4.9s5.7 1.8 6.4 4.9"/></svg>
-          <span>Account</span>
-        </a>
-        <button id="alerts" type="button" class="link foot-link" hidden>
-          <span>Notifications</span>
-          <span id="alerts-state" class="alerts-state"></span>
-        </button>
-        <a id="settings" class="link foot-link" href="#/settings">
-          <svg class="foot-icon" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M8.61 4.42 8.86 2.38 11.14 2.38 11.39 4.42 12.96 5.07 14.58 3.81 16.19 5.42 14.93 7.04 15.58 8.61 17.62 8.86 17.62 11.14 15.58 11.39 14.93 12.96 16.19 14.58 14.58 16.19 12.96 14.93 11.39 15.58 11.14 17.62 8.86 17.62 8.61 15.58 7.04 14.93 5.42 16.19 3.81 14.58 5.07 12.96 4.42 11.39 2.38 11.14 2.38 8.86 4.42 8.61 5.07 7.04 3.81 5.42 5.42 3.81 7.04 5.07Z"/><circle cx="10" cy="10" r="2.5"/></svg>
-          <span>Settings</span>
-        </a>
-      </footer>
       <div id="divider" class="divider" role="separator" aria-orientation="vertical" aria-label="Width of the session list" tabindex="0" title="Drag to resize. Double-click to reset."></div>
     </aside>
 
@@ -300,7 +287,7 @@
         </header>
         <div id="account-body" class="guide"></div>
       </section>
-      <!-- The settings (#/settings), from Settings under the list: what the list shows, how the page looks, what a
+      <!-- The settings (#/settings), from the gear at the head of the list: what the list shows, how the page looks, what a
            session's tile says, and this device's notifications. All of it is this device's own, kept in its
            browser. Laid out as the account's page is, and dressed as it is on a server with a front door. -->
       <section id="settings-page" class="new-session" hidden>
@@ -371,6 +358,13 @@
               <p id="set-alerts-says"></p>
               <div><button type="button" id="set-alerts-go" class="primary">Turn on</button></div>
               <p id="set-alerts-note" class="muted" hidden></p>
+            </div>
+          </section>
+          <section class="acct-part" id="set-account">
+            <h2>Account</h2>
+            <div class="acct-body">
+              <p class="muted">Your email and password, your API tokens, your passphrase and the devices that have it, and signing out.</p>
+              <div><a id="set-account-go" class="ghost button-link" href="#/account">Open the account page</a></div>
             </div>
           </section>
         </div>

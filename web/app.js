@@ -1217,7 +1217,7 @@ const TOUR = [
   {
     title: 'Then let it tap you.',
     says: [
-      'Under the list of sessions, Notifications turns alerts on: a session that stops to ask, or has finished, sends one to your phone.',
+      'In Settings, the gear at the top of the list, Notifications turns alerts on: a session that stops to ask, or has finished, sends one to your phone.',
       'On an iPhone, add the page to your Home Screen first, from Safari’s Share menu, and open ManyClaws from there. On Android, the browser asks once.',
     ],
     shot: ['shot-approve', 'A session on a phone, stopped at a permission prompt: Claude wants to use Bash to run a migration on staging, with Allow and Deny'],
@@ -1641,14 +1641,10 @@ async function testAlert() {
   sayOfAlerts(`Alerts are on, but a test notification could not be sent to this device (its push service answered ${status || 'nothing'}).`)
 }
 
-// What there is to say about alerts is said over the foot of the list, where their button
-// is and the settings open: those are shut, so that it is seen
-// What there is to say of this device's notifications: over the foot of the list, and in the settings
+// What there is to say of this device's notifications: in the settings, where they are turned on and off
 function sayOfAlerts(text) {
-  for (const id of ['alerts-note', 'set-alerts-note']) {
-    el(id).textContent = text
-    el(id).hidden = false
-  }
+  el('set-alerts-note').textContent = text
+  el('set-alerts-note').hidden = false
 }
 
 const keyBytes = (key) => Uint8Array.from(atob(key.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
@@ -1704,24 +1700,11 @@ function alertsState() {
   return !has ? (needsHomeScreen() ? 'home' : 'none') : Notification.permission === 'denied' ? 'blocked' : app.pushOn ? 'on' : Notification.permission === 'granted' && !canPush() ? 'open' : Notification.permission === 'granted' && app.pushError ? 'open' : 'off'
 }
 
+// How this device's notifications stand, in the settings, in so many words, and the way to change that
+// (until 2026-10-13 a button under the list said on or off too, and turned them on and off)
 function renderAlertsButton() {
-  const button = el('alerts')
-  const note = el('alerts-note')
   const state = alertsState()
-  button.hidden = state === 'none'
-  button.dataset.state = state
-  // (it is called Notifications whatever the state, with on or off beside it: its title says the rest)
-  el('alerts-state').textContent = { on: 'on', open: 'on', blocked: 'blocked' }[state] ?? 'off'
-  button.setAttribute('aria-label', 'Notifications: ' + ({ home: 'how to get them here', blocked: 'blocked', on: 'on', open: 'on while this page is open', off: 'off' }[state] ?? ''))
-  button.title = {
-    home: 'How to get notifications on this device',
-    blocked: "Notifications are turned off for this site in the browser's settings",
-    on: 'Notifications are on: this device is told when a session needs you, and when a long turn is done. Tap to turn that off.',
-    open: 'Notifications are shown while this page is open',
-    off: 'Notifications are off. Turn them on to be told when a session needs you, and when a long turn is done',
-  }[state] ?? ''
-  if (state !== 'home' && state !== 'open') note.hidden = el('set-alerts-note').hidden = true
-  // The same in the settings, in so many words: how it stands on this device, and the way to change it
+  if (state !== 'home' && state !== 'open') el('set-alerts-note').hidden = true
   el('set-alerts').hidden = state === 'none'
   el('set-alerts').dataset.state = state
   el('set-alerts-says').textContent =
@@ -1738,15 +1721,10 @@ function renderAlertsButton() {
   go.className = state === 'on' ? 'ghost' : 'primary'
 }
 
-// Notifications pressed, under the list or in the settings: turned on where they are off, and off where they are on
-async function alertsPressed({ fromList = false } = {}) {
-  const note = el('alerts-note')
-  const state = el('alerts').dataset.state
-  if (state === 'home') {
-    // (under the list a second press puts what was said away; the settings say it all the time)
-    if (fromList && !note.hidden) return void (note.hidden = el('set-alerts-note').hidden = true)
-    return sayOfAlerts('To get notifications here: tap Share, then Add to Home Screen, open ManyClaws from the Home Screen, and turn on alerts there.')
-  }
+// Notifications pressed in the settings: turned on where they are off, and off where they are on
+async function alertsPressed() {
+  const state = alertsState()
+  if (state === 'home') return sayOfAlerts('To get notifications here: tap Share, then Add to Home Screen, open ManyClaws from the Home Screen, and turn on alerts there.')
   if (state === 'on') {
     if (!(await ask('Turn notifications off on this device?', { yes: 'Turn off' }))) return
     // (kept on the device: off is off until it is turned on here again, whatever the browser still holds)
@@ -1764,7 +1742,6 @@ async function alertsPressed({ fromList = false } = {}) {
     sayOfAlerts('Notifications could not be set up to arrive when this page is closed (' + app.pushError + '). They are shown while it is open.')
   }
 }
-el('alerts').addEventListener('click', () => alertsPressed({ fromList: true }))
 el('set-alerts-go').addEventListener('click', () => alertsPressed())
 
 // ---- Streaming: a watched session sends its reply as it's written
@@ -3286,7 +3263,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
   )
 }
 
-// ---- The settings (#/settings, from Settings under the list): a page of their own, where a
+// ---- The settings (#/settings, from the gear at the head of the list): a page of their own, where a
 // conversation is, as the account's is. What the list shows, how the page looks, what a
 // session's tile says, and this device's notifications. All of it is this device's own,
 // kept in its browser: another device has its own. (Until 2026-10-08 they opened over the
@@ -4531,7 +4508,7 @@ const ICONS = {
   auto: 'M11 2.5 4.5 11h4.75L8.5 17.5 15.5 9h-4.75L11 2.5Z',
   bypassPermissions: 'M3 6.5h7m5 0h2M12.5 4.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4ZM3 13.5h2m5 0h7M7.5 11.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z',
   effort: 'M2.5 10h2m11 0h2M4.5 6.5v7M7.5 5v10m5-10v10m3-8.5v7M7.5 10h5',
-  // (the settings' own, under the list)
+  // (the settings' own, at the head of the list)
   gear: 'M8.61 4.42 8.86 2.38 11.14 2.38 11.39 4.42 12.96 5.07 14.58 3.81 16.19 5.42 14.93 7.04 15.58 8.61 17.62 8.86 17.62 11.14 15.58 11.39 14.93 12.96 16.19 14.58 14.58 16.19 12.96 14.93 11.39 15.58 11.14 17.62 8.86 17.62 8.61 15.58 7.04 14.93 5.42 16.19 3.81 14.58 5.07 12.96 4.42 11.39 2.38 11.14 2.38 8.86 4.42 8.61 5.07 7.04 3.81 5.42 5.42 3.81 7.04 5.07ZM12.5 10a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z',
   autoApprove: 'M10 3.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 3.25V10l2.25 1.5',
   // (on a session's row, the way to the box its mark is set in: the pencil the open session's head has, in index.html)
