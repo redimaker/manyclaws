@@ -1457,7 +1457,7 @@ function connect() {
   on('message', (ev) => {
     const { sid, message } = JSON.parse(ev.data)
     if (sid === app.firstId || !message) return
-    if (typedRow(message) && notePrompt(sid, message) && app.sortBy === 'prompt') renderListSoon()
+    if (personRow(message) && notePrompt(sid, message) && app.sortBy === 'prompt') renderListSoon()
     if (sid === app.current) {
       addMessage(message)
     } else {
@@ -2145,7 +2145,7 @@ const byStanding = (a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || sinc
 const promptTime = (s) => app.promptAt.get(s.id) || s.createdAt || 0
 const SORTS = {
   standard: { name: 'Standard', says: 'Needs you first, then at work, then the rest: the latest first', by: byStanding },
-  prompt: { name: 'Prompt (desc)', says: 'The one you last typed to first', by: (a, b) => promptTime(b) - promptTime(a) || byStanding(a, b) },
+  prompt: { name: 'Prompt (desc)', says: 'The one you last typed to first (not what another session or a task said to it)', by: (a, b) => promptTime(b) - promptTime(a) || byStanding(a, b) },
   action: { name: 'Last action (desc)', says: 'The one that last said or did something first', by: (a, b) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0) || byStanding(a, b) },
 }
 
@@ -2160,6 +2160,12 @@ const whereLabel = (name, mid) => {
 // Things said of a session on one line, a dot between each (one of them may be such a label)
 const dotted = (...parts) => parts.filter(Boolean).flatMap((part, i) => (i ? [' · ', part] : [part]))
 
+// When, on a tile: when it was last heard to say or do something; or, where the list is in the order of the last
+// prompt, when its person last typed to it (where this page has read that), so that the order says why it is so
+function rowTime(s) {
+  const typed = app.sortBy === 'prompt' ? app.promptAt.get(s.id) : 0
+  return typed ? h('span', { class: 'row-time', title: 'You last typed to it ' + whenText(typed) }, ago(typed)) : h('span', { class: 'row-time' }, ago(s.lastActivity))
+}
 // What started a session that is running, for its tile: its person, there, in a terminal or an editor, said in a word
 // after the project and the computer, with the rest for whoever points at it; or the computer's own agent, which runs
 // it itself (one started or taken up again from this page: the ones Exit ends), which is said by ManyClaws' own mark
@@ -3235,6 +3241,11 @@ const promptOf = (s) => s.lastPrompt || app.typed.get(s.id) || ''
 // (Of a prompt, what was typed: not Claude in Chrome's instructions, which the app puts in front of one typed in VS Code.)
 const typedText = (m) => (typeof m?.text === 'string' ? m.text.replace(/<browser_instruction>[\s\S]*?<\/browser_instruction>\s*/g, '').trim() : '')
 const typedRow = (m) => m?.role === 'user' && m.origin !== 'engine' && !!typedText(m) && !/^(\/[\w:.-]+(\s|$)|! )/.test(typedText(m))
+// One a person typed (in a terminal or an editor, on this page or another of the account's, through Remote Control),
+// and not what was said to the session by something else: a background task's word, another session's ("peer"), a
+// coordinator's, Claude Code's own, or what a schedule, a loop or a hook puts in. What the order by the last prompt goes by.
+const NOT_TYPED = /engine|task|peer|coordinat|agent|cron|schedul|loop|hook|system|notif/i
+const personRow = (m) => typedRow(m) && !NOT_TYPED.test(String(m.origin ?? ''))
 // When its user last typed to a session, from a row of that: kept where it is later than what was known. Says whether it was.
 function notePrompt(sid, row) {
   const at = Number(row?.ts) || 0
@@ -3273,7 +3284,6 @@ function markSort() {
   const b = el('sort-open')
   b.title = 'Sort: ' + now.name
   b.setAttribute('aria-label', 'Sort the sessions: ' + now.name)
-  b.classList.toggle('sorted', app.sortBy !== 'standard')
   fill(el('sort-list'), ...Object.entries(SORTS).map(([by, o]) => menuRow({ title: o.name, says: o.says, on: by === app.sortBy, 'data-sort': by, onclick: () => (setSort(by), sortMenu(false)) })))
 }
 function sortMenu(open) {
@@ -3293,9 +3303,10 @@ document.addEventListener('keydown', (ev) => ev.key === 'Escape' && !el('sort-me
 
 // Some rows of a session's chat, as they were read here: the last its user typed is kept. Says whether there was one.
 function typedHere(sid, rows) {
+  const person = rows.findLast(personRow)
+  if (person) notePrompt(sid, person)
   const mine = rows.findLast(typedRow)
   if (!mine) return false
-  notePrompt(sid, mine)
   const text = typedText(mine).slice(0, 200)
   if (app.typed.get(sid) === text) return false
   app.typed.set(sid, text)
@@ -3339,7 +3350,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
       'div',
       { class: 'row-main' },
       // (the first line: its name, its label, ManyClaws' mark, when, and the star, at the end)
-      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.claws && agentMark(s), tile.time && h('span', { class: 'row-time' }, ago(s.lastActivity)), starButton(s)),
+      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.claws && agentMark(s), tile.time && rowTime(s), starButton(s)),
       (sub.length || s.agents?.length || soon) && h('div', { class: 'row-sub' }, sub, sub.length && s.agents?.length ? ' · ' : '', agentsMark(s), (sub.length || s.agents?.length) && soon ? ' · ' : '', soon),
       due && remindLine(mark),
       typed && h('div', { class: 'row-prompt', title: 'The last thing you typed to it' }, h('span', { class: 'row-prompt-mark', 'aria-hidden': 'true' }, '❯'), h('span', { class: 'row-said' }, typed)),

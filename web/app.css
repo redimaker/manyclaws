@@ -1278,7 +1278,8 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .foot-menu[hidden] { display: none; }
 /* (the orders of the list: under the head, at its right, from the button beside the gear) */
 .sort-menu { top: var(--sort-top, 48px); bottom: auto; right: 8px; width: min(320px, calc(100% - 16px)); }
-.sort-open[aria-expanded="true"], .sort-open.sorted { color: var(--accent); }
+/* (drawn as the gear is: the same grey, the same weight of line; held a shade darker while its menu is open) */
+.sort-open[aria-expanded="true"] { color: var(--text); background: var(--hover); }
 /* (beside the gear, not under it: the gear's edge is the head's, the button's is not) */
 .head-link.sort-open { margin-right: 0; }
 .sort-menu .menu-row > .menu-icon { display: none; }
