@@ -4151,7 +4151,21 @@ const haikuRun = (sid) => app.haiku?.runs.find((r) => r.sid === sid && r.state =
 
 // What it may do: read and search the files under the folders where the transcripts are, and nothing else. With Read,
 // Grep or Glob, paths under them; with Bash, a command that only reads (haikuShell).
-const underFolders = (p, folders) => !/(^|[\\/])\.\.([\\/]|$)/.test(p) && folders.some((f) => p === f || p.startsWith(f + '/') || p.startsWith(f + '\\'))
+// Where the transcripts are under one of a computer's Claude Code folders, as Haiku is told it and its Bash takes it:
+// with /, which Git Bash on Windows takes too (C:/Users/…), where a \ there is the shell's own (and refused here)
+const haikuFolder = (root) => String(root).replace(/\\/g, '/').replace(/\/+$/, '') + '/projects'
+// A path on Windows (a drive's letter), where \ and / are one, Git Bash's /c/ is C:/, and a name is any case
+const onWindows = (folders) => folders.some((f) => /^[A-Za-z]:[\\/]/.test(f))
+const pathKey = (p, windows) => (windows ? String(p).replace(/\\/g, '/').replace(/^\/([A-Za-z])(\/|$)/, '$1:/').toLowerCase() : String(p))
+const underFolders = (p, folders) => {
+  const windows = onWindows(folders)
+  if (/(^|[\\/])\.\.([\\/]|$)/.test(p)) return false
+  const k = pathKey(p, windows)
+  return folders.some((f) => {
+    const fk = pathKey(f, windows).replace(/\/+$/, '')
+    return k === fk || k.startsWith(fk + '/')
+  })
+}
 function haikuMay(r, folders) {
   if (r.kind !== 'approval' || !HAIKU_TOOLS.includes(r.tool)) return false
   const i = r.input ?? {}
@@ -4206,6 +4220,9 @@ function shellWords(command) {
 function haikuShell(command, folders) {
   const parts = shellWords(command)
   if (!parts) return false
+  // (on Windows a word is a path where it has a \\ in it or begins with a drive's letter, as well as where it has a /)
+  const windows = onWindows(folders)
+  const pathy = (p) => p.includes('/') || (windows && (p.includes('\\') || /^[A-Za-z]:/.test(p)))
   return parts.every(([name, ...args]) => {
     const not = HAIKU_SHELL[name]
     if (!not) return false
@@ -4218,10 +4235,10 @@ function haikuShell(command, folders) {
       // (tr is given characters, not files; cut a / to cut at, which is no path)
       if (name === 'tr') return true
       if (name === 'cut' && (a === '/' || /^-d\/$/.test(a))) return true
-      const at = a.indexOf('/')
-      if (at < 0) return !/(^|[\\/])\.\.([\\/]|$)/.test(a)
       // (the path in it: the word itself, or what follows an option's = or a short option's letter)
-      return a.slice(0, at).replace(/^--?[A-Za-z-]*=?/, '') === '' && underFolders(a.slice(at), folders)
+      const path = /^(--[A-Za-z][A-Za-z-]*=|-[A-Za-z](?=[\\/]|[A-Za-z]:))?(.*)$/s.exec(a)[2]
+      if (!pathy(path)) return !/(^|[\\/])\.\.([\\/]|$)/.test(a)
+      return underFolders(path, folders)
     })
   })
 }
@@ -4247,7 +4264,7 @@ async function askHaiku() {
   if (q.length < 2) app.haiku = { q, short: true, runs: [] }
   else if (!app.key) app.haiku = { q, locked: true, runs: [] }
   else {
-    app.haiku = { q, effort, runs: able.map((m) => ({ mid: m.id, state: 'starting', folders: m.roots.map((root) => root.replace(/[\\/]+$/, '') + (root.includes('\\') ? '\\' : '/') + 'projects') })) }
+    app.haiku = { q, effort, runs: able.map((m) => ({ mid: m.id, state: 'starting', folders: m.roots.map(haikuFolder) })) }
   }
   haikuDrawn()
   const hk = app.haiku
