@@ -410,7 +410,13 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .star { font-size: 1.15em; width: 1.4em; height: 1.6em; }
 .star:hover { color: var(--text); }
 .star.on { color: var(--star); }
+/* (on a tile, at the end of its first line, right of when: it takes no more of the line's height than the words do) */
+.row-top .star { align-self: center; height: 1.4em; margin: -.2em -.2em -.2em 0; }
 .grip { width: 1.1em; height: 1.6em; cursor: grab; touch-action: none; }
+/* (a favorite's grip is at its left, in the room the tile has there already, the whole height of it: at its right is
+   the edge the list's width is dragged by) */
+.row.favorite { position: relative; }
+.row .grip { position: absolute; left: 0; top: 0; width: 12px; height: 100%; display: grid; place-items: center; font-size: 12px; }
 /* The pencil on a session's row: the way to the box its mark is set in (app.js, editButton), without opening the
    session. Small, and close to the star it is beside: the row's name keeps its room. */
 .row-edit { display: grid; place-items: center; width: 1.4em; height: 1.6em; margin-right: -4px; }
@@ -520,9 +526,10 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 @media (hover: none) {
   .row .star, .row .grip, .row .row-edit { opacity: .75; }
   .row .star { width: 1.8em; height: 2.2em; }
+  .row-top .star { margin: -.6em -.45em -.6em 0; }
   .row .row-edit { width: 2em; height: 2.5em; margin-right: -6px; }
   .row .row-edit .menu-icon { width: 1.15em; height: 1.15em; }
-  .row .grip { width: 1.6em; height: 2.2em; }
+  .row .grip { width: 26px; justify-items: start; padding-left: 2px; font-size: 14px; }
 }
 /* Marks: what an account puts on a session of its own. A colour behind its row and along
    its edge, a label beside its name, and a reminder: said small in the line under the
@@ -705,12 +712,17 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .search-haiku:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .search-haiku[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fffaf5; }
 .search-haiku svg { width: 13px; height: 13px; flex: none; fill: currentColor; }
+/* (and at its end, where the gear is otherwise, the way out of the search) */
+.search-close { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: -4px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); font: inherit; font-size: 13px; line-height: 1; cursor: pointer; }
+.search-close:hover { background: var(--hover); color: var(--text); }
+.search-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .search-haiku.busy svg { animation: haiku-spark 1.4s ease-in-out infinite; }
 @keyframes haiku-spark { 50% { transform: rotate(90deg) scale(.7); opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .search-haiku.busy svg { animation: none; } }
 /* (a terminal's: square, in its own type, the way chosen drawn in reverse) */
 [data-view="terminal"] .search-modes, [data-view="terminal"] .search-modes button, [data-view="terminal"] .search-haiku { border-radius: 0; font-size: inherit; }
 [data-view="terminal"] .search-modes button[aria-pressed="true"] { background: var(--text); color: var(--panel); box-shadow: none; }
+[data-view="terminal"] .search-close { width: auto; height: auto; margin: 0; border-radius: 0; font-size: inherit; }
 /* A choice under what the question box says (app.js, ask: `check`) */
 .ask-check { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; color: var(--n-soft, var(--muted)); font-size: 14px; cursor: pointer; }
 .ask-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--n-accent, var(--accent)); }
@@ -1369,6 +1381,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 [data-view="terminal"] .view-switch button { font-size: inherit; line-height: inherit; padding: 0 var(--cell-w); }
 [data-view="terminal"] .group-head { font-size: inherit; font-weight: 400; text-transform: none; padding: 1em var(--cell-w) 0; }
 [data-view="terminal"] .row { padding: .3em var(--cell-w); gap: var(--cell-w); }
+[data-view="terminal"] .row .grip { width: var(--cell-w); font-size: .8em; }
 [data-view="terminal"] .row-sub, [data-view="terminal"] .row-preview, [data-view="terminal"] .row-prompt, [data-view="terminal"] .row-time,
 [data-view="terminal"] .chat-sub, [data-view="terminal"] .badge,
 [data-view="terminal"] .card-sub, [data-view="terminal"] .composer-note { font-size: inherit; }
@@ -1686,6 +1699,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .search-modes button { padding: 8px 6px; font-size: 14px; }
   .search-haiku { padding: 8px 13px 8px 11px; font-size: 14px; }
   .search-haiku svg { width: 15px; height: 15px; }
+  .search-close { width: var(--tap); height: var(--tap); margin: -8px -12px -8px -4px; font-size: 16px; }
   .view-switch { border-radius: 8px; }
   .view-switch button { padding: 8px 12px; font-size: 14px; }
   .conn { width: 10px; height: 10px; }

@@ -3264,7 +3264,8 @@ function renderRow(s, { favorite = false, due = false } = {}) {
     h(
       'div',
       { class: 'row-main' },
-      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.claws && agentMark(s), tile.time && h('span', { class: 'row-time' }, ago(s.lastActivity))),
+      // (the first line: its name, its label, ManyClaws' mark, when, and the star, at the end)
+      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.claws && agentMark(s), tile.time && h('span', { class: 'row-time' }, ago(s.lastActivity)), starButton(s)),
       (sub.length || s.agents?.length || soon) && h('div', { class: 'row-sub' }, sub, sub.length && s.agents?.length ? ' · ' : '', agentsMark(s), (sub.length || s.agents?.length) && soon ? ' · ' : '', soon),
       due && remindLine(mark),
       typed && h('div', { class: 'row-prompt', title: 'The last thing you typed to it' }, h('span', { class: 'row-prompt-mark', 'aria-hidden': 'true' }, '❯'), h('span', { class: 'row-said' }, typed)),
@@ -3272,7 +3273,6 @@ function renderRow(s, { favorite = false, due = false } = {}) {
     ),
     due && doneButton(s),
     editButton(s, key),
-    starButton(s),
     favorite && gripButton(s.id, nameOf(s)),
   )
 }
@@ -3384,9 +3384,11 @@ function tileOptions(on) {
     clearTimeout(press?.timer)
     press = null
   }
+  // (a long press is a finger's way, a double click a mouse's; and there is one only where something is left off)
+  const nothingOff = () => TILE_OPTIONS.every((k) => app.tile[k])
   list.addEventListener('pointerdown', (ev) => {
     finger = ev.pointerType !== 'mouse'
-    if (!ev.target.closest('.row') || onOption(ev.target) || ev.button > 0) return
+    if (!finger || nothingOff() || !ev.target.closest('.row') || onOption(ev.target) || ev.button > 0) return
     forget()
     press = {
       x: ev.clientX,
@@ -3403,7 +3405,7 @@ function tileOptions(on) {
   for (const type of ['pointerup', 'pointercancel', 'pointerleave']) list.addEventListener(type, forget)
   // (a phone says a long press is one for its own menu: on a tile it is this)
   list.addEventListener('contextmenu', (ev) => {
-    if (!finger || !ev.target.closest('.row')) return
+    if (!finger || nothingOff() || !ev.target.closest('.row')) return
     ev.preventDefault()
     forget()
     longAt = Date.now()
@@ -3781,13 +3783,12 @@ function pastRow(s, { inProject = false, favorite = false, due = false } = {}) {
     h(
       'div',
       { class: 'row-main' },
-      h('div', { class: 'row-top' }, h('span', { class: 'row-title' }, name), labelChip(mark), app.tile.time && h('span', { class: 'row-time' }, now?.lastActivity || s.lastActivity ? ago(now?.lastActivity ?? s.lastActivity) : '')),
+      h('div', { class: 'row-top' }, h('span', { class: 'row-title' }, name), labelChip(mark), app.tile.time && h('span', { class: 'row-time' }, now?.lastActivity || s.lastActivity ? ago(now?.lastActivity ?? s.lastActivity) : ''), starButton(s)),
       h('div', { class: 'row-sub' }, sub, now?.agents?.length ? ' · ' : '', agentsMark(now), (sub.length || now?.agents?.length) && soon ? ' · ' : '', soon),
       due && remindLine(mark),
     ),
     due && doneButton(s),
     editButton(s, key, true),
-    starButton(s),
     favorite && gripButton(s.id, name),
   )
 }
@@ -3841,12 +3842,14 @@ el('search').addEventListener('input', () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(runSearch, 200)
 })
-el('search').addEventListener('keydown', (ev) => {
-  if (ev.key !== 'Escape') return
+// The way out: the words gone, the box left, and the list and its head as they were (✕ at the end of the ways, or Escape)
+function closeSearch() {
   el('search').value = ''
-  runSearch()
   el('search').blur()
-})
+  searchOpen(false)
+}
+el('search').addEventListener('keydown', (ev) => ev.key === 'Escape' && closeSearch())
+el('search-close').addEventListener('click', closeSearch)
 
 // The words are searched on every machine, the way chosen. For the text, what comes back first is which machines
 // have matches, and in which of their projects, and the rest is read as it's opened; the names and the prompts
