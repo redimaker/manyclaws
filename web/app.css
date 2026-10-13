@@ -727,7 +727,9 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .ask-check { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; color: var(--n-soft, var(--muted)); font-size: 14px; cursor: pointer; }
 .ask-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--n-accent, var(--accent)); }
 .search-group { display: flex; align-items: center; gap: 8px; }
-.found-why { padding: 0 12px 8px 30px; margin-top: -4px; font-size: .9em; color: var(--muted); }
+/* (in a session found, what the search found in it, in its tile, where what was last said in it is in the list's) */
+.row-why { margin-top: 2px; font-size: .9em; line-height: 1.4; color: color-mix(in srgb, var(--text) 78%, var(--muted)); overflow-wrap: anywhere; }
+.row.active .row-why { color: inherit; }
 .haiku-note { padding: 8px 12px; font-size: .9em; color: var(--muted); }
 .search-box { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 #search {

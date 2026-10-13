@@ -4010,7 +4010,9 @@ function searchNodes() {
   return by === 'text' ? textNodes() : foundNodes(data.found, { empty: data.failed ? 'The search could not be run.' : 'Nothing found.', notes: searchNotes(data) })
 }
 
-// Sessions found, under the computer each is on: as the list shows them, with what was found in each where it says
+// Sessions found, under the computer each is on: each by its name and where it is, as the list shows those, and in
+// its tile what the search found in it where that is said (Haiku's why), in place of what was last said in it; the
+// lines of it a search found under it
 function foundNodes(found, { empty, notes = [] } = {}) {
   const groups = new Map()
   for (const f of found) groups.set(f.mid ?? '', [...(groups.get(f.mid ?? '') ?? []), f])
@@ -4019,9 +4021,11 @@ function foundNodes(found, { empty, notes = [] } = {}) {
     const m = app.machines.get(mid)
     nodes.push(h('div', { class: 'group-head', 'data-key': 'found:' + mid }, h('span', { class: 'machine-name' }, m ? whereLabel(machineName(m), mid) : (whereOf(list[0].s) ?? 'Elsewhere'))))
     for (const f of list) {
-      nodes.push(f.live ? renderRow(f.s) : pastRow(f.s))
+      const row = f.live ? renderRow(f.s) : pastRow(f.s)
+      for (const said of row.querySelectorAll('.row-prompt, .row-preview, .row-remind')) said.remove()
+      if (f.why) row.querySelector('.row-main').append(h('div', { class: 'row-why' }, f.why))
+      nodes.push(row)
       for (const hit of f.hits ?? []) nodes.push(h('a', { class: 'hit', 'data-depth': 1, href: `#/m/${mid}/${encodeURIComponent(f.s.id)}?at=${encodeURIComponent(hit.uuid)}` }, h('span', { class: 'hit-role' }, HIT_ROLES[hit.role] ?? hit.role), ...marked(hit.snippet)))
-      if (f.why) nodes.push(h('div', { class: 'found-why' }, f.why))
     }
   }
   if (!found.length && empty) nodes.push(h('div', { class: 'list-empty' }, empty))
