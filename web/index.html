@@ -20,14 +20,14 @@
        and holding it against the public repository's is holding all of it. The modules the script goes on to
        import are named too, each fetched and checked before the script asks for it (seal.js before keys.js, which
        imports it). -->
-  <link rel="stylesheet" href="app.css" integrity="sha384-CiKxHBfKg681LpnCqldNhvRSbX9lBZvg8NGwgkRb0/mqfbMN9KmcLVcscsvN3xcc">
+  <link rel="stylesheet" href="app.css" integrity="sha384-Tql7GNdnbpu4dUq87SeTEsT6HlGrt9DsKEnlOwd2udvKMH2o6qrzy/ktKGbB+ffy">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-It05x/2EV39+9/HmQFKcu0xLy0Rs5ZCmqyt4XwhlEcW2mU87v/zjlyvqiIz2en0u">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-iXNtiv6ROo1bs7A2jUQm6Ywq/IiiKm95WzhXkd7YrD6eOSprO2PAF4iMWvLTGBeZ">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-B1CvuHkwxxLe6VIx00ahJBtgg+SZDU3ZEzHKK/X9HRbSRG1z+ui5orsJIvJrtpnx">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-vjYD0/zLU+HzcLnhWRAepZlgvqGIWMy7uD1jWGWYGt58IbWv+uEbZfg1YMEjH1UB">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-w+/fVzQtEtgcqsDZth00TL3NiGQ8L7PE5ffHkCqrGaekGoOy5O6yNiwwkdLXXgzP">
-  <script src="app.js" defer integrity="sha384-US0fhGr0YvoTOxTv34cyHfxrdJEK2E6SaUlGJjLpFipKke1bc+eOt3MbPx8sh/u5"></script>
+  <script src="app.js" defer integrity="sha384-exKXAicTZaoBaU4X5kGulr7Uf3N3jAko7LXvxRVRO7F9BkZ8YQKMCLqgJZKrK/VR"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -124,11 +124,14 @@
     <aside id="list-pane">
       <header class="bar">
         <!-- At the head of the list: ManyClaws' mark and the site's name, which are the way to the account; a dot, only while
-             the page does not hear the server; and the gear, the way to the settings, a page of their own -->
+             the page does not hear the server; the order the sessions are in; and the gear, the way to the settings -->
         <h1 class="brand"><a id="account-link" class="brand-link" href="#/account" title="Account" aria-label="manyclaws.dev: your account"><svg viewBox="0 0 179.4 136.1" aria-hidden="true"><path d="M70.5 136.1C61.7 120.4 49.3 108.6 32.4 99.1C13.8 88.2 3.3 64.4 3.4 46.5C-1.8 29 -1.6 11.1 7.5 0C13.1 16.2 21.9 31.9 37 44.6C36.2 31.6 38.2 17.3 44.6 3C57 12.6 71.1 30.1 74.9 53.9C80.1 73.6 78 101.3 86.7 128.2ZM108.9 136.1C117.7 120.4 130.1 108.6 147 99.1C165.7 88.2 176.2 64.4 176 46.5C181.2 29 181 11.1 172 0C166.3 16.2 157.5 31.9 142.4 44.6C143.2 31.6 141.3 17.3 134.9 3C122.4 12.6 108.3 30.1 104.5 53.9C99.3 73.6 101.4 101.3 92.7 128.2Z"/></svg><span>manyclaws.dev</span></a></h1>
         <span id="conn" class="conn" title="Not connected: trying again" role="img" aria-label="Not connected: trying again"></span>
+        <button id="sort-open" type="button" class="head-link sort-open" aria-haspopup="menu" aria-expanded="false" aria-controls="sort-menu" title="Sort: Standard" aria-label="Sort the sessions: Standard"><svg class="head-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M6.5 4v12M3.75 13.25 6.5 16l2.75-2.75M13.5 16V4M10.75 6.75 13.5 4l2.75 2.75"/></svg></button>
         <a id="settings" class="head-link" href="#/settings" title="Settings" aria-label="Settings"><svg class="head-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M8.61 4.42 8.86 2.38 11.14 2.38 11.39 4.42 12.96 5.07 14.58 3.81 16.19 5.42 14.93 7.04 15.58 8.61 17.62 8.86 17.62 11.14 15.58 11.39 14.93 12.96 16.19 14.58 14.58 16.19 12.96 14.93 11.39 15.58 11.14 17.62 8.86 17.62 8.61 15.58 7.04 14.93 5.42 16.19 3.81 14.58 5.07 12.96 4.42 11.39 2.38 11.14 2.38 8.86 4.42 8.61 5.07 7.04 3.81 5.42 5.42 3.81 7.04 5.07Z"/><circle cx="10" cy="10" r="2.5"/></svg></a>
       </header>
+      <!-- The orders the active sessions can be in, from the button beside the gear (app.js, SORTS) -->
+      <div id="sort-menu" class="foot-menu sort-menu" role="menu" aria-label="Sort the sessions" hidden><div id="sort-list" class="menu-list"></div></div>
       <!-- In the head's place while the search box is in use: what is searched (the names, what you typed, or all of
            what was said), Haiku, which is asked once to look through the transcripts on each computer, and the way out -->
       <div id="search-by" class="bar search-by" hidden>

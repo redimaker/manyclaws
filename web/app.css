@@ -1276,6 +1276,12 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .foot-menu[data-kind="model"] { right: auto; left: 0; }
 :root:not([data-view="terminal"]) .foot-menu[data-kind="model"] .menu-row > .menu-icon { display: none; }
 .foot-menu[hidden] { display: none; }
+/* (the orders of the list: under the head, at its right, from the button beside the gear) */
+.sort-menu { top: var(--sort-top, 48px); bottom: auto; right: 8px; width: min(320px, calc(100% - 16px)); }
+.sort-open[aria-expanded="true"], .sort-open.sorted { color: var(--accent); }
+/* (beside the gear, not under it: the gear's edge is the head's, the button's is not) */
+.head-link.sort-open { margin-right: 0; }
+.sort-menu .menu-row > .menu-icon { display: none; }
 /* (what is listed scrolls when there is more than fits; the effort under it is always in sight) */
 .menu-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
 .menu-foot { flex: none; padding: 6px; border-top: 1px solid var(--border); }

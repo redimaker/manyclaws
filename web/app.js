@@ -87,6 +87,8 @@ const app = {
   // The search: its words, the machines and projects with matches (`data`), which rows are
   // open ("m:<machine>", "p:<machine>|<folder>", "s:<machine>|<session>"), and what's been read under them
   search: { q: '', seq: 0, data: null, open: new Set(), sessions: new Map(), hits: new Map(), by: 'title' },
+  sortBy: 'standard', // the order the active sessions are in, on this device (SORTS)
+  promptAt: new Map(), // when its user last typed to each session, as this page has read it: session id -> time
   haiku: null, // the last search Haiku was asked for, on each computer that could start one: { q, runs: [{ mid, sid, state, folders, found, why }] }
   drafts: {}, // what's typed and not sent, by session: { text, at }
   expect: null, // a session just started or resumed, not reporting yet: { sid, mid, until }
@@ -1195,6 +1197,10 @@ function showApp() {
     app.shut = new Set(JSON.parse(localStorage.getItem('mc.shut')) ?? [])
   } catch {}
   app.tile = tileKept()
+  try {
+    app.sortBy = SORTS[localStorage.getItem('mc.sortBy')] ? localStorage.getItem('mc.sortBy') : 'standard'
+  } catch {}
+  markSort()
   el('show-ended').checked = app.showEnded
   markPastBy()
   markTile()
@@ -1397,6 +1403,7 @@ function connect() {
     for (const s of app.sessions.values()) settle(s, had.get(s.id) ?? null)
     autoApprove()
     haikuWatch()
+    if (app.sortBy === 'prompt') readPrompts()
     snapshotCame()
     seeToUpgrade()
     app.favorites = snapshot.favorites ?? []
@@ -1450,6 +1457,7 @@ function connect() {
   on('message', (ev) => {
     const { sid, message } = JSON.parse(ev.data)
     if (sid === app.firstId || !message) return
+    if (typedRow(message) && notePrompt(sid, message) && app.sortBy === 'prompt') renderListSoon()
     if (sid === app.current) {
       addMessage(message)
     } else {
@@ -2087,7 +2095,7 @@ function renderList() {
   }
   if (visible.length) {
     nodes.push(h('div', { class: 'group-head', 'data-key': 'active' }, h('span', null, app.showEnded ? 'Active and inactive' : 'Active'), optionsDone()))
-    for (const s of visible.sort(byStanding)) nodes.push(renderRow(s))
+    for (const s of visible.sort(SORTS[app.sortBy]?.by ?? byStanding)) nodes.push(renderRow(s))
   }
   const hidden = all.length - visible.length
   if (!nodes.length && !app.machines.size) {
@@ -2131,6 +2139,15 @@ function renderListSoon() {
 // stayed under a finger.)
 const sinceOf = (s) => s.since ?? s.lastActivity
 const byStanding = (a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || sinceOf(b) - sinceOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+// The orders the active sessions can be in (the button beside the gear): as they stand (needs you, then at work, then
+// the rest, each the latest first); the one last typed to first; or the one that last said or did something first.
+// (when its user last typed to a session is as this page has read it: until it has, when the session began)
+const promptTime = (s) => app.promptAt.get(s.id) || s.createdAt || 0
+const SORTS = {
+  standard: { name: 'Standard', says: 'Needs you first, then at work, then the rest: the latest first', by: byStanding },
+  prompt: { name: 'Prompt (desc)', says: 'The one you last typed to first', by: (a, b) => promptTime(b) - promptTime(a) || byStanding(a, b) },
+  action: { name: 'Last action (desc)', says: 'The one that last said or did something first', by: (a, b) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0) || byStanding(a, b) },
+}
 
 // Where a session runs: the name its mod was given, else its machine's, else the host
 const whereOf = (s) => s.label || app.machines.get(s.machine)?.label || s.host
@@ -3218,10 +3235,67 @@ const promptOf = (s) => s.lastPrompt || app.typed.get(s.id) || ''
 // (Of a prompt, what was typed: not Claude in Chrome's instructions, which the app puts in front of one typed in VS Code.)
 const typedText = (m) => (typeof m?.text === 'string' ? m.text.replace(/<browser_instruction>[\s\S]*?<\/browser_instruction>\s*/g, '').trim() : '')
 const typedRow = (m) => m?.role === 'user' && m.origin !== 'engine' && !!typedText(m) && !/^(\/[\w:.-]+(\s|$)|! )/.test(typedText(m))
+// When its user last typed to a session, from a row of that: kept where it is later than what was known. Says whether it was.
+function notePrompt(sid, row) {
+  const at = Number(row?.ts) || 0
+  if (!at || at <= (app.promptAt.get(sid) ?? 0)) return false
+  app.promptAt.set(sid, at)
+  return true
+}
+// For the order by what was last typed: what each active session's chat says of it, read once from the server's rows of
+// it (the last of them, sealed, opened here) where this page has not seen it typed to since it was opened
+const promptsRead = new Set()
+async function readPrompts() {
+  const want = [...app.sessions.values()].filter((s) => !s.ended && !app.promptAt.has(s.id) && !promptsRead.has(s.id))
+  for (const s of want) promptsRead.add(s.id)
+  let i = 0
+  const one = async () => {
+    for (let s = want[i++]; s; s = want[i++]) {
+      const r = await fetch('/api/sessions/' + encodeURIComponent(s.id) + '/messages?limit=200').catch(() => null)
+      if (r?.ok && typedHere(s.id, (await r.json()).messages ?? []) && app.sortBy === 'prompt') renderListSoon()
+    }
+  }
+  await Promise.all([one(), one(), one()])
+  if (app.sortBy === 'prompt') renderListSoon()
+}
+
+function setSort(by) {
+  app.sortBy = SORTS[by] ? by : 'standard'
+  try {
+    localStorage.setItem('mc.sortBy', app.sortBy)
+  } catch {}
+  markSort()
+  if (app.sortBy === 'prompt') readPrompts()
+  renderList()
+}
+function markSort() {
+  const now = SORTS[app.sortBy]
+  const b = el('sort-open')
+  b.title = 'Sort: ' + now.name
+  b.setAttribute('aria-label', 'Sort the sessions: ' + now.name)
+  b.classList.toggle('sorted', app.sortBy !== 'standard')
+  fill(el('sort-list'), ...Object.entries(SORTS).map(([by, o]) => menuRow({ title: o.name, says: o.says, on: by === app.sortBy, 'data-sort': by, onclick: () => (setSort(by), sortMenu(false)) })))
+}
+function sortMenu(open) {
+  const menu = el('sort-menu')
+  if (open) {
+    markSort()
+    menu.style.setProperty('--sort-top', Math.round(el('list-pane').querySelector(':scope > header.bar').getBoundingClientRect().bottom - el('list-pane').getBoundingClientRect().top + 4) + 'px')
+  }
+  menu.hidden = !open
+  el('sort-open').setAttribute('aria-expanded', String(open))
+  if (open) menu.querySelector('.menu-row.on')?.focus()
+}
+el('sort-open').addEventListener('click', () => sortMenu(el('sort-menu').hidden))
+// (a press anywhere else, or Escape, shuts it)
+document.addEventListener('pointerdown', (ev) => !el('sort-menu').hidden && !ev.target.closest?.('#sort-menu, #sort-open') && sortMenu(false))
+document.addEventListener('keydown', (ev) => ev.key === 'Escape' && !el('sort-menu').hidden && (sortMenu(false), el('sort-open').focus()))
+
 // Some rows of a session's chat, as they were read here: the last its user typed is kept. Says whether there was one.
 function typedHere(sid, rows) {
   const mine = rows.findLast(typedRow)
   if (!mine) return false
+  notePrompt(sid, mine)
   const text = typedText(mine).slice(0, 200)
   if (app.typed.get(sid) === text) return false
   app.typed.set(sid, text)
