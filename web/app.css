@@ -724,10 +724,14 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .hit-more { padding: 0 12px 4px; font-size: .85em; color: var(--muted); }
 /* Subagents a session has running: a mark in its row, and a strip above the reply box */
 .agents-mark { color: var(--working); white-space: nowrap; }
-/* What started a running session, on its tile: a word, and for one its computer's agent runs a small tag about it */
+/* What started a running session, on its tile: a word; and for one its computer's agent runs, ManyClaws' two claws,
+   small, before the time on the tile's first line, in the red they have beside the page's name */
 .row-by { white-space: nowrap; }
-.row-by.agent { padding: 0 .45em; border: 1px solid currentColor; border-radius: 99px; font-size: .92em; }
-[data-view="terminal"] .row-by.agent { border-radius: 0; }
+.row-agent { flex: none; align-self: center; display: inline-flex; line-height: 1; }
+.row-agent svg { width: auto; height: .8em; fill: #e2664a; }
+@media (prefers-color-scheme: light) {
+  .row-agent svg { fill: #c6452c; }
+}
 .agents-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 16px; border-top: 1px solid var(--border); font-size: .9em; color: var(--muted); max-height: 5.5em; overflow-y: auto; flex-shrink: 0; }
 .agents-strip .agents-count { color: var(--working); font-weight: 600; }
 .agents-strip .agent { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }

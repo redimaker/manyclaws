@@ -2152,15 +2152,23 @@ const whereLabel = (name, mid) => {
 // Things said of a session on one line, a dot between each (one of them may be such a label)
 const dotted = (...parts) => parts.filter(Boolean).flatMap((part, i) => (i ? [' · ', part] : [part]))
 
-// What started a session that is running, for its tile: the computer's own agent, which runs it itself (one started or
-// taken up again from this page: the ones Exit ends), or its person, there, in a terminal or an editor. A word, with
-// the rest for whoever points at it. Of a session that is not running there is nothing to say.
+// What started a session that is running, for its tile: its person, there, in a terminal or an editor, said in a word
+// after the project and the computer, with the rest for whoever points at it; or the computer's own agent, which runs
+// it itself (one started or taken up again from this page: the ones Exit ends), which is said by ManyClaws' own mark
+// before the time (agentMark). Of a session that is not running there is nothing to say.
 function startedBy(s) {
-  if (!s || s.ended || !s.online) return null
-  if (s.hosted) return h('span', { class: 'row-by agent', title: 'Started from this page: the ManyClaws agent on its computer runs it, and Exit ends it' }, 'agent')
+  if (!s || s.ended || !s.online || s.hosted) return null
   const e = s.entrypoint ?? ''
   const [word, says] = /vscode/.test(e) ? ['VS Code', 'in VS Code'] : /desktop/.test(e) ? ['Desktop app', 'in the Desktop app'] : s.interactive === false ? ['headless', 'by a script or claude -p, with nobody at it'] : ['terminal', 'in a terminal']
   return h('span', { class: 'row-by', title: 'Started on its computer, ' + says }, word)
+}
+
+// ManyClaws' mark on the tile of a running session its computer's agent runs: the two claws beside the page's name,
+// small, at the end of the tile's first line, before the time. What it means is said to whoever points at it, or has it read out.
+const BY_AGENT = 'Started from this page: the ManyClaws agent on its computer runs it, and Exit ends it'
+function agentMark(s) {
+  if (!s || s.ended || !s.online || !s.hosted) return null
+  return h('span', { class: 'row-agent', role: 'img', 'aria-label': BY_AGENT, title: BY_AGENT }, document.querySelector('.brand svg').cloneNode(true))
 }
 
 // How many subagents a session has running, for a row of the list
@@ -3265,7 +3273,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
     h(
       'div',
       { class: 'row-main' },
-      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.time && h('span', { class: 'row-time' }, ago(s.lastActivity))),
+      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.where && agentMark(s), tile.time && h('span', { class: 'row-time' }, ago(s.lastActivity))),
       (sub.length || s.agents?.length || soon) && h('div', { class: 'row-sub' }, sub, sub.length && s.agents?.length ? ' · ' : '', agentsMark(s), (sub.length || s.agents?.length) && soon ? ' · ' : '', soon),
       due && remindLine(mark),
       typed && h('div', { class: 'row-prompt', title: 'The last thing you typed to it' }, h('span', { class: 'row-prompt-mark', 'aria-hidden': 'true' }, '❯'), h('span', { class: 'row-said' }, typed)),
