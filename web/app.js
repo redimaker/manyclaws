@@ -2093,9 +2093,11 @@ function renderList() {
     for (const m of due) nodes.push(favoriteRow(app.favorites.find((f) => f.id === m.id) ?? m, { due: true }))
     for (const f of app.favorites) if (!first.has(f.id)) nodes.push(favoriteRow(f))
   }
-  if (visible.length) {
+  if (app.sortBy !== 'standard') nodes.length = 0
+  if (app.sortBy !== 'standard') nodes.push(...flatNodes(due))
+  else if (visible.length) {
     nodes.push(h('div', { class: 'group-head', 'data-key': 'active' }, h('span', null, app.showEnded ? 'Active and inactive' : 'Active'), optionsDone()))
-    for (const s of visible.sort(SORTS[app.sortBy]?.by ?? byStanding)) nodes.push(renderRow(s))
+    for (const s of visible.sort(byStanding)) nodes.push(renderRow(s))
   }
   const hidden = all.length - visible.length
   if (!nodes.length && !app.machines.size) {
@@ -2103,9 +2105,11 @@ function renderList() {
       h('div', { class: 'list-empty', 'data-key': 'none' }, all.length ? `${hidden} inactive session${hidden === 1 ? '' : 's'} hidden.` : 'No sessions yet. Start Claude Code with the ManyClaws mod loaded and it shows up here.'),
     )
   }
-  for (const m of [...app.machines.values()].sort((a, b) => machineName(a).localeCompare(machineName(b)))) nodes.push(...machineNodes(m))
-  // (and the computers that have no machine, where one needs something: its sessions are heard from, and no agent is)
-  for (const c of looseComputers().sort((a, b) => a.name.localeCompare(b.name))) nodes.push(...looseNodes(c))
+  if (app.sortBy === 'standard') {
+    for (const m of [...app.machines.values()].sort((a, b) => machineName(a).localeCompare(machineName(b)))) nodes.push(...machineNodes(m))
+    // (and the computers that have no machine, where one needs something: its sessions are heard from, and no agent is)
+    for (const c of looseComputers().sort((a, b) => a.name.localeCompare(b.name))) nodes.push(...looseNodes(c))
+  }
   // (a grip being moved by the keys is still the one in hand once the rows are drawn again)
   const held = document.activeElement?.matches?.('.grip') ? document.activeElement.closest('.row').dataset.favorite : null
   redraw(list, nodes)
@@ -2120,6 +2124,26 @@ function renderList() {
       ;(waiting ? navigator.setAppBadge?.(waiting) : navigator.clearAppBadge?.())?.catch(() => {})
     } catch {}
   }
+}
+
+// The list in an order of everything (SORTS): each session once, from what is reporting (the inactive too), the
+// favorites, and every computer's past sessions as read so far; a reminder that has come due still first, as in the
+// list as it stands. With no headings, a past session's tile says which computer it is on. Under them, the way to more
+// of every computer's past sessions.
+function flatNodes(due) {
+  const all = new Map()
+  for (const s of app.sessions.values()) all.set(s.id, { s, live: true })
+  for (const c of app.catalog.values()) for (const s of c.sessions ?? []) if (!all.has(s.id)) all.set(s.id, { s })
+  for (const f of app.favorites) if (!all.has(f.id)) all.set(f.id, { s: { ...f, lastActivity: 0, known: false } })
+  const first = new Set(due.map((m) => m.id))
+  const at = SORTS[app.sortBy].at
+  const nodes = due.map((m) => favoriteRow(app.favorites.find((f) => f.id === m.id) ?? m, { due: true }))
+  const rest = [...all.values()].filter((x) => !first.has(x.s.id)).sort((a, b) => at(b) - at(a) || (a.s.id < b.s.id ? -1 : 1))
+  for (const x of rest) nodes.push(x.live ? renderRow(x.s) : pastRow(x.s, { where: true }))
+  const more = [...app.catalog.entries()].filter(([, c]) => c.more)
+  if (more.length) nodes.push(h('button', { type: 'button', class: 'more-link', 'data-key': 'more:all', onclick: () => more.forEach(([mid]) => loadCatalog(mid, true)) }, 'Earlier sessions…'))
+  if (!nodes.length) nodes.push(h('div', { class: 'list-empty', 'data-key': 'none' }, 'No sessions yet.'))
+  return nodes
 }
 
 // Updates arrive in bursts, and from sessions at work several times a second: the list
@@ -2139,14 +2163,18 @@ function renderListSoon() {
 // stayed under a finger.)
 const sinceOf = (s) => s.since ?? s.lastActivity
 const byStanding = (a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || sinceOf(b) - sinceOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-// The orders the active sessions can be in (the button beside the gear): as they stand (needs you, then at work, then
-// the rest, each the latest first); the one last typed to first; or the one that last said or did something first.
-// (when its user last typed to a session is as this page has read it: until it has, when the session began)
-const promptTime = (s) => app.promptAt.get(s.id) || s.createdAt || 0
+// The orders the list can be in (the button beside the gear). Standard is as it was: the favorites, the active (needs
+// you, then at work, then the rest, each the latest first), and each computer's past sessions. The other two are of
+// everything in one list, with no headings: the session last typed to first, or the one that last said or did
+// something first (`at`: a session in the list, `{ s, live }`, to the time it goes by).
+// When its person last typed to a session is as this page has read it (promptAt). Until it has: for one reporting,
+// when it began; for a past one, when it last did anything, which no prompt of its is later than, until its
+// transcript's end has been read (pastPrompts), and then when it began where that says none.
+const promptAtOf = ({ s, live }) => app.promptAt.get(s.id) || (live ? s.createdAt : pastPrompts.has(s.id) ? s.firstActivity : s.lastActivity) || 0
 const SORTS = {
-  standard: { name: 'Standard', says: 'Needs you first, then at work, then the rest: the latest first', by: byStanding },
-  prompt: { name: 'Prompt (desc)', says: 'The one you last typed to first (not what another session or a task said to it)', by: (a, b) => promptTime(b) - promptTime(a) || byStanding(a, b) },
-  action: { name: 'Last action (desc)', says: 'The one that last said or did something first', by: (a, b) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0) || byStanding(a, b) },
+  standard: { name: 'Standard', says: 'Favorites, then needs you, at work and the rest, then each computer' },
+  prompt: { name: 'Prompt (desc)', says: 'Everything, the one you last typed to first (not what another session or a task said to it)', at: promptAtOf },
+  action: { name: 'Last action (desc)', says: 'Everything, the one that last said or did something first', at: ({ s }) => s.lastActivity ?? 0 },
 }
 
 // Where a session runs: the name its mod was given, else its machine's, else the host
@@ -3257,7 +3285,8 @@ function notePrompt(sid, row) {
 // it (the last of them, sealed, opened here) where this page has not seen it typed to since it was opened
 const promptsRead = new Set()
 async function readPrompts() {
-  const want = [...app.sessions.values()].filter((s) => !s.ended && !app.promptAt.has(s.id) && !promptsRead.has(s.id))
+  readPastPrompts()
+  const want = [...app.sessions.values()].filter((s) => !app.promptAt.has(s.id) && !promptsRead.has(s.id))
   for (const s of want) promptsRead.add(s.id)
   let i = 0
   const one = async () => {
@@ -3268,6 +3297,30 @@ async function readPrompts() {
   }
   await Promise.all([one(), one(), one()])
   if (app.sortBy === 'prompt') renderListSoon()
+}
+
+// And for the past sessions in it, from the end of each one's transcript on its computer, read once: the 45 that last
+// did anything first (none of the rest can have been typed to later than those were last at work)
+const pastPrompts = new Set()
+async function readPastPrompts() {
+  const want = [...app.catalog.values()]
+    .flatMap((c) => c.sessions ?? [])
+    .filter((s) => !isReporting(s.id) && !app.promptAt.has(s.id) && !pastPrompts.has(s.id) && app.machines.get(s.machine)?.online)
+    .sort((a, b) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0))
+    .slice(0, Math.max(0, 45 - pastPrompts.size))
+  let i = 0
+  const one = async () => {
+    for (let s = want[i++]; s; s = want[i++]) {
+      const r = await fetch(`/api/machines/${s.machine}/sessions/${encodeURIComponent(s.id)}/messages?` + (await askOf({ sid: s.id, limit: 60 }))).catch(() => null)
+      const page = r?.ok ? await r.json() : null
+      if (!page) continue
+      pastPrompts.add(s.id)
+      const person = (page.messages ?? []).findLast(personRow)
+      if (person) notePrompt(s.id, person)
+      if (app.sortBy === 'prompt') renderListSoon()
+    }
+  }
+  await Promise.all([one(), one(), one()])
 }
 
 function setSort(by) {
@@ -3693,6 +3746,7 @@ async function loadCatalog(mid, more = false) {
   // (but not one that has been worked in since, and so is in the first page now)
   const again = new Set(sessions.map((x) => x.id))
   const rest = more ? [] : (have?.sessions ?? []).filter((old) => sessions.length && old.lastActivity < sessions.at(-1).lastActivity && !again.has(old.id))
+  if (app.sortBy === 'prompt') setTimeout(readPastPrompts, 0)
   app.catalog.set(mid, { sessions: [...kept, ...sessions, ...rest], more: more ? sessions.length === PAST_PAGE : (have?.more ?? sessions.length === PAST_PAGE), loaded: true, failed: false, at: Date.now() })
   renderList()
 }
@@ -3840,7 +3894,7 @@ const isReporting = (sid) => {
 
 // A session in a machine's list. One that's reporting now is marked live (a green dot)
 // and opens as the live session it is; one that isn't opens from its transcript.
-function pastRow(s, { inProject = false, favorite = false, due = false } = {}) {
+function pastRow(s, { inProject = false, favorite = false, due = false, where = false } = {}) {
   const live = isReporting(s.id)
   const now = live ? app.sessions.get(s.id) : null
   const active = live ? app.current === s.id : app.past?.sid === s.id && !app.past.sub
@@ -3854,7 +3908,7 @@ function pastRow(s, { inProject = false, favorite = false, due = false } = {}) {
   // (among the favorites it says which machine it's on: there it isn't under its machine's name)
   // (which project and which computer, where this device has its tiles say so: the settings)
   const key = due ? 'due:' + s.id : favorite ? 'favorite:' + s.id : `past:${s.machine}/${s.id}`
-  const sub = dotted(inProject || !app.tile.where ? '' : s.project, app.tile.where && (favorite || due) ? (app.machines.has(s.machine) ? whereLabel(machineName(app.machines.get(s.machine)), s.machine) : s.where) : '', s.messages ? s.messages + ' messages' : '', live ? 'live' : s.open ? 'open on the machine' : '')
+  const sub = dotted(inProject || !app.tile.where ? '' : s.project, app.tile.where && (favorite || due || where) ? (app.machines.has(s.machine) ? whereLabel(machineName(app.machines.get(s.machine)), s.machine) : s.where) : '', s.messages ? s.messages + ' messages' : '', live ? 'live' : s.open ? 'open on the machine' : '')
   return h(
     'a',
     {
