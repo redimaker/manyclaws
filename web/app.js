@@ -454,12 +454,15 @@ function listen(node, type, fn) {
 //   await ask('Why not?', { text: '', yes: 'Deny' })      what was typed, or null where the box was left
 //   tell('Not sent', 'Why not.')                          nothing to choose: read, and shut
 //
+//   await ask('Search?', { check: "Don't show this again" }); askChecked             and whether that was ticked
+//
 // `yes` and `no` are what its two ways out are called (`no: null`: there is one way out);
 // `danger`: what it does is not put back, so the way ahead is in the mark's colour and the
 // box opens with the other one in hand. Escape, a press beside the box and going to
 // another part of the page all leave it: false, or null.
 let asking = Promise.resolve()
 let askDone = null
+let askChecked = false // whether the choice under the last question asked with one (`check`) was ticked
 function ask(title, about = {}) {
   const turn = asking.then(() => askNow(title, about))
   asking = turn.catch(() => {})
@@ -467,9 +470,12 @@ function ask(title, about = {}) {
 }
 const tell = (title, says = '') => ask(title, { says, no: null })
 
-function askNow(title, { says = '', yes = 'OK', no = 'Cancel', danger = false, text = null, type = 'text' }) {
+function askNow(title, { says = '', yes = 'OK', no = 'Cancel', danger = false, text = null, type = 'text', check = '' }) {
   const box = el('ask-box')
   const typed = text !== null
+  el('ask-check-row').hidden = !check
+  el('ask-check').checked = false
+  el('ask-check-says').textContent = check
   el('ask-title').textContent = title
   fill(el('ask-says'), ...[says].flat().filter(Boolean).map((p) => h('p', null, p)))
   el('ask-text').hidden = !typed
@@ -485,6 +491,7 @@ function askNow(title, { says = '', yes = 'OK', no = 'Cancel', danger = false, t
   return new Promise((answered) => {
     askDone = (went) => {
       askDone = null
+      askChecked = !!check && el('ask-check').checked
       const value = typed ? (went ? el('ask-text').value : null) : went
       if (box.open) box.close()
       answered(value)
@@ -2073,13 +2080,13 @@ function renderList() {
   if (Number.isFinite(next)) app.quietTimer = setTimeout(renderListSoon, next + 50)
   const nodes = []
   if (due.length || app.favorites.length) {
-    nodes.push(h('div', { class: 'group-head', 'data-key': 'favorites' }, h('span', null, 'Favorites')))
+    nodes.push(h('div', { class: 'group-head', 'data-key': 'favorites' }, h('span', null, 'Favorites'), optionsDone()))
     // A session whose reminder has come due is at the top of them, favorite or not, until the reminder is cleared or put off
     for (const m of due) nodes.push(favoriteRow(app.favorites.find((f) => f.id === m.id) ?? m, { due: true }))
     for (const f of app.favorites) if (!first.has(f.id)) nodes.push(favoriteRow(f))
   }
   if (visible.length) {
-    nodes.push(h('div', { class: 'group-head', 'data-key': 'active' }, h('span', null, app.showEnded ? 'Active and inactive' : 'Active')))
+    nodes.push(h('div', { class: 'group-head', 'data-key': 'active' }, h('span', null, app.showEnded ? 'Active and inactive' : 'Active'), optionsDone()))
     for (const s of visible.sort(byStanding)) nodes.push(renderRow(s))
   }
   const hidden = all.length - visible.length
@@ -3279,6 +3286,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
 function openSettings() {
   leaveChat()
   markTile()
+  markHaiku()
   renderAlertsButton()
 }
 
@@ -3308,9 +3316,9 @@ const TILE_SAMPLE = {
   title: 'Fix the flaky login test',
   project: 'ios-app',
   host: 'Mac Studio',
-  // (running, and started there in a terminal: its tile says so with the project and the computer)
+  // (running, and started from this page: its tile has ManyClaws' mark, where this device's tiles have it)
   online: true,
-  entrypoint: 'cli',
+  hosted: true,
   lastPrompt: 'Find out why the login test is flaky on CI and fix it. Run the suite fifty times before you call it done, and tell me what the cause was.',
   lastReply: 'Reproduced it: the test taps before the keyboard has finished animating. Waiting on the field’s focus fixes it, and fifty runs in a row pass now where one in six failed before.',
 }
@@ -3323,10 +3331,17 @@ function markTile() {
   el('tile-options-note').hidden = TILE_OPTIONS.every((k) => app.tile[k])
   for (const box of document.querySelectorAll('[data-tile]')) box.checked = !!app.tile[box.dataset.tile]
   for (const b of document.querySelectorAll('[data-tile-lines]')) b.setAttribute('aria-pressed', String(Number(b.dataset.tileLines) === app.tile.lines))
-  const row = renderRow({ ...TILE_SAMPLE, lastActivity: Date.now() - 3 * 60_000 })
-  // (it is a picture of a tile: it goes nowhere, and has no pencil or star to press)
+  const row = renderRow({ ...TILE_SAMPLE, lastActivity: Date.now() - 3 * 60_000 }, { favorite: true })
+  // (it is a picture of a tile, a favorite's: it has what a tile in the list has, as this device has them, and none of it does anything)
   row.removeAttribute('href')
-  for (const b of row.querySelectorAll('.row-edit, .star')) b.remove()
+  row.removeAttribute('data-favorite')
+  row.setAttribute('aria-hidden', 'true')
+  row.inert = true
+  const star = row.querySelector('.star')
+  if (star) {
+    star.classList.add('on')
+    star.textContent = '★'
+  }
   fill(el('tile-sample'), row)
 }
 for (const box of document.querySelectorAll('[data-tile]')) box.addEventListener('change', () => setTile({ [box.dataset.tile]: box.checked }))
@@ -3335,8 +3350,27 @@ for (const box of document.querySelectorAll('[data-tile]')) box.addEventListener
 // back on every tile by a long press or a double click on one, and stay until a press on a tile that is not on one of
 // them, which goes on to do what it does.
 const LONG_PRESS_MS = 500
+// While they are back, the way to put them away again besides a press on a tile: a ✕ at the end of each heading of the list
+const optionsDone = () =>
+  h(
+    'button',
+    {
+      type: 'button',
+      class: 'options-done',
+      'aria-label': 'Done: put the star, the grabber and the pencil away again',
+      title: 'Done',
+      onclick: (ev) => {
+        ev.preventDefault()
+        ev.stopPropagation()
+        tileOptions(false)
+      },
+    },
+    '✕',
+  )
 const onOption = (node) => !!node.closest?.('.star, .grip, .row-edit')
+// (where none of them is left off there is nothing to bring back)
 function tileOptions(on) {
+  if (on && TILE_OPTIONS.every((k) => app.tile[k])) return
   if (on === document.documentElement.hasAttribute('data-tile-options')) return
   if (on) document.documentElement.dataset.tileOptions = ''
   else delete document.documentElement.dataset.tileOptions
@@ -3593,6 +3627,7 @@ function machineNodes(m) {
       ),
       // (its own page: its color, a new session on it, and the Claude accounts on it where it has cswap; and what it needs, where it needs something)
       computerLink(computerOf(m.id), { aria: 'its color, a new session, and its settings', title: computerSays(m) }),
+      optionsDone(),
     ),
   ]
   if (shut) return nodes
@@ -4058,9 +4093,35 @@ const haikuAsk = (q, folders) =>
   [
     `${HAIKU_SAYS} ${q}`,
     `They are JSON Lines files under ${folders.join(' and ')}: a folder for each project, in which a session's transcript is <session id>.jsonl, and its subagents' are under <session id>/subagents/. Use the Grep, Glob and Read tools only, and only on files there: nothing else will be allowed. Grep for the words and for words that mean the same, and read around what you find to judge it. Leave out any session whose first message begins "${HAIKU_SAYS}": those are searches like this one.`,
+    'The transcripts are large: most are far more than Read takes at once (25,000 tokens), and a single line of one can be thousands of characters long. Never Read a whole transcript, and never Read one without offset and limit. Find what you need with Grep: first the files that match (files_with_matches), then the matching lines of a few of them (content, with a head_limit, and -C for a line or two around them). Read only a few lines at a time, with offset and limit, where Grep says the match is.',
     'Reply with the sessions that match best, at most ten, the best first, one to a line, as: <session id> — <what in it matches, in a few words>. Reply with that list and nothing else. If none matches, reply: none',
   ].join('\n\n')
 const haikuSaid = new Set() // the prompts of its that were answered here
+// What this device asks Haiku with, and whether it says first what that spends: low effort, and said, to begin with
+// (the settings, Haiku search; the warning's "Don't show this again")
+function haikuKept() {
+  let kept = null
+  try {
+    kept = JSON.parse(localStorage.getItem('mc.haiku'))
+  } catch {}
+  return { effort: EFFORTS.some(([v]) => v === kept?.effort) ? kept.effort : 'low', warn: kept?.warn !== false }
+}
+function haikuKeep(change) {
+  try {
+    localStorage.setItem('mc.haiku', JSON.stringify({ ...haikuKept(), ...change }))
+  } catch {}
+  markHaiku()
+}
+const effortSaid = (effort) => (effort ? (EFFORTS.find(([v]) => v === effort)?.[1] ?? effort).toLowerCase() + ' effort' : "its computer's default effort")
+function markHaiku() {
+  const { effort, warn } = haikuKept()
+  const pick = el('set-haiku-effort')
+  if (!pick.options.length) pick.replaceChildren(...EFFORTS.map(([v, label]) => h('option', { value: v }, v ? label : "Each computer's default")))
+  pick.value = effort
+  el('set-haiku-warn').checked = warn
+}
+el('set-haiku-effort').addEventListener('change', (ev) => haikuKeep({ effort: ev.target.value }))
+el('set-haiku-warn').addEventListener('change', (ev) => haikuKeep({ warn: ev.target.checked }))
 // The one of its searches a session is, while it searches
 const haikuRun = (sid) => app.haiku?.runs.find((r) => r.sid === sid && r.state === 'searching') ?? null
 
@@ -4074,16 +4135,28 @@ function haikuMay(r, folders) {
 
 async function askHaiku() {
   const q = el('search').value.trim()
+  const able = [...app.machines.values()].filter((m) => m.online && m.spawn && (m.roots ?? []).length)
+  const { effort, warn } = haikuKept()
+  // What it spends is said first, until this device is told not to (here, or in the settings)
+  if (warn && q.length >= 2 && app.key && able.length) {
+    const where = able.length === 1 ? machineName(able[0]) : `each of ${able.length} computers (${able.map(machineName).join(', ')})`
+    const go = await ask('Search with Haiku?', {
+      says: [`This spends Claude tokens. On ${where}, a session run by Claude Haiku, at ${effortSaid(effort)}, reads through the transcripts there, on the Claude account Claude Code is signed in to on that computer. How much depends on how much it reads.`, 'The effort, and whether this is asked, are in Settings, under Haiku search.'],
+      yes: 'Search',
+      check: "Don't show this again",
+    })
+    if (!go) return
+    if (askChecked) haikuKeep({ warn: false })
+  }
   setSearchBy('haiku', { run: false })
   // (one still searching for other words is stopped: it is this search that is wanted now)
   for (const run of app.haiku?.runs ?? []) if (run.state === 'searching' || run.state === 'starting') haikuStop(run, 'stopped')
   if (q.length < 2) app.haiku = { q, short: true, runs: [] }
   else if (!app.key) app.haiku = { q, locked: true, runs: [] }
   else {
-    const able = [...app.machines.values()].filter((m) => m.online && m.spawn && (m.roots ?? []).length)
-    app.haiku = { q, runs: able.map((m) => ({ mid: m.id, state: 'starting', folders: m.roots.map((root) => root.replace(/[\\/]+$/, '') + (root.includes('\\') ? '\\' : '/') + 'projects') })) }
+    app.haiku = { q, effort, runs: able.map((m) => ({ mid: m.id, state: 'starting', folders: m.roots.map((root) => root.replace(/[\\/]+$/, '') + (root.includes('\\') ? '\\' : '/') + 'projects') })) }
   }
-  renderList()
+  haikuDrawn()
   const hk = app.haiku
   await Promise.all(hk.runs.map((run) => haikuStart(hk, run)))
 }
@@ -4091,7 +4164,7 @@ async function askHaiku() {
 async function haikuStart(hk, run) {
   const m = app.machines.get(run.mid)
   const mode = m?.spawn?.modes?.includes('default') ? 'default' : undefined
-  const order = await orderFor(run.mid, 'start', { prompt: haikuAsk(hk.q, run.folders), model: 'haiku', mode, name: 'Haiku search', listed: false })
+  const order = await orderFor(run.mid, 'start', { prompt: haikuAsk(hk.q, run.folders), model: 'haiku', ...(hk.effort ? { effort: hk.effort } : {}), mode, name: 'Haiku search', listed: false })
   const r = order ? await fetch(`/api/machines/${run.mid}/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order }) }).catch(() => null) : null
   const data = (await r?.json().catch(() => ({}))) ?? {}
   if (run.state !== 'starting') return
@@ -4129,7 +4202,7 @@ async function haikuRead(run) {
   const r = await fetch('/api/sessions/' + encodeURIComponent(run.sid) + '/messages?limit=30').catch(() => null)
   const rows = r?.ok ? ((await r.json()).messages ?? []) : []
   const said = rows.findLast((m) => m.role === 'assistant' && m.text)?.text ?? ''
-  haikuStop(run, 'done')
+  haikuStop(run)
   const seen = new Set([run.sid, ...(app.haiku?.runs ?? []).map((x) => x.sid)])
   run.found = []
   for (const line of said.split('\n')) {
@@ -4149,15 +4222,20 @@ async function haikuRead(run) {
     }),
   )
   run.found = run.found.filter((f) => f.s)
+  run.state = 'done'
   haikuDrawn()
 }
 
-function haikuStop(run, state) {
+function haikuStop(run, state = run.state) {
   run.state = state
+  haikuDrawn()
   if (run.sid) fetch(`/api/machines/${run.mid}/sessions/${encodeURIComponent(run.sid)}/stop`, { method: 'POST' }).catch(() => {})
 }
 
-const haikuDrawn = () => app.search.by === 'haiku' && renderList()
+function haikuDrawn() {
+  el('search-haiku').classList.toggle('busy', !!app.haiku?.runs.some((r) => ['starting', 'searching', 'reading'].includes(r.state)))
+  if (app.search.by === 'haiku') renderList()
+}
 
 function haikuNodes() {
   const hk = app.haiku
@@ -4175,7 +4253,7 @@ function haikuNodes() {
       nodes.push(h('div', { class: 'haiku-note' }, says, run.state === 'searching' ? [' ', h('a', { href: '#/s/' + encodeURIComponent(run.sid) }, 'Watch it')] : null))
       continue
     }
-    if (run.found.length) nodes.push(...foundNodes(run.found))
+    if (run.found?.length) nodes.push(...foundNodes(run.found))
     else nodes.push(h('div', { class: 'group-head', 'data-key': 'haiku:' + run.mid }, h('span', { class: 'machine-name' }, whereLabel(name, run.mid))), note(`Haiku found nothing on ${name}.`))
   }
   return nodes

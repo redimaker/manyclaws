@@ -495,6 +495,16 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
    them all back, on every tile (data-tile-options); and a tile is not a link to be previewed or text to be chosen by a long press */
 [data-tile-off~="star"]:not([data-tile-options]) .row .star, [data-tile-off~="grip"]:not([data-tile-options]) .row .grip, [data-tile-off~="edit"]:not([data-tile-options]) .row .row-edit { display: none; }
 [data-tile-options] .row .star, [data-tile-options] .row .grip, [data-tile-options] .row .row-edit { opacity: 1; }
+/* (in the picture of a tile in the settings, what it has is shown as it is, not only when pointed at) */
+.tile-sample .row .star, .tile-sample .row .grip, .tile-sample .row .row-edit { opacity: 1; }
+/* While they are back, a ✕ at the end of each heading of the list puts them away again */
+.options-done { display: none; flex: none; align-self: center; margin: -4px -4px -4px auto; padding: 0; width: 22px; height: 22px; place-items: center; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); font: inherit; font-size: 11px; line-height: 1; cursor: pointer; }
+.options-done:hover { background: color-mix(in srgb, var(--text) 18%, transparent); }
+[data-tile-options] .options-done { display: inline-grid; }
+.machine-head .options-done { margin-left: 6px; }
+@media (hover: none) {
+  .options-done { width: 30px; height: 30px; font-size: 13px; margin-top: -8px; margin-bottom: -8px; }
+}
 .session-list .row { -webkit-touch-callout: none; }
 /* A favorite in hand, by its grip or being dragged: (the grip held with the keys is in hand too) */
 .session-list .row.dragging, .session-list .row:has(.grip:focus-visible) { background: color-mix(in srgb, var(--accent) 22%, var(--bg)); color: var(--active-text); outline: 2px solid var(--accent); outline-offset: -2px; opacity: 1; }
@@ -677,18 +687,33 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
    choice between two or three things is its name with the switch beside it, and a tile
    of the list is shown there as this device has its tiles, on the list's own ground */
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; max-width: 420px; min-height: 30px; margin: 8px 0; }
-.tile-sample { max-width: 380px; margin: 10px 0 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); overflow: hidden; }
+.tile-sample { max-width: 480px; margin: 10px 0 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); overflow: hidden; }
 /* (a picture of a tile: in the list's own colour, whatever the page around it has its links in) */
 .guide .tile-sample .row { color: var(--text); text-decoration: none; cursor: default; }
 #set-alerts[data-state="on"] #set-alerts-says, #set-alerts[data-state="open"] #set-alerts-says { color: var(--text); }
 
-/* Search, and what it finds. While the box is in use the head of the list gives way to what is searched: three
-   ways, one pressed, and Haiku beside them, which is asked once */
-.search-by { gap: 8px; }
-.search-by .search-modes { flex: 3; display: flex; }
-.search-by .search-modes button { flex: 1; padding: 4px 8px; font-size: 13px; }
-.search-haiku { flex: 1; padding: 4px 8px; font-size: 13px; }
-.search-haiku[aria-pressed="true"] { border-color: var(--accent); color: var(--text); }
+/* Search, and what it finds. While the box is in use the head of the list gives way to what is searched: the three
+   ways as one switch on a soft track, the one chosen raised on it; and Haiku beside them, in ManyClaws' orange, with
+   a spark that turns while it searches */
+.search-by { gap: 8px; padding-top: 7px; padding-bottom: 7px; }
+.search-modes { flex: 1; display: flex; gap: 2px; min-width: 0; padding: 3px; border-radius: 9px; background: color-mix(in srgb, var(--text) 9%, transparent); }
+.search-modes button { flex: 1; min-width: 0; padding: 4px 6px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 500; line-height: 1.4; cursor: pointer; transition: background-color .15s ease, color .15s ease, box-shadow .15s ease; }
+.search-modes button:hover { color: var(--text); }
+.search-modes button[aria-pressed="true"] { background: var(--input-bg); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .25), 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent); }
+.search-modes button:focus-visible, .search-haiku:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.search-haiku { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px 5px 9px; border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font: inherit; font-size: 12.5px; font-weight: 600; line-height: 1.4; cursor: pointer; transition: background-color .15s ease, color .15s ease; }
+.search-haiku:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.search-haiku[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fffaf5; }
+.search-haiku svg { width: 13px; height: 13px; flex: none; fill: currentColor; }
+.search-haiku.busy svg { animation: haiku-spark 1.4s ease-in-out infinite; }
+@keyframes haiku-spark { 50% { transform: rotate(90deg) scale(.7); opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .search-haiku.busy svg { animation: none; } }
+/* (a terminal's: square, in its own type, the way chosen drawn in reverse) */
+[data-view="terminal"] .search-modes, [data-view="terminal"] .search-modes button, [data-view="terminal"] .search-haiku { border-radius: 0; font-size: inherit; }
+[data-view="terminal"] .search-modes button[aria-pressed="true"] { background: var(--text); color: var(--panel); box-shadow: none; }
+/* A choice under what the question box says (app.js, ask: `check`) */
+.ask-check { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; color: var(--n-soft, var(--muted)); font-size: 14px; cursor: pointer; }
+.ask-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--n-accent, var(--accent)); }
 .search-group { display: flex; align-items: center; gap: 8px; }
 .found-why { padding: 0 12px 8px 30px; margin-top: -4px; font-size: .9em; color: var(--muted); }
 .haiku-note { padding: 8px 12px; font-size: .9em; color: var(--muted); }
@@ -1657,6 +1682,10 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .brand { font-size: 15px; }
   .head-link { width: var(--tap); height: var(--tap); margin: -8px -12px -8px 0; }
   .head-icon { width: 22px; height: 22px; }
+  .search-by { padding-top: 9px; padding-bottom: 9px; }
+  .search-modes button { padding: 8px 6px; font-size: 14px; }
+  .search-haiku { padding: 8px 13px 8px 11px; font-size: 14px; }
+  .search-haiku svg { width: 15px; height: 15px; }
   .view-switch { border-radius: 8px; }
   .view-switch button { padding: 8px 12px; font-size: 14px; }
   .conn { width: 10px; height: 10px; }

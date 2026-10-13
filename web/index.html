@@ -20,14 +20,14 @@
        and holding it against the public repository's is holding all of it. The modules the script goes on to
        import are named too, each fetched and checked before the script asks for it (seal.js before keys.js, which
        imports it). -->
-  <link rel="stylesheet" href="app.css" integrity="sha384-/FQpWm1yAjUtqfY4ZfZe9nGtFCwtGNt+7aUgrwvF+Z/zMr62R/m8BWSYRwunTyfG">
+  <link rel="stylesheet" href="app.css" integrity="sha384-abrKA2SidyfGZKk82G+AhtDlZObq0Kr0fHbQcZ3ABs7Wio2+KpJkXCp/5k3Dquvi">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-It05x/2EV39+9/HmQFKcu0xLy0Rs5ZCmqyt4XwhlEcW2mU87v/zjlyvqiIz2en0u">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-iXNtiv6ROo1bs7A2jUQm6Ywq/IiiKm95WzhXkd7YrD6eOSprO2PAF4iMWvLTGBeZ">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-B1CvuHkwxxLe6VIx00ahJBtgg+SZDU3ZEzHKK/X9HRbSRG1z+ui5orsJIvJrtpnx">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-vjYD0/zLU+HzcLnhWRAepZlgvqGIWMy7uD1jWGWYGt58IbWv+uEbZfg1YMEjH1UB">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-w+/fVzQtEtgcqsDZth00TL3NiGQ8L7PE5ffHkCqrGaekGoOy5O6yNiwwkdLXXgzP">
-  <script src="app.js" defer integrity="sha384-QuwYDQTM+rDoZYqeD2EYlTZDUYCG4omDi0uYEtO+yvRJeB6w2WDM3uqdnkAuq2rA"></script>
+  <script src="app.js" defer integrity="sha384-41m+BEBv2BhpQ2WMGW4IYG1XPlpt8rjoqFKhTgv0UpY4DERjUT3oSvb3ioSQ4jyD"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -132,12 +132,12 @@
       <!-- In the head's place while the search box is in use: what is searched (the names, what you typed, or all of
            what was said), and Haiku, which is asked once to look through the transcripts on each computer -->
       <div id="search-by" class="bar search-by" hidden>
-        <span class="view-switch search-modes" role="group" aria-label="Search by">
+        <span class="search-modes" role="group" aria-label="Search by">
           <button type="button" data-search-by="title" aria-pressed="true" title="The names of your sessions">Title</button>
           <button type="button" data-search-by="prompt" aria-pressed="false" title="What you typed to your sessions">Prompt</button>
           <button type="button" data-search-by="text" aria-pressed="false" title="Everything said and done in your sessions">Text</button>
         </span>
-        <button type="button" id="search-haiku" class="ghost search-haiku" aria-pressed="false" title="Ask Claude Haiku, once, to look through the transcripts on each of your computers for what you typed">Haiku</button>
+        <button type="button" id="search-haiku" class="search-haiku" aria-pressed="false" title="Ask Claude Haiku, once, to look through the transcripts on each of your computers for what you typed"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1c.45 3.2 2 4.9 5.2 5.4v.9C10 7.8 8.45 9.5 8 12.7h-.05C7.5 9.5 6 7.8 2.8 7.3v-.9C6 5.9 7.5 4.2 7.95 1z"/><path d="M12.6 10.6c.18 1.25.8 1.9 2 2.1v.35c-1.2.2-1.82.85-2 2.1h-.04c-.18-1.25-.8-1.9-2-2.1v-.35c1.2-.2 1.82-.85 2-2.1z"/></svg>Haiku</button>
       </div>
       <div class="search-box">
         <input id="search" type="search" placeholder="Search every session" autocomplete="off" spellcheck="false" aria-label="Search every session on every machine">
@@ -367,6 +367,14 @@
               </div>
             </div>
           </section>
+          <section class="acct-part" id="set-haiku">
+            <h2>Haiku search</h2>
+            <div class="acct-body">
+              <p class="muted">Haiku, beside Title, Prompt and Text while you search, starts a session run by Claude Haiku on each of your computers that can start one, to read through the transcripts there. It spends Claude tokens on the Claude account Claude Code is signed in to on each.</p>
+              <label class="guide-field">Effort <select id="set-haiku-effort"></select></label>
+              <label class="guide-check"><input type="checkbox" id="set-haiku-warn"> Warn before each Haiku search</label>
+            </div>
+          </section>
           <section class="acct-part" id="set-alerts">
             <h2>Notifications</h2>
             <div class="acct-body">
@@ -497,6 +505,7 @@
       <h2 id="ask-title" class="ask-title"></h2>
       <div id="ask-says" class="ask-says"></div>
       <input id="ask-text" class="ask-text" autocomplete="off" autocapitalize="off" spellcheck="false" hidden>
+      <label id="ask-check-row" class="ask-check" hidden><input id="ask-check" type="checkbox"> <span id="ask-check-says"></span></label>
       <div class="ask-foot">
         <button id="ask-no" type="button" class="ask-no">Cancel</button>
         <button id="ask-yes" type="submit" class="ask-yes">OK</button>
