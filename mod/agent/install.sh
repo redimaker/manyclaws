@@ -2,7 +2,12 @@
 # Installs the ManyClaws agent on this machine and starts it as a service of your
 # own user (launchd on macOS, systemd --user on Linux).
 #
-#   curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/agent/install.sh | bash -s -- [options]
+#   curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/mod/agent/install.sh | bash -s -- [options]
+#
+# or, from the ManyClaws plugin as Claude Code installed it (the agent is in the plugin's folder, with
+# the signed list the plugin was released by), what the plugin runs when the page asks it to:
+#
+#   bash <the plugin's folder>/agent/install.sh --from <the plugin's folder> [options]
 #
 # and, once it is installed, to bring it up to date, the copy of this that it keeps:
 #
@@ -11,7 +16,7 @@
 # The agent's files are fetched from the public repository they are kept in
 # (github.com/redimaker/manyclaws): what runs here is what anyone can read there, and no
 # server hands it out. What is fetched is a release: a list of every file with its SHA-256
-# (release.json), signed (release.json.sig) with a key that is kept neither in that
+# (mod/release.json), signed (mod/release.json.sig) with a key that is kept neither in that
 # repository nor on any server. Nothing is installed unless the signature is by a key this
 # installer knows (SIGNERS, below) and every file is as the list says; and none older than
 # the release installed is taken. So an agent that is installed updates itself by a key it
@@ -31,8 +36,9 @@
 #   --server URL        the ManyClaws server this machine reports to (default: what it was set
 #                       up with, else https://manyclaws.dev)
 #   --from WHERE        take the release from here, where it is not to come from the repository:
-#                       a .tar.gz by its address or its path, or a folder, laid out as the
-#                       repository is (or MANYCLAWS_AGENT_FROM). It is checked all the same
+#                       a .tar.gz by its address or its path, or a folder: a checkout of the
+#                       repository, or the plugin's own folder (or MANYCLAWS_AGENT_FROM). It
+#                       is checked all the same
 #   --signers FILE      the keys a release may be signed by, in place of the ones this installer
 #                       knows: a file as ssh-keygen's "allowed signers" are written. For a
 #                       release of your own making
@@ -231,13 +237,16 @@ node_bin="$(command -v node || true)"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 if [ -d "$from" ]; then
+  # (a checkout of the repository has the list and the agent in its plugin's folder; the plugin's folder has them at its top)
+  base="$from"
+  [ ! -f "$from/mod/release.json" ] || base="$from/mod"
   mkdir "$stage/from"
-  for part in agent release.json release.json.sig; do [ ! -e "$from/$part" ] || cp -R "$from/$part" "$stage/from/"; done
+  for part in agent release.json release.json.sig; do [ ! -e "$base/$part" ] || cp -R "$base/$part" "$stage/from/"; done
 elif [ -f "$from" ]; then tar -xzf "$from" -C "$stage"
 else curl -fsSL "$from" | tar -xzf - -C "$stage" || { echo "The release could not be fetched from $from" >&2; exit 1; }
 fi
-# (the repository's archive has everything in one folder under its top)
-list="$(find "$stage" -maxdepth 2 -name release.json | head -1)"
+# (the repository's archive has everything in one folder under its top, and the list in the plugin's folder there)
+list="$(find "$stage" -maxdepth 3 -name release.json | head -1)"
 [ -n "$list" ] && [ -f "$(dirname "$list")/agent/agent.mjs" ] || { echo "What $from gave is not a ManyClaws release: it has no release.json with the agent beside it. Nothing was changed." >&2; exit 1; }
 top="$(dirname "$list")"
 src="$top/agent"
@@ -272,19 +281,22 @@ try {
 }
 if (!Number.isInteger(list.release) || !list.files || typeof list.files !== 'object') no('release.json is not a list of files')
 if (list.release < had) (console.error(`The release fetched (${list.release}) is older than the one installed (${had}): it is not gone back to.`), process.exit(1))
-const listed = Object.keys(list.files).filter((f) => f.startsWith('agent/'))
-const there = fs.readdirSync(path.join(top, 'agent')).map((f) => 'agent/' + f)
+// (the list names every file by its path in the repository, and is kept in the plugin's folder, mod/, where it is here:
+// so mod/agent/x is agent/x beside it)
+const listed = Object.keys(list.files).filter((f) => f.startsWith('mod/agent/'))
+const at = (f) => path.join(top, f.slice('mod/'.length))
+const there = fs.readdirSync(path.join(top, 'agent')).map((f) => 'mod/agent/' + f)
 for (const f of there) if (!listed.includes(f)) no(f + ' is not on the list')
 for (const f of listed) {
   let bytes
   try {
-    bytes = fs.readFileSync(path.join(top, f))
+    bytes = fs.readFileSync(at(f))
   } catch {
     no(f + ' is missing')
   }
   if (crypto.createHash('sha256').update(bytes).digest('hex') !== list.files[f]) no(f + ' is not the file the list names')
 }
-if (!listed.includes('agent/agent.mjs') || !listed.includes('agent/service.mjs') || !listed.includes('agent/install.sh')) no('the agent is not whole')
+if (!['agent.mjs', 'service.mjs', 'install.sh'].every((f) => listed.includes('mod/agent/' + f))) no('the agent is not whole')
 CHECK
 # Installed again: the agent that is here is stopped and taken away whole, with everything it kept (its files, its
 # index, what it remembered, its log), once the release that takes its place is in hand and checked. How the machine was

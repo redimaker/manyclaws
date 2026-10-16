@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Makes a release of what this repository holds: the list of every file that ends up on a
-// person's computer or in their browser, each with its SHA-256 (release.json), and that
-// list signed (release.json.sig). The agent's installer installs nothing that is not on a
-// signed list, and anyone can hold what a server hands their browser against the same one.
+// person's computer or in their browser, each with its SHA-256 (mod/release.json), and that
+// list signed (mod/release.json.sig). The two are kept in the plugin's own folder, so every
+// copy of the plugin carries the list it was released by. The agent's installer installs
+// nothing that is not on a signed list, and anyone can hold what a server hands their
+// browser, or what Claude Code installed, against the same one.
 //
 //   node release.mjs            bring the page's integrity values up to date (web/index.html):
 //                               each script and style sheet it loads is named there with its
@@ -14,9 +16,11 @@
 //                               next number, then its signature, by the key (or keys) named in
 //                               MANYCLAWS_RELEASE_KEY: a private key's path, or a public key's
 //                               whose other half an ssh-agent holds; several with a colon between
+//   node release.mjs --tag      once the release is committed: tags that commit release-N, so
+//                               that a release can be checked out, read and compared by its name
 //
 // Signed with ssh-keygen, under the namespace manyclaws-release. Which keys count is in
-// agent/install.sh (SIGNERS): to replace one, a release signed by the old key carries an
+// mod/agent/install.sh (SIGNERS): to replace one, a release signed by the old key carries an
 // installer that names the new one.
 import { execFileSync, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
@@ -27,9 +31,11 @@ const flags = new Set(process.argv.slice(2).filter((a) => a.startsWith('--')))
 const ROOT = path.resolve(process.argv.slice(2).find((a) => !a.startsWith('--')) ?? import.meta.dirname)
 const NAMESPACE = 'manyclaws-release'
 
-// What a release is of: the agent, the plugin, the page, and what lets Claude Code install the plugin from here
-const PARTS = ['.claude-plugin', 'agent', 'mod', 'web']
-const NOT = (rel) => /(^|\/)(\.DS_Store|node_modules)(\/|$)/.test(rel) || rel.startsWith('mod/.claude-plugin/types/') || rel === 'mod/tsconfig.json'
+// What a release is of: the plugin (with the agent in it), the page, and what lets Claude Code install the plugin from here
+const PARTS = ['.claude-plugin', 'mod', 'web']
+// The list and its signature, in the plugin's folder: what the rest is held against, and not on the list itself
+const LIST = 'mod/release.json'
+const NOT = (rel) => /(^|\/)(\.DS_Store|node_modules)(\/|$)/.test(rel) || rel.startsWith('mod/.claude-plugin/types/') || rel === 'mod/tsconfig.json' || rel === LIST || rel === LIST + '.sig'
 
 function filesOf(root = ROOT) {
   // In a checkout, the files git has or is about to have: not what something wrote beside them and git leaves out
@@ -72,14 +78,14 @@ function stamped(html) {
 const listed = () => Object.fromEntries(filesOf().map((f) => [f, digest(f)]))
 const readList = () => {
   try {
-    return JSON.parse(fs.readFileSync(path.join(ROOT, 'release.json'), 'utf8'))
+    return JSON.parse(fs.readFileSync(path.join(ROOT, LIST), 'utf8'))
   } catch {
     return null
   }
 }
 const versions = () => ({
   plugin: JSON.parse(fs.readFileSync(path.join(ROOT, 'mod/.claude-plugin/plugin.json'), 'utf8')).version,
-  agent: /^export const VERSION = '(.*)'$/m.exec(fs.readFileSync(path.join(ROOT, 'agent/service.mjs'), 'utf8'))?.[1] ?? '',
+  agent: /^export const VERSION = '(.*)'$/m.exec(fs.readFileSync(path.join(ROOT, 'mod/agent/service.mjs'), 'utf8'))?.[1] ?? '',
 })
 
 const hasPage = fs.existsSync(path.join(ROOT, PAGE))
@@ -90,8 +96,8 @@ if (flags.has('--check')) {
   const stale = []
   if (pageNow !== html) stale.push(`${PAGE} names its scripts and styles by hashes that are not theirs now: node release.mjs`)
   const list = readList()
-  if (!list || JSON.stringify(list.files) !== JSON.stringify(listed())) stale.push('release.json is not a list of the files as they are now: node release.mjs --sign')
-  else if (!fs.existsSync(path.join(ROOT, 'release.json.sig'))) stale.push('release.json is not signed: node release.mjs --sign')
+  if (!list || JSON.stringify(list.files) !== JSON.stringify(listed())) stale.push(LIST + ' is not a list of the files as they are now: node release.mjs --sign')
+  else if (!fs.existsSync(path.join(ROOT, LIST + '.sig'))) stale.push(LIST + ' is not signed: node release.mjs --sign')
   for (const line of stale) console.error(line)
   process.exit(stale.length ? 1 : 0)
 }
@@ -113,8 +119,27 @@ if (flags.has('--sign')) {
   const same = was && JSON.stringify(was.files) === JSON.stringify(files)
   const list = { release: same ? was.release : (was?.release ?? 0) + 1, made: same ? was.made : new Date().toISOString().slice(0, 10), ...versions(), files }
   const text = JSON.stringify(list, null, 2) + '\n'
-  fs.writeFileSync(path.join(ROOT, 'release.json'), text)
+  fs.writeFileSync(path.join(ROOT, LIST), text)
   const sigs = keys.map((key) => execFileSync('ssh-keygen', ['-Y', 'sign', '-f', key, '-n', NAMESPACE], { input: text, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }))
-  fs.writeFileSync(path.join(ROOT, 'release.json.sig'), sigs.join(''))
+  fs.writeFileSync(path.join(ROOT, LIST + '.sig'), sigs.join(''))
   console.log(`release ${list.release}: plugin ${list.plugin}, agent ${list.agent}, ${Object.keys(files).length} files, signed by ${keys.length} key${keys.length > 1 ? 's' : ''}`)
+}
+
+// The commit a release is in, named for it: release-N, on the commit that holds that list as signed. Only once the
+// list and its signature are committed as they are here, so that the name stands for what was signed and nothing else.
+if (flags.has('--tag')) {
+  const git = (...args) => spawnSync('git', ['-C', ROOT, ...args], { encoding: 'utf8' })
+  const list = readList()
+  const no = (why) => (console.error(why), process.exit(1))
+  if (!list || !Number.isInteger(list.release)) no(`${LIST} does not read: nothing was tagged`)
+  for (const file of [LIST, LIST + '.sig']) {
+    const committed = git('show', 'HEAD:' + file)
+    if (committed.status !== 0 || committed.stdout !== fs.readFileSync(path.join(ROOT, file), 'utf8')) no(`${file} is not committed as it is here: commit the release first. Nothing was tagged`)
+  }
+  const name = 'release-' + list.release
+  const at = git('rev-parse', '--verify', '--quiet', name + '^{commit}').stdout.trim()
+  const head = git('rev-parse', 'HEAD').stdout.trim()
+  if (at && at !== head) no(`${name} is already the name of another commit (${at.slice(0, 12)}): nothing was tagged`)
+  if (!at && git('tag', name, head).status !== 0) no(`git would not tag ${head.slice(0, 12)} ${name}`)
+  console.log(`${name} is ${head.slice(0, 12)}: push it with the branch (git push origin main ${name})`)
 }

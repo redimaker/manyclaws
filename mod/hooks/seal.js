@@ -17,9 +17,10 @@
 // account is still only as safe as its passphrase is hard to guess.
 //
 // This file is kept as three identical copies (a test compares them): mod/hooks/seal.js
-// (the plugin), server/public/seal.js (the page) and agent/seal.mjs (the machine agent).
+// (the plugin), web/seal.js (the page) and mod/agent/seal.mjs (the machine agent).
 // The plugin's runtime has no crypto library, so everything is implemented here in plain
-// JavaScript: SHA-256, SHA-512, HMAC, HKDF, BLAKE2b, Argon2id, AES-256-GCM and Ed25519.
+// JavaScript: SHA-256, SHA-512, HMAC, HKDF, BLAKE2b, Argon2id, AES-256-GCM, Ed25519,
+// X25519, and the check of an SSH signature (a release's).
 // The tests check each one against Node's own. (Where there is WebAssembly, which is in a
 // browser and in the machine's agent, the inner step of Argon2id is run in that: the same
 // step, several times as fast. And the page keeps what comes of a passphrase where a
@@ -524,6 +525,166 @@ export function verify(message, signature, key) {
   return same(times(s, BASE), add(R, times(k, A)))
 }
 
+// ---- X25519 (RFC 7748), and sealing a value to a key: what a computer that has not yet
+// been given its token and key is handed them in. The plugin makes a pair once for the
+// asking, puts its public half in a link that goes from its own session to the person's
+// browser, and nothing but that pair's other half opens what the page seals to it. In the
+// same whole-number arithmetic as Ed25519, over the same field.
+
+const NINE = new Uint8Array(32)
+NINE[0] = 9
+export function x25519(scalar, u) {
+  const k = Uint8Array.from(scalar)
+  k[0] &= 248
+  k[31] &= 127
+  k[31] |= 64
+  const n = little(k)
+  const x1 = mod(little(u) & ((1n << 255n) - 1n))
+  let [x2, z2, x3, z3, swap] = [1n, 0n, x1, 1n, 0n]
+  for (let t = 254n; t >= 0n; t--) {
+    const bit = (n >> t) & 1n
+    swap ^= bit
+    if (swap) [x2, x3, z2, z3] = [x3, x2, z3, z2]
+    swap = bit
+    const a = mod(x2 + z2)
+    const aa = mod(a * a)
+    const b = mod(x2 - z2)
+    const bb = mod(b * b)
+    const e = mod(aa - bb)
+    const da = mod(mod(x3 - z3) * a)
+    const cb = mod(mod(x3 + z3) * b)
+    x3 = mod((da + cb) * (da + cb))
+    z3 = mod(x1 * mod((da - cb) * (da - cb)))
+    x2 = mod(aa * bb)
+    z2 = mod(e * (aa + 121665n * e))
+  }
+  if (swap) [x2, x3, z2, z3] = [x3, x2, z3, z2]
+  return bytesOf(mod(x2 * inverse(z2)), 32)
+}
+// A pair: the half kept (`secret`) and the half handed out (`public`), 32 bytes each
+export function x25519Keys(secret = random(32)) {
+  return { secret, public: x25519(secret, NINE) }
+}
+const TO_PREFIX = 'k1.'
+const TO_INFO = 'manyclaws sealed to a key v1'
+const TO_AAD = enc.encode('manyclaws sealed to a key v1')
+// `value`, sealed so that only the holder of the other half of `publicKey` opens it
+export function sealTo(publicKey, value) {
+  const mine = x25519Keys()
+  const shared = x25519(mine.secret, publicKey)
+  if (shared.every((b) => b === 0)) throw new Error('that is not a key anything can be sealed to')
+  const key = hkdf(shared, TO_INFO, 32, concat(mine.public, publicKey))
+  const iv = random(12)
+  return TO_PREFIX + toB64(concat(mine.public, iv, gcmEncrypt(key, iv, madeUp(enc.encode(JSON.stringify(value === undefined ? null : value))), TO_AAD)))
+}
+// What was sealed to the pair whose kept half is `secret`, or null
+export function openFrom(secret, text) {
+  try {
+    if (typeof text !== 'string' || !text.startsWith(TO_PREFIX)) return null
+    const bytes = fromB64(text.slice(TO_PREFIX.length))
+    if (bytes.length < 32 + 12 + 16) return null
+    const theirs = bytes.subarray(0, 32)
+    const shared = x25519(secret, theirs)
+    if (shared.every((b) => b === 0)) return null
+    const key = hkdf(shared, TO_INFO, 32, concat(theirs, x25519(secret, NINE)))
+    const plain = gcmDecrypt(key, bytes.subarray(32, 44), bytes.subarray(44), TO_AAD)
+    return plain ? JSON.parse(dec.decode(plain)) : null
+  } catch {
+    return null
+  }
+}
+
+// ---- Releases. A release is a list of every file with its SHA-256 (release.json), signed
+// with ssh-keygen (release.json.sig) by a key kept neither in the public repository nor on
+// any server. The agent's installer checks the signature with ssh-keygen itself; this is
+// the same check in plain JavaScript, for what has no ssh-keygen to run: the page, which
+// holds what a computer says it runs against the release it names, and the plugin. Only
+// ssh-ed25519 keys, the only kind a release is signed with.
+
+const SSHSIG = enc.encode('SSHSIG')
+const fromStd64 = (text) => fromB64(String(text).replace(/\s+/g, '').replace(/=+$/, ''))
+const sshString = (bytes) => {
+  const out = new Uint8Array(4 + bytes.length)
+  new DataView(out.buffer).setUint32(0, bytes.length)
+  out.set(bytes, 4)
+  return out
+}
+// The strings an SSH blob is made of, in order (null where it is not made of them)
+function sshStrings(bytes, at = 0) {
+  const out = []
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length)
+  while (at < bytes.length) {
+    if (at + 4 > bytes.length) return null
+    const n = view.getUint32(at)
+    if (at + 4 + n > bytes.length) return null
+    out.push(bytes.subarray(at + 4, at + 4 + n))
+    at += 4 + n
+  }
+  return out
+}
+const ED25519 = 'ssh-ed25519'
+const ed25519Of = (blob) => {
+  const parts = sshStrings(blob)
+  return parts?.length === 2 && dec.decode(parts[0]) === ED25519 && parts[1].length === 32 ? parts[1] : null
+}
+// The keys an allowed-signers file names (as ssh-keygen reads one): { principal, namespaces, key }
+export function signersOf(text) {
+  const out = []
+  for (const line of String(text ?? '').split('\n')) {
+    const m = /^\s*(\S+)\s+(?:namespaces="([^"]*)"\s+)?ssh-ed25519\s+([A-Za-z0-9+/]+=*)/.exec(line)
+    if (!m || m[1].startsWith('#')) continue
+    const key = ed25519Of(fromStd64(m[3]))
+    if (key) out.push({ principal: m[1], namespaces: m[2] === undefined ? null : m[2].split(','), key })
+  }
+  return out
+}
+// Whether `message` (text or bytes) was signed, in one of the signatures in `sigText`, by
+// a key `signersText` names for `principal` and `namespace`
+export function sshSigned(message, sigText, signersText, { principal = 'manyclaws', namespace = 'manyclaws-release' } = {}) {
+  const bytes = typeof message === 'string' ? enc.encode(message) : message
+  const keys = signersOf(signersText).filter((s) => s.principal === principal && (!s.namespaces || s.namespaces.includes(namespace)))
+  const armored = String(sigText ?? '').match(/-----BEGIN SSH SIGNATURE-----([\s\S]*?)-----END SSH SIGNATURE-----/g) ?? []
+  return armored.some((one) => {
+    try {
+      const blob = fromStd64(one.replace(/-----(BEGIN|END) SSH SIGNATURE-----/g, ''))
+      if (blob.length < 10 || !SSHSIG.every((b, i) => blob[i] === b) || new DataView(blob.buffer, blob.byteOffset).getUint32(6) !== 1) return false
+      const parts = sshStrings(blob, 10)
+      if (parts?.length !== 5) return false
+      const [publicKey, ns, reserved, hashName, signature] = parts
+      if (dec.decode(ns) !== namespace) return false
+      const key = ed25519Of(publicKey)
+      const sig = sshStrings(signature)
+      if (!key || sig?.length !== 2 || dec.decode(sig[0]) !== ED25519) return false
+      if (!keys.some((s) => s.key.every((b, i) => b === key[i]))) return false
+      const hash = dec.decode(hashName)
+      const digest = hash === 'sha512' ? sha512(bytes) : hash === 'sha256' ? sha256(bytes) : null
+      if (!digest) return false
+      return verify(concat(SSHSIG, sshString(ns), sshString(reserved), sshString(hashName), sshString(digest)), sig[1], key)
+    } catch {
+      return false
+    }
+  })
+}
+
+// What a plugin is, as one digest: each of its files by its path in the plugin's folder and
+// its SHA-256, in order, made one SHA-256. The same from a release's list (the files under
+// mod/) as from a folder Claude Code installed, so that what a computer runs is said in one
+// value that can be held against a signed list, or approved by itself where it is no
+// release. What of a plugin's folder is not the plugin: the list it was released by, and
+// what Claude Code writes there of its own.
+export const notPlugin = (rel) =>
+  rel === 'release.json' || rel === 'release.json.sig' || rel === 'tsconfig.json' || rel === '.orphaned_at' || /^\.in_use(\/|$)/.test(rel) || rel.startsWith('.claude-plugin/types/') || /(^|\/)(\.DS_Store|node_modules)(\/|$)/.test(rel)
+const hexOf = (bytes) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+export const hexSha256 = (bytes) => hexOf(sha256(typeof bytes === 'string' ? enc.encode(bytes) : bytes))
+// `files`: { path: its SHA-256 } (or [path, SHA-256] pairs)
+export function pluginDigest(files) {
+  const entries = (Array.isArray(files) ? files : Object.entries(files ?? {})).filter(([rel]) => !notPlugin(rel))
+  entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return hexSha256(entries.map(([rel, hash]) => hash + '  ' + rel + '\n').join(''))
+}
+// A release's list as the plugin's files: those under mod/, by their paths in the plugin's folder
+export const pluginOfList = (list) => Object.fromEntries(Object.entries(list?.files ?? {}).filter(([f]) => f.startsWith('mod/')).map(([f, hash]) => [f.slice(4), hash]))
+
 // ---- Keys, and sealing values
 
 const toB64 = (bytes) => {
@@ -971,24 +1132,36 @@ const isDeviceKey = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{43}$/.test(v
 
 // What a list is signed by
 export const devicesDigest = (list) => sha256(concat(DEVICES_TAG, enc.encode(list)))
-// A list ({ v, devices }) written out and signed: `signer` is the passphrase's own. Sealed, it is what the server keeps.
-export function signDevices({ v, devices }, signer) {
-  const list = JSON.stringify({ v, devices })
+// A list ({ v, devices, allowed }) written out and signed: `signer` is the passphrase's own. Sealed, it is what the
+// server keeps. Beside the devices, and signed with them, the plugins the account's owner allowed on a computer where
+// they are no release (`allowed`: { machine, hash, at }, the hash as pluginDigest makes it): what only the passphrase
+// says, as only it says which devices are the account's. And on a device, `start: false` where it may not start
+// sessions on the account's computers (one that is not its owner's own, with `until`, never may).
+const MAX_ALLOWED = 200
+export function signDevices({ v, devices, allowed = [] }, signer) {
+  const list = JSON.stringify(allowed.length ? { v, devices, allowed } : { v, devices })
   return { list, sig: toB64(sign(devicesDigest(list), signer)) }
 }
-// A list as it was signed ({ v, devices }), where the passphrase's checker says its signer signed it: null otherwise
+const isAllowed = (a) => a && typeof a.machine === 'string' && a.machine.length <= 100 && /^[0-9a-f]{64}$/.test(a.hash) && Number.isFinite(a.at)
+// A list as it was signed ({ v, devices, allowed }), where the passphrase's checker says its signer signed it: null otherwise
 export function signedDevices(got, checker) {
   try {
     if (!got || typeof got.list !== 'string' || typeof got.sig !== 'string' || !checker) return null
     if (!verify(devicesDigest(got.list), fromB64(got.sig), checker)) return null
-    const { v, devices } = JSON.parse(got.list)
+    const { v, devices, allowed = [] } = JSON.parse(got.list)
     if (!Number.isFinite(v) || !Array.isArray(devices) || devices.length > MAX_DEVICES) return null
-    if (!devices.every((d) => d && isDeviceKey(d.key) && typeof d.name === 'string' && Number.isFinite(d.at) && (d.until === undefined || Number.isFinite(d.until)))) return null
-    return { v, devices }
+    if (!devices.every((d) => d && isDeviceKey(d.key) && typeof d.name === 'string' && Number.isFinite(d.at) && (d.until === undefined || Number.isFinite(d.until)) && (d.start === undefined || typeof d.start === 'boolean'))) return null
+    if (!Array.isArray(allowed) || allowed.length > MAX_ALLOWED || !allowed.every(isAllowed)) return null
+    return { v, devices, allowed }
   } catch {
     return null
   }
 }
+// Whether a device may have a session started on one of the account's computers: one that is its owner's own (no
+// `until`), unless its owner turned that off
+export const mayStart = (d) => !!d && d.until === undefined && d.start !== false
+// Whether a plugin (its pluginDigest) was allowed on a computer (its id) by the list
+export const allowedOn = (list, machine, hash) => !!list?.allowed?.some((a) => a.machine === machine && a.hash === hash)
 export const makeDevices = (list, key, signer) => seal(signDevices(list, signer), key)
 export const readDevices = (text, key, checker) => signedDevices(open(text, key, null), checker)
 // One of a list's devices, by its key, while it is one of them: null for one that is not there, or whose stay is over

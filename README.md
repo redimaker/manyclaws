@@ -82,7 +82,7 @@ The guide at <https://manyclaws.dev/setup> walks through it, and Claude Code can
 ```
 claude plugin marketplace add redimaker/manyclaws
 claude plugin install manyclaws@manyclaws
-curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/agent/install.sh | bash -s -- --spawn ~/code
+curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/mod/agent/install.sh | bash -s -- --spawn ~/code
 ```
 
 The first two install the plugin; the third installs the agent as a service of your own user and lets sessions be started in `~/code` (leave `--spawn` out and they can only be read and searched). Then give the plugin your API token and your encryption passphrase in its own dialog (`/plugin` in Claude Code), and start a new session.

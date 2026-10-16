@@ -26,10 +26,12 @@
 //                                         the ManyClaws plugin to give it its token and key.
 //                                         On a Mac the token and the key are kept in the
 //                                         keychain (secrets.mjs), unless --no-keychain
-//   node agent.mjs verify [--server URL]  hold what is here against the signed release it was
+//   node agent.mjs verify [--server URL] [--here]
+//                                         hold what is here against the signed release it was
 //                                         installed from: the agent's files, the plugin as Claude
-//                                         Code has it, and what the server hands a browser for
-//                                         its page (verify.mjs)
+//                                         Code has it (against the list it carries), and what the
+//                                         server hands a browser for its page (verify.mjs). With
+//                                         --here, this computer's agent and plugin alone
 //   node agent.mjs plugin [--look]        give the ManyClaws plugin in Claude Code what this machine
 //                                         was set up with (the installer does, where it was typed
 //                                         into it), so that the token and the passphrase are
@@ -336,7 +338,8 @@ async function main() {
   if (command === 'verify') {
     const config = loadConfig()
     const { verify } = await import('./verify.mjs')
-    const { ok, lines } = await verify({ home: HOME, roots: config.roots, server: String((flags.server === true ? '' : flags.server) || config.server || '').replace(/\/+$/, '') })
+    // (--here: this computer's agent and plugin, and not the page its server hands out)
+    const { ok, lines } = await verify({ home: HOME, roots: config.roots, here: flags.here === true, server: String((flags.server === true ? '' : flags.server) || config.server || '').replace(/\/+$/, '') })
     for (const line of lines) console.log(line)
     process.exitCode = ok ? 0 : 1
     return

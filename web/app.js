@@ -8929,7 +8929,7 @@ function renderUpgrade() {
               2,
               'Remove the old agent and install the new one',
               h('p', null, 'One command does both. It removes the old agent with everything it kept, its API token and key among it, and installs the newest release in its place, checked against its signature and set up as the old one was: the same computer here, with the same name and folders.'),
-              codeBox('curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/agent/install.sh | bash -s -- --reinstall'),
+              codeBox('curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/mod/agent/install.sh | bash -s -- --reinstall'),
               h('p', { class: 'muted' }, 'It ends the sessions the old agent is running, the ones started from this page: while there are any it does nothing and says so. Add --end-sessions to end them.'),
             ),
             step(

@@ -40,7 +40,7 @@ The first removes the plugin with the marketplace it came from, and with them th
 A computer that has the agent has `~/.manyclaws/agent.json`. One that never had it skips this step (the guide at {{origin}}/setup.md says how to add one).
 
 ```
-curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/agent/install.sh | bash -s -- --reinstall --end-sessions
+curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/mod/agent/install.sh | bash -s -- --reinstall --end-sessions
 ```
 
 This stops the old agent and removes it with everything it kept: its files, its index of your transcripts, and its API token and key. Then it installs the newest release in its place, checked against its signature, set up as the old one was: the same computer on your page, with the same name and the same folders. It asks for nothing. The new agent has no token and no key, and waits: it takes both from the plugin once step 4 is done, and reads your transcripts into its index again, which takes a few minutes on a computer with many.

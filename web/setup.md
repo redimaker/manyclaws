@@ -39,7 +39,7 @@ The plugin shows a computer's sessions while they run. The agent is a small back
 Claude Code runs this too, and nothing is asked of you: the agent is installed and waits. It signs in with the same API token as the plugin, and seals with the same key, and it takes both from the plugin once step 4 is done.
 
 ```
-curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/agent/install.sh | bash -s -- {{#elsewhere}}--server {{origin}} {{/elsewhere}}--spawn ~/code
+curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/mod/agent/install.sh | bash -s -- {{#elsewhere}}--server {{origin}} {{/elsewhere}}--spawn ~/code
 ```
 
 The installer and the agent it installs come from the same public repository. What it installs is a release: a list of every file with its SHA-256, signed with a key that is kept neither in that repository nor on {{name}}'s server, and nothing is installed unless the signature and every file check out.
