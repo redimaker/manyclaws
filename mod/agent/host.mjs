@@ -33,7 +33,10 @@ export function sessionEnv(base, { inside = insideSession() } = {}) {
 export class HostError extends Error {}
 
 export class Host {
-  constructor(config, { store, onChange = () => {}, log = () => {} }) {
+  // (`usedFolder`: the rule a folder a person used is judged by, mayBeUsedFolder; given in its place only by a test, whose
+  // own folders are under one whose name starts with a dot)
+  // (`startedFile`: where what it started is remembered; with none, as the tests' own hosts have, it is not written down)
+  constructor(config, { store, onChange = () => {}, log = () => {}, usedFolder = mayBeUsedFolder, startedFile = null }) {
     this.config = config
     // args and env are added to every session the agent starts: a default model, say.
     // max: how many it runs at once. One left idle keeps its place until it is closed
@@ -45,12 +48,27 @@ export class Host {
     // started from a phone or a browser only where the machine's owner said so, on the
     // machine. A list in its agent.json ("spawn": { "modes": [...] }, or the installer's
     // --mode) is how its owner names them.
-    this.spawnConfig = { enabled: false, folders: [], modes: DEFAULT_MODES, idleMinutes: 30, max: 64, args: [], env: {}, ...(config.spawn ?? {}) }
+    // auto: the folders a person has used Claude Code in (autoFolders, below) are allowed too, and autoOff names the
+    // ones of those that are not; folders: the ones the owner listed. A session may be started anywhere under either,
+    // and a new folder made only under one the owner listed.
+    this.spawnConfig = { enabled: false, folders: [], auto: false, autoOff: [], modes: DEFAULT_MODES, idleMinutes: 30, max: 64, args: [], env: {}, ...(config.spawn ?? {}) }
     this.store = store
     this.onChange = onChange
     this.log = log
     this.hosted = new Map() // sid -> { sid, proc, cwd, state, startedAt, lastActive, timer, tail }
     this.env = null
+    // What is checked before any session is started here (the service's: that the plugin it loads is a release, or allowed)
+    this.guard = null
+    // The folders a person used, as last worked out (refreshAuto)
+    this.autoList = []
+    this.usedFolder = usedFolder
+    // The sessions this agent has started, kept across restarts: what they ran in is not a folder a person chose
+    this.startedFile = startedFile
+    try {
+      this.started = new Set(startedFile ? JSON.parse(fs.readFileSync(startedFile, 'utf8')) : [])
+    } catch {
+      this.started = new Set()
+    }
   }
 
   // What the server and the page are told about them
@@ -99,7 +117,7 @@ export class Host {
   // machine has it and allows it, else a folder of the same name under one the owner
   // listed, else the first of those the owner listed. A session is never started outside them.
   folderLike(like) {
-    const roots = this.roots()
+    const roots = [...(this.spawnConfig.enabled ? this.roots() : []), ...this.autoRoots()]
     if (!roots.length) throw new HostError('starting sessions is turned off on this machine (spawn.folders in agent.json)')
     const wanted = String(like ?? '').trim()
     if (wanted) {
@@ -261,8 +279,7 @@ export class Host {
 
   // (`counted`: whether room for one more is looked for here, or by the caller once it knows a session is to be started)
   allow(mode, { counted = true } = {}) {
-    const c = this.spawnConfig
-    if (!c.enabled) throw new HostError('starting sessions is turned off on this machine (spawn.enabled in agent.json)')
+    if (!this.canStart()) throw new HostError('starting sessions is turned off on this machine (spawn.enabled in agent.json)')
     if (counted) this.room()
     this.allowMode(mode)
   }
@@ -295,19 +312,32 @@ export class Host {
       .filter(Boolean)
   }
 
-  inside(real) {
-    return this.roots().some((f) => sameCase(real) === sameCase(f) || sameCase(real).startsWith(sameCase(f) + path.sep))
+  inside(real, roots = this.roots()) {
+    return roots.some((f) => sameCase(real) === sameCase(f) || sameCase(real).startsWith(sameCase(f) + path.sep))
+  }
+  // The folders a person used, where those are allowed (spawn.auto), as they really are on disk
+  autoRoots() {
+    return this.spawnConfig.auto ? this.autoList : []
+  }
+  // Whether a session may be started here at all: the owner listed a folder, or allowed the ones they used
+  canStart() {
+    return !!(this.spawnConfig.enabled && this.spawnConfig.folders.length) || this.autoRoots().length > 0
+  }
+  // Every folder a session may be started in: the owner's, then the ones they used
+  startFolders() {
+    return [...(this.spawnConfig.enabled ? this.spawnConfig.folders : []), ...this.autoRoots().filter((f) => !this.inside(f))]
   }
 
   // The folder a session may run in: one that exists, under a folder the machine's owner
-  // listed. `create`: one that isn't there yet is made first, if where it would be is
-  // under such a folder (judged by the nearest folder that does exist, links followed).
+  // listed or one they used (where those are allowed). `create`: one that isn't there yet
+  // is made first, if where it would be is under a folder the owner listed (judged by the
+  // nearest folder that does exist, links followed): never under one that was only used.
   folder(cwd, { create = false } = {}) {
     const wanted = path.resolve(expandHome(String(cwd ?? '')))
     if (create && String(cwd ?? '').trim() && !fs.existsSync(wanted)) {
       let nearest = wanted
       while (!fs.existsSync(nearest) && path.dirname(nearest) !== nearest) nearest = path.dirname(nearest)
-      if (!this.inside(fs.realpathSync(nearest))) throw new HostError(`${wanted} is outside the folders this machine allows (spawn.folders in agent.json)`)
+      if (!this.inside(fs.realpathSync(nearest))) throw new HostError(`${wanted} is outside the folders this machine allows new ones to be made in (spawn.folders in agent.json): a folder is made only under one its owner listed`)
       fs.mkdirSync(wanted, { recursive: true })
       this.log(`made the folder ${wanted}`)
     }
@@ -318,8 +348,46 @@ export class Host {
     } catch {
       throw new HostError(`${cwd || 'the folder'} is not a folder on this machine`)
     }
-    if (!this.inside(real)) throw new HostError(`${real} is outside the folders this machine allows (spawn.folders in agent.json)`)
+    if (!this.inside(real) && !this.inside(real, this.autoRoots())) throw new HostError(`${real} is outside the folders this machine allows (spawn.folders in agent.json)`)
     return real
+  }
+
+  // ---- The folders a person used. Where its owner allows it (spawn.auto), a session may be
+  // started in a folder a person has used Claude Code in here: one a session started at a
+  // terminal, in an editor or in the desktop app ran in, not one a program started (its
+  // transcript says sdk-…) or this agent did. Never the home folder or one above it, a
+  // folder for what is temporary, or one inside a folder whose name starts with a dot
+  // (~/.claude, ~/.ssh, ~/.manyclaws); only one that is there now, used in the last 90
+  // days, and not one the owner turned off (spawn.autoOff). Worked out again as the index
+  // is brought up to date: true where the list changed.
+  refreshAuto({ now = Date.now() } = {}) {
+    const off = new Set((this.spawnConfig.autoOff ?? []).map((f) => sameCase(realOr(path.resolve(expandHome(f))))))
+    const out = []
+    for (const { cwd } of this.store?.peopleFolders?.(now - AUTO_DAYS * 86400_000, this.started) ?? []) {
+      let real
+      try {
+        real = fs.realpathSync(cwd)
+        if (!fs.statSync(real).isDirectory()) continue
+      } catch {
+        continue
+      }
+      if (!this.usedFolder(real) || off.has(sameCase(real)) || out.some((f) => sameCase(f) === sameCase(real))) continue
+      out.push(real)
+    }
+    out.sort((a, b) => a.localeCompare(b))
+    const changed = JSON.stringify(out) !== JSON.stringify(this.autoList)
+    this.autoList = out
+    return changed
+  }
+
+  // A session this agent started, remembered (the last few thousand)
+  remember(sid) {
+    this.started.add(sid)
+    if (this.started.size > 5000) this.started.delete(this.started.values().next().value)
+    if (!this.startedFile) return
+    try {
+      fs.writeFileSync(this.startedFile, JSON.stringify([...this.started]), { mode: 0o600 })
+    } catch {}
   }
 
   // The folders right under the ones the owner listed: projects a session could be
@@ -330,12 +398,14 @@ export class Host {
   // read of some folders (an external disk, Documents) until someone answers a prompt on
   // the screen; read the plain way, the whole agent waited with it, and was offline.
   async subfolders({ limit = 500, waitMs = 2000 } = {}) {
-    const roots = this.roots()
+    const roots = this.spawnConfig.enabled ? this.roots() : []
     const lists = await Promise.all(roots.map((root) => this.listing(root, waitMs)))
     const others = []
     lists.forEach((entries, i) => {
       for (const e of entries ?? []) if (e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules') others.push(path.join(roots[i], e.name))
     })
+    // (and the folders a person used, where those are allowed: each one, as it is)
+    for (const f of this.autoRoots()) if (!others.includes(f) && !roots.includes(f)) others.push(f)
     return { others: others.sort((a, b) => a.localeCompare(b)).slice(0, limit), unread: roots.filter((_, i) => lists[i] === null) }
   }
 
@@ -358,6 +428,7 @@ export class Host {
   // ---- The process
 
   launch({ sid, cwd, root, args, mode, model, effort, name, prompt, listed }) {
+    this.guard?.()
     const claude = this.config.claude || findClaude(this.shellEnv())
     if (!claude) throw new HostError('claude was not found on this machine; set "claude" in agent.json')
     const env = sessionEnv(this.shellEnv())
@@ -369,6 +440,7 @@ export class Host {
     const waiting = !String(prompt ?? '').trim()
     const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', startedAt: Date.now(), lastActive: Date.now(), timer: null, tail: '', asked: new Map(), listed: typeof listed === 'boolean' ? listed : undefined }
     this.hosted.set(sid, h)
+    this.remember(sid)
     this.log(`started ${sid} in ${cwd} (pid ${proc.pid})`)
     let buffered = ''
     proc.stdout.on('data', (chunk) => {
@@ -629,6 +701,27 @@ export function sessionArgs(spawnConfig, { args = [], mode, model, effort, name 
 
 // ~ and ~/x (or ~\x) are the account's home
 export const expandHome = (p) => String(p).replace(/^~(?=$|[\\/])/, os.homedir())
+
+// How many days a folder a person used is allowed for, after it was last used
+const AUTO_DAYS = 90
+const realOr = (p) => {
+  try {
+    return fs.realpathSync(p)
+  } catch {
+    return p
+  }
+}
+// The folders for what is temporary, as they really are on disk
+const tempFolders = () => [...new Set([os.tmpdir(), '/tmp', '/var/tmp', '/var/folders', '/private/tmp', '/private/var/tmp', '/private/var/folders'].map(realOr))]
+// Whether a folder (as it really is on disk) may be one a person used that the page starts sessions in: not the home
+// folder or one above it, not a temporary one, and not inside one whose name starts with a dot
+export function mayBeUsedFolder(real, { home = realOr(os.homedir()), temps = tempFolders() } = {}) {
+  if (!path.isAbsolute(real)) return false
+  const [r, h] = [sameCase(real), sameCase(home)]
+  if (r === h || h.startsWith(r.endsWith(path.sep) ? r : r + path.sep)) return false
+  if (temps.some((t) => r === sameCase(t) || r.startsWith(sameCase(t) + path.sep))) return false
+  return !real.split(/[\\/]/).some((part) => part.startsWith('.') && part !== '.' && part !== '..')
+}
 
 // Windows takes C:\Git and c:\git for one folder
 const sameCase = (p) => (process.platform === 'win32' ? p.toLowerCase() : p)

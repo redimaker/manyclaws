@@ -45,7 +45,13 @@
 #   --label NAME        what the page calls this machine (default: its host name)
 #   --root DIR          a Claude Code config dir to index; repeat for several (default: ~/.claude)
 #   --spawn DIR         let the page start and resume sessions in DIR; repeat for several.
-#                       Without it the machine's sessions can be read and searched, not started.
+#                       Without it (or --auto-folders) the machine's sessions can be read and
+#                       searched, not started.
+#   --auto-folders      let the page start and resume sessions in the folders you have used Claude
+#                       Code in on this machine too: never your home folder or one above it, a
+#                       temporary one, or one inside a folder whose name starts with a dot, and only
+#                       one used in the last 90 days. No new folder is made in them (--spawn names
+#                       where that may be), and the page lists them and may turn any of them off
 #   --mode MODE         a permission mode the page may start sessions in; repeat for several.
 #                       Given, only the ones named are allowed. With none: default, acceptEdits,
 #                       plan, auto and dontAsk, and not bypassPermissions, which lets a session
@@ -99,7 +105,7 @@ from="${MANYCLAWS_AGENT_FROM:-https://codeload.github.com/$REPO/tar.gz/refs/head
 # release signed by one of these may bring an installer with others: that is how a key is
 # replaced, and it is why an installed agent is updated by its own copy of this script.
 SIGNERS='manyclaws namespaces="manyclaws-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMPeEfWVnYHahu/dRpMq7J+2eRNg67sQS+IJh/bH8PDD'
-server="" token="" label="" relay=0 uninstall=0 rekey=0 typed=0 update=0 end_sessions=0 keychain=1 signers="" reinstall=0
+server="" token="" label="" relay=0 uninstall=0 rekey=0 typed=0 update=0 end_sessions=0 keychain=1 signers="" reinstall=0 auto_folders=0
 roots=() spawn=() modes=() files=() key=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -109,6 +115,7 @@ while [ $# -gt 0 ]; do
     --label) label="$2"; shift 2 ;;
     --root) roots+=("$2"); shift 2 ;;
     --spawn) spawn+=("$2"); shift 2 ;;
+    --auto-folders) auto_folders=1; shift ;;
     --mode) modes+=("$2"); shift 2 ;;
     --files) files+=("$2"); shift 2 ;;
     --signers) signers="$2"; shift 2 ;;
@@ -325,6 +332,7 @@ if [ "$update" = 0 ]; then
   for m in "${modes[@]:-}"; do [ -n "$m" ] && configure+=(--mode "$m"); done
   for d in "${files[@]:-}"; do [ -n "$d" ] && configure+=(--files "$d"); done
   [ "$relay" = 1 ] && configure+=(--relay)
+  [ "$auto_folders" = 1 ] && configure+=(--auto-folders)
   [ "$keychain" = 0 ] && configure+=(--no-keychain)
   [ "$waiting" = 1 ] && configure+=(--wait)
   # (the key goes in the environment, not on a command line others can see)
@@ -400,15 +408,16 @@ if [ "$update" = 1 ]; then
 fi
 echo "The ManyClaws agent is installed in $HOME_DIR and running. Its log: $HOME_DIR/agent.log"
 echo "To bring it up to date later: bash $HOME_DIR/agent/install.sh --update"
-if [ ${#spawn[@]} -eq 0 ]; then echo "Sessions on this machine can be read and searched from the page. Starting them is off (--spawn DIR turns it on)."
+if [ ${#spawn[@]} -eq 0 ] && [ "$auto_folders" = 0 ]; then echo "Sessions on this machine can be read and searched from the page. Starting them is off (--spawn DIR or --auto-folders turns it on)."
 else
-  echo "The page may start and resume sessions in: ${spawn[*]}"
+  [ ${#spawn[@]} -eq 0 ] || echo "The page may start and resume sessions in: ${spawn[*]}"
+  [ "$auto_folders" = 0 ] || echo "The page may start and resume sessions in the folders you have used Claude Code in on this machine (not your home folder, a temporary one or one inside a folder whose name starts with a dot; used in the last 90 days). It lists them, and can turn any of them off."
   case " ${modes[*]:-} " in *" bypassPermissions "*) echo "Sessions may be started with their permissions bypassed, as you asked (--mode bypassPermissions)." ;; *) echo "Sessions are not started with their permissions bypassed (--mode bypassPermissions allows it)." ;; esac
 fi
 if [ ${#files[@]} -gt 0 ]; then echo "The page may open files from: ${files[*]}"
-elif [ ${#spawn[@]} -gt 0 ]; then echo "The page may open files from those folders, and from nowhere else on this machine (--files DIR names others)."
+elif [ ${#spawn[@]} -gt 0 ] || [ "$auto_folders" = 1 ]; then echo "The page may open files from those folders, and from nowhere else on this machine (--files DIR names others)."
 else echo "The page opens no files from this machine (--files DIR names folders it may)."; fi
-if [ ${#spawn[@]} -gt 0 ]; then echo "The page may put files into the folders sessions are started in, and nowhere else (\"upload\": false in agent.json has none put anywhere)."
+if [ ${#spawn[@]} -gt 0 ] || [ "$auto_folders" = 1 ]; then echo "The page may put files into the folders sessions are started in, and nowhere else (\"upload\": false in agent.json has none put anywhere)."
 else echo "The page puts no files on this machine."; fi
 
 # The plugin beside it, in Claude Code, and this agent are given the same token and key,

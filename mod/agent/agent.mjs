@@ -9,7 +9,8 @@
 //   node agent.mjs sessions [words]       list sessions, newest first
 //   node agent.mjs read <session id>      print a session's conversation
 //   node agent.mjs configure --server URL [--token T] [--label NAME] [--root DIR]… [--spawn DIR]…
-//                            [--mode MODE]… [--files DIR]… [--relay] [--key KEY] [--wait] [--no-keychain]
+//                            [--auto-folders] [--mode MODE]… [--files DIR]… [--relay] [--key KEY] [--wait]
+//                            [--no-keychain]
 //                                         write agent.json (the installer does); what's
 //                                         there is kept (--mode: the only permission modes
 //                                         sessions may be started in; with no list, every
@@ -94,7 +95,14 @@ export function configure(opts, { home = HOME, env = process.env } = {}) {
   if (folders(opts.root).length) config.roots = folders(opts.root)
   config.roots ??= [path.join(os.homedir(), '.claude')]
   const spawn = folders(opts.spawn)
+  // (--auto-folders: the folders a person has used Claude Code in here may have sessions started in them too, within
+  // the limits host.mjs sets; turned off one at a time from the page, as spawn.autoOff)
   config.spawn = { ...(config.spawn ?? {}), enabled: spawn.length > 0, folders: spawn }
+  if (opts.autoFolders === true) config.spawn.auto = true
+  else {
+    delete config.spawn.auto
+    delete config.spawn.autoOff
+  }
   if (opts.mode?.length) config.spawn.modes = opts.mode
   // The folders a file may be opened from, where they are not the ones sessions are started in (`"files": false`,
   // written there by hand, opens none). Files are put into the folders sessions are started in, and into these as
@@ -314,7 +322,7 @@ async function main() {
       if (!server || !token) throw new Error('a server and a token are required')
       key = await keyOfPassphrase(server, token, key)
     }
-    const config = configure({ ...lists, server: text(flags.server), token: text(flags.token), label: text(flags.label), relay: !!flags.relay, key, wait: !!flags.wait, keychain: flags['no-keychain'] ? false : undefined })
+    const config = configure({ ...lists, server: text(flags.server), token: text(flags.token), label: text(flags.label), relay: !!flags.relay, autoFolders: !!flags['auto-folders'], key, wait: !!flags.wait, keychain: flags['no-keychain'] ? false : undefined })
     // What was written, and nothing secret but the relay's own word
     console.log(JSON.stringify({ id: config.id, label: config.label ?? '', roots: config.roots, spawn: config.spawn, files: config.files ?? null, claude: config.claude ?? '', relay: config.relay ?? null, secrets: config.secrets ?? 'file', waiting: !config.has && (!config.token || !config.key) }))
     return

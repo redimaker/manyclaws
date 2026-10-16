@@ -11,9 +11,10 @@ import path from 'node:path'
 import { Store } from './store.mjs'
 import { Indexer } from './indexer.mjs'
 import { Transcript } from './transcript.mjs'
-import { Host, HostError, CARRY_MAX } from './host.mjs'
+import { Host, HostError, CARRY_MAX, expandHome } from './host.mjs'
 import { Cswap } from './cswap.mjs'
-import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused, WIRE } from './seal.mjs'
+import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused, WIRE, mayStart, allowedOn, pluginDigest } from './seal.mjs'
+import { pluginRelease, pluginFiles, installedPlugins } from './verify.mjs'
 import { historyRows } from './rows.mjs'
 import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, FILE_MAX } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
@@ -163,7 +164,7 @@ export async function run(config, flags = {}) {
   }
   let announce = () => {}
   let tokenRefused = false // the server would not take this machine's token (401): the plugin's is taken in its place
-  const host = new Host(config, { store, log, onChange: () => announce() })
+  const host = new Host(config, { store, log, onChange: () => announce(), startedFile: path.join(process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws'), 'started.json') })
   const cswap = new Cswap(config, { fail: (text) => new HostError(text) })
   // What it signs in with and what it seals with. With all three it is this account's
   // machine; without one of them it says nothing to anybody, and waits (see the end).
@@ -174,15 +175,22 @@ export async function run(config, flags = {}) {
   // Files are opened from here for the account's own devices, and only from inside the folders this machine's owner
   // lets sessions be started in, or the ones agent.json names for it (`"files": [...]`); `"files": false` opens none.
   // (as those folders really are on disk: a file is one of theirs by where it really is, links followed. files.mjs)
-  const filesFrom = config.files === false ? null : fileRoots(Array.isArray(config.files) ? config.files : host.spawnConfig.enabled ? host.spawnConfig.folders : [])
-  const servesFiles = !!filesFrom?.length
+  // (and the folders a person used, where sessions may be started in those: what they are is worked out from the index
+  // now, and again as it is brought up to date)
+  host.refreshAuto()
+  let filesFrom, servesFiles, takesInto, takesFiles
+  const refreshFileRoots = () => {
+    filesFrom = config.files === false ? null : fileRoots(Array.isArray(config.files) ? config.files : host.startFolders())
+    servesFiles = !!filesFrom?.length
+    takesInto = config.upload === false || !servesFiles ? null : fileRoots([...host.startFolders(), ...(config.upload === true && Array.isArray(config.files) ? config.files : [])])
+    takesFiles = !!takesInto?.length
+  }
+  refreshFileRoots()
   // And files are taken from the account's own devices: one sent to a session's folder, or one that was opened from here
   // and is written back changed. Into the folders sessions may be started in, where those devices can have anything
   // done already by asking a session; and into the folders named only for opening files (`"files": [...]`) where the
   // machine's owner says so too, `"upload": true`: a machine set up to be read is not written to because its agent
   // was brought up to date. `"upload": false` takes none anywhere, and so does a machine that opens none.
-  const takesInto = config.upload === false || !servesFiles ? null : fileRoots([...(host.spawnConfig.enabled ? host.spawnConfig.folders : []), ...(config.upload === true && Array.isArray(config.files) ? config.files : [])])
-  const takesFiles = !!takesInto?.length
   const ownHome = process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws')
   const transcripts = new Map() // path -> Transcript, most recently used last
   // Transcripts on their way to or from another machine, held for the minutes that takes
@@ -207,6 +215,83 @@ export async function run(config, flags = {}) {
     return open
   }
   let announcedTitles = ''
+  let announcedPlugins = ''
+
+  // ---- The plugin on this machine, held against the release it carries. The agent was installed from a signed
+  // release and kept the keys it was checked by (agent/release-signers): by those, each copy of the ManyClaws plugin
+  // Claude Code installed here, and each folder a session's plugin said it was loaded from (it leaves a note under
+  // plugins/), is the release its list says, or not; either way its digest says what it is. That is said to the
+  // account's own devices, sealed, and a session the agent starts loads a plugin that is a release, or one the
+  // account's owner allowed on this computer by its digest with the passphrase (the list of devices). An agent that
+  // was not installed from a release (run from a checkout) has no keys to go by, and says so.
+  const signersFile = path.join(ownHome, 'agent', 'release-signers')
+  const checks = () => fs.existsSync(signersFile)
+  const notesDir = path.join(ownHome, 'plugins')
+  const NOTE_MS = 7 * 86400_000
+  const pluginDirs = () => {
+    const out = []
+    const add = (dir, where) => {
+      if (dir && !out.some((o) => o.dir === dir) && fs.existsSync(path.join(dir, '.claude-plugin', 'plugin.json'))) out.push({ dir, where })
+    }
+    // (the one the sessions this agent starts load, where that is named on their command line; then what Claude Code installed)
+    add(hostedPlugin(), 'started')
+    for (const root of config.roots) for (const one of installedPlugins(root)) add(one.dir, 'installed')
+    let names = []
+    try {
+      names = fs.readdirSync(notesDir).filter((n) => n.endsWith('.json'))
+    } catch {}
+    for (const name of names) {
+      const file = path.join(notesDir, name)
+      try {
+        const note = JSON.parse(fs.readFileSync(file, 'utf8'))
+        if (Date.now() - (Number(note.at) || 0) > NOTE_MS || typeof note.root !== 'string' || !fs.existsSync(note.root)) fs.rmSync(file, { force: true })
+        else add(note.root, 'loaded')
+      } catch {}
+    }
+    return out
+  }
+  let measured = []
+  let measuredAt = 0
+  const measure = ({ fresh = false } = {}) => {
+    if (!fresh && Date.now() - measuredAt < 60_000) return measured
+    measured = pluginDirs().map(({ dir, where }) => {
+      try {
+        const r = checks() ? pluginRelease(dir, signersFile) : null
+        return { dir, where, checked: !!r, signed: !!r?.signed, as: !!r?.as, release: r?.release ?? null, plugin: r?.plugin ?? null, digest: r ? r.digest : pluginDigest(pluginFiles(dir)), wrong: (r?.wrong ?? []).slice(0, 20), extra: (r?.extra ?? []).slice(0, 20) }
+      } catch (err) {
+        return { dir, where, checked: false, signed: false, as: false, release: null, plugin: null, digest: null, error: String(err.message ?? err) }
+      }
+    })
+    measuredAt = Date.now()
+    return measured
+  }
+  // The release this agent was installed from, as its list says: { release, made, plugin, agent }, or null
+  const agentRelease = () => {
+    try {
+      const { release, made, plugin, agent } = JSON.parse(fs.readFileSync(path.join(ownHome, 'agent', 'release.json'), 'utf8'))
+      return { release, made, plugin, agent }
+    } catch {
+      return null
+    }
+  }
+  const listOf = (dir) => {
+    try {
+      return { list: fs.readFileSync(path.join(dir, 'release.json'), 'utf8'), sig: fs.readFileSync(path.join(dir, 'release.json.sig'), 'utf8') }
+    } catch {
+      return {}
+    }
+  }
+  // The plugin a session this agent starts loads: one named on its command line (spawn.args), else the one installed
+  const hostedPlugin = () => {
+    const args = host.spawnConfig.args ?? []
+    const at = args.indexOf('--plugin-dir')
+    if (at >= 0 && args[at + 1]) return path.resolve(expandHome(args[at + 1]))
+    for (const root of config.roots) {
+      const one = installedPlugins(root)[0]
+      if (one) return one.dir
+    }
+    return null
+  }
 
   // ---- The index: scanned on a timer, read a slice at a time between other work
 
@@ -232,6 +317,17 @@ export async function run(config, flags = {}) {
       if (left) return setImmediate(step)
       indexing = false
       if (found > 20) log(`indexed ${found} files; ${JSON.stringify(store.stats())}`)
+      // (a folder a person has used since, or one that has gone or been left long enough, changes where sessions may start)
+      if (host.refreshAuto()) {
+        refreshFileRoots()
+        announce()
+      }
+      // (and what the plugin is, looked at again every so often: one that changed is said)
+      const now = JSON.stringify(measure().map(({ digest, as, signed, release }) => [digest, as, signed, release]))
+      if (now !== announcedPlugins) {
+        announcedPlugins = now
+        announce()
+      }
       // A running session's title changes as it goes: the server is told when one does
       const titles = JSON.stringify(Object.entries(openSessions()).map(([sid, o]) => [sid, o.title, o.firstPrompt]))
       if (titles !== announcedTitles) {
@@ -286,7 +382,7 @@ export async function run(config, flags = {}) {
     'sessions.list': ({ limit, before, q, cwd } = {}) => ({ sessions: store.sessions({ limit, before, q, cwd }), open: host.open(), hosted: host.list() }),
     'session.get': ({ sid } = {}) => ({ session: store.session(String(sid ?? '')) ?? null, open: host.open()[sid] ?? null }),
     // The folders sessions have run in, the ones a session may be started in, and the folders right under those
-    folders: async () => ({ folders: store.folders(), allowed: host.spawnConfig.enabled ? host.spawnConfig.folders : [], ...(host.spawnConfig.enabled ? await host.subfolders() : { others: [], unread: [] }) }),
+    folders: async () => ({ folders: store.folders(), allowed: host.startFolders(), ...(host.canStart() ? await host.subfolders() : { others: [], unread: [] }) }),
     search: (args = {}) => ({ results: store.search(args), indexing: indexer.pending.length }),
     // The same search as a way down: the projects with matches, the sessions in one, the matches in one
     'search.projects': (args = {}) => ({ ...store.searchProjects(args), indexing: indexer.pending.length }),
@@ -473,12 +569,46 @@ export async function run(config, flags = {}) {
     // cswap, where the machine has it: the Claude accounts here, and a switch to one of them
     'cswap.list': () => cswap.list(),
     'cswap.switch': ({ to } = {}) => cswap.switchTo(to),
+    // What the plugin here is, looked at now, for whoever asked (`nonce`: theirs, said back, so that an answer from
+    // before is not taken for this one): each copy, with the list it carries where that is signed, and the agent's own
+    'plugin.measure': ({ nonce } = {}) => ({
+      nonce: String(nonce ?? '').slice(0, 64),
+      at: Date.now(),
+      checks: checks(),
+      release: agentRelease(),
+      agentList: listOf(path.join(ownHome, 'agent')),
+      plugins: measure({ fresh: true }).map((m) => ({ ...m, ...(m.signed ? listOf(m.dir) : {}) })),
+    }),
+    // The folders a person used, allowed or not (`auto`), and those of them turned off (`off`)
+    'spawn.folders': ({ auto, off } = {}) => setFolders({ auto, off }),
+  }
+
+  // The folders a person used: allowed or not, and which of them are turned off. Written to agent.json, and gone by
+  // from now on
+  function setFolders({ auto, off }) {
+    const file = path.join(ownHome, 'agent.json')
+    const kept = JSON.parse(fs.readFileSync(file, 'utf8'))
+    kept.spawn = { ...(kept.spawn ?? {}) }
+    if (typeof auto === 'boolean') kept.spawn.auto = auto
+    if (Array.isArray(off)) kept.spawn.autoOff = [...new Set(off.map(String).filter((f) => path.isAbsolute(f)))].slice(0, 500)
+    fs.writeFileSync(file, JSON.stringify(kept, null, 2) + '\n', { mode: 0o600 })
+    Object.assign(host.spawnConfig, { auto: kept.spawn.auto === true, autoOff: kept.spawn.autoOff ?? [] })
+    host.refreshAuto()
+    refreshFileRoots()
+    announce()
+    log(`the folders a person used are ${host.spawnConfig.auto ? 'allowed' : 'not allowed'} for sessions started from the page (${host.autoList.length}, and ${host.spawnConfig.autoOff.length} turned off)`)
+    return { auto: host.spawnConfig.auto, folders: host.autoList, off: host.spawnConfig.autoOff }
   }
 
   function describe() {
     const about = {
       roots: config.roots,
-      spawn: host.spawnConfig.enabled ? { folders: host.spawnConfig.folders, modes: host.spawnConfig.modes } : null,
+      // (the folders the owner listed, and the ones a person used where those are allowed, with the ones turned off)
+      spawn: host.canStart() || host.spawnConfig.auto ? { folders: host.spawnConfig.enabled ? host.spawnConfig.folders : [], auto: host.spawnConfig.auto ? host.autoList : null, autoOff: host.spawnConfig.autoOff ?? [], modes: host.spawnConfig.modes } : null,
+      // (what the plugin here is, and what release this agent is)
+      plugins: measure().map(({ wrong, extra, ...m }) => ({ ...m, wrong: wrong?.length ?? 0, extra: extra?.length ?? 0 })),
+      release: agentRelease(),
+      checks: checks(),
       // (the folders a file may be opened from, and the ones a file is taken into)
       files: filesFrom ?? [],
       upload: takesInto ?? [],
@@ -494,9 +624,9 @@ export async function run(config, flags = {}) {
       ...machine,
       agent: VERSION,
       node: process.version,
-      capabilities: ['sessions', 'search', ...(host.spawnConfig.enabled ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
+      capabilities: ['sessions', 'search', 'measure', 'folders', ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
       sealed: 3,
-      spawn: !!about.spawn,
+      spawn: host.canStart(),
       card: seal(about, sealKey),
       hosted: host.list().map(({ sid, ...rest }) => ({ sid, s: seal(rest, sealKey) })),
       open: Object.fromEntries(Object.entries(openSessions()).map(([sid, { title, firstPrompt, ...rest }]) => [sid, { named: seal(title || String(firstPrompt ?? '').slice(0, 80), sealKey), s: seal(rest, sealKey) }])),
@@ -583,13 +713,43 @@ export async function run(config, flags = {}) {
     }
   }
   const asks = (order) => readOrder(order, sealKey, devices.list)?.do
+  // A session is started here only for one of the account's own devices that may start them (mayStart): not one that
+  // was added as not its owner's own, which is one of the account's for a day, and not one its owner turned that off
+  // for, with the passphrase (Account, Devices). A reply to a session that is running is not starting one.
+  const NOT_TO_START = "this computer starts a session only when that is asked from one of your own devices that may start them, and this was asked from one that may not: it was added as not your own (one of your account's devices for a day), or starting sessions is turned off for it (Account, Devices)"
+  const startedBy = (o) => {
+    if (!mayStart(devices.list?.devices?.find((d) => d.key === o.by))) throw new HostError(NOT_TO_START)
+    return o
+  }
   // A new session from another, on the order for it: which says how it is to be made (new,
   // clone or handoff), so that one asked for empty is not made from words instead
   const branch = (a, ...hows) => {
     const o = readOrder(a.order, sealKey, devices.list)
     if (o && o.do === 'branch' && !hows.includes(o.with.how)) throw new HostError('this machine does what it is asked only when a device that has your passphrase signed it: it was signed for something else')
-    return take(a.order, machine.id, ['branch']).with
+    return startedBy(take(a.order, machine.id, ['branch'])).with
   }
+  // And nothing is started here with a plugin that is not a release (its files as the list it carries has them, signed
+  // by a key this computer was installed with), unless the account's owner allowed that plugin on this computer by its
+  // digest: the plugin has the account's key, and what it would be handed here is what is asked of a session
+  // (why not, or null where it may be)
+  const pluginRefused = () => {
+    if (!checks()) return null
+    const dir = hostedPlugin()
+    if (!dir || !fs.existsSync(dir)) return null
+    const r = pluginRelease(dir, signersFile)
+    if (r.as || allowedOn(devices.list, machine.id, r.digest)) return null
+    return `the ManyClaws plugin on this computer ${r.signed ? `is not as release ${r.release} lists it` : 'carries no release signed by a key this computer knows'} (what it is: ${r.digest.slice(0, 12)}): no session is started here until it is a release again, or you allow it on your page`
+  }
+  host.guard = () => {
+    const why = pluginRefused()
+    if (!why) return
+    measuredAt = 0
+    announce()
+    throw new HostError(why)
+  }
+  // What may start a session: before one is gone by with a plugin that is not a release, the list of devices is read
+  // afresh, whatever was read a moment ago (what its owner allowed may be a moment old)
+  const STARTS = new Set(['session.start', 'session.resume', 'session.seed', 'session.import'])
   // (what a new session is seeded with is what another of the account's computers sealed, or it is nothing: a handoff
   // sealed whole, or rows each sealed whole. A row with anything of it in the open is not one.)
   const cameSealed = (v) => (Array.isArray(v) ? v.length > 0 && v.every((row) => row && isSealed(row.row)) : isSealed(v))
@@ -605,14 +765,16 @@ export async function run(config, flags = {}) {
     },
     'session.resume': (a) => {
       const what = asks(a.order)
-      // A reply to a session that has exited, which starts it again
+      // A reply to a session that has exited, which starts it again (a reply to one this machine is running goes to it)
       if (what === 'prompt') {
-        const w = take(a.order, machine.id, ['prompt']).with
+        const o = take(a.order, machine.id, ['prompt'])
+        const w = o.with
+        if (!host.hosted.has(String(w.sid ?? ''))) startedBy(o)
         return { sid: String(w.sid ?? ''), prompt: String(w.text ?? ''), mode: w.mode }
       }
       // One opened from its transcript: signed for this machine
       if (what === 'open') {
-        const w = take(a.order, machine.id, ['open']).with
+        const w = startedBy(take(a.order, machine.id, ['open'])).with
         return { sid: w.sid, prompt: w.prompt, mode: w.mode, model: w.model, effort: w.effort, fork: w.fork === true }
       }
       // A copy of one that is here
@@ -624,8 +786,19 @@ export async function run(config, flags = {}) {
         const w = branch(a, 'new')
         return { ...(w.cwd ? { cwd: w.cwd } : { like: w.like }), idle: true, mode: w.mode, listed: w.listed }
       }
-      const w = take(a.order, machine.id, ['start']).with
+      const w = startedBy(take(a.order, machine.id, ['start'])).with
       return { cwd: w.cwd, prompt: w.prompt, mode: w.mode, model: w.model, effort: w.effort, name: w.name, create: w.create === true, listed: w.listed }
+    },
+    // Which of the folders a person used sessions may be started in: allowed or not, and those turned off. Any of the
+    // account's devices may narrow that; widening it is starting sessions where they could not be, which is for one
+    // that may start them
+    'spawn.folders': (a) => {
+      const o = take(a.order, machine.id, ['folders'])
+      const auto = typeof o.with.auto === 'boolean' ? o.with.auto : undefined
+      const off = Array.isArray(o.with.off) ? o.with.off.map(String) : undefined
+      const wider = (auto === true && !host.spawnConfig.auto) || (off && (host.spawnConfig.autoOff ?? []).some((f) => !off.includes(f)))
+      if (wider) startedBy(o)
+      return { auto, off }
     },
     'session.seed': (a, raw) => {
       if (!cameSealed(raw.rows ?? raw.text)) throw new HostError('what the new session was to start from did not come sealed, so it was not started')
@@ -807,6 +980,7 @@ export async function run(config, flags = {}) {
         const fn = Object.hasOwn(methods, method) ? methods[method] : null
         if (!fn) throw new HostError('unknown method ' + method)
         if (Object.hasOwn(ORDERED, method)) await freshDevices()
+        if (STARTS.has(method) && pluginRefused()) await readList()
         // (what comes in from the page is opened, and what goes back closed)
         taken = null
         const args = asked(method, c.args)

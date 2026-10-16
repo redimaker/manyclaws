@@ -134,6 +134,16 @@ export class Store {
     return this.db.prepare("SELECT cwd, MAX(last_ts) AS last_ts, COUNT(*) AS sessions FROM sessions WHERE cwd != '' AND messages > 0 GROUP BY cwd ORDER BY last_ts DESC LIMIT ?").all(limit)
   }
 
+  // The folders a person ran Claude Code in since `since`, most recent first: sessions that say they were started at a
+  // terminal, in an editor or in the desktop app, not by a program (sdk-…), and none of those in `skip` (the ones the
+  // agent itself started, which may say otherwise of themselves once marked to be shown in Claude Code's own lists)
+  peopleFolders(since = 0, skip = new Set()) {
+    const rows = this.db.prepare("SELECT sid, cwd, last_ts FROM sessions WHERE cwd != '' AND messages > 0 AND last_ts >= ? AND COALESCE(entrypoint, '') NOT LIKE 'sdk-%' ORDER BY last_ts DESC").all(since)
+    const out = new Map()
+    for (const r of rows) if (!skip.has(r.sid) && !out.has(r.cwd)) out.set(r.cwd, { cwd: r.cwd, last_ts: r.last_ts })
+    return [...out.values()]
+  }
+
   // ---- Search
 
   // Words are all required, in any order; "a phrase" in quotes stays together; the
