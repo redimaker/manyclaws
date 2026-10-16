@@ -1,90 +1,85 @@
-# Upgrade a computer for {{name}}
+# Move a computer to the new release of {{name}}
 
-A computer that was set up for {{name}} before 9 October 2026 has to be upgraded once, by hand: its agent is removed and installed again, the plugin's marketplace is removed and added again, and the computer is signed in again with an API token and your encryption passphrase. We are sorry for the trouble. It is a one-time step, after a change to how {{name}} is secured, and it is not needed again.
+From plugin 6.0.0 the {{name}} plugin carries the agent, and the signed list of every file it was released with, and both are kept up to date from your page: you approve each update there, for each computer. A computer whose plugin or agent is from before knows nothing of being asked, so the first time is done on the computer, once, by this guide. After that it is never needed again.
 
-**The short way:** on the computer, start Claude Code in a terminal or in VS Code (not a session you started from your {{name}} page) and say
+**The short way:** on the computer, start Claude Code in a terminal, in VS Code or in the desktop app (not a session you started from your {{name}} page, which the old agent itself is running) and say
 
-> Read {{origin}}/upgrade.md and upgrade {{name}} on this computer.
+> Read {{origin}}/upgrade.md and move ManyClaws on this computer to the new release.
 
-Claude replaces the plugin and the agent. One step is yours, and it is the one that connects the computer again: in Claude Code, open **Manage Plugins** and give the {{name}} plugin two things, an **API token** and your **encryption passphrase**. [Make a new API token here]({{origin}}/app#/setup); the passphrase is the one you typed into your browser.
+Claude updates the plugin and hands the agent over to the copy the new plugin carries. Where that would end sessions your page started there, it asks you first. There is nothing to type, unless the computer was set up before 9 October 2026: then its plugin shows a link in a new session, which you open in a browser where you are signed in to {{name}} and give your passphrase to (as [the set-up guide]({{origin}}/setup)'s step 3 has it).
 
-What changed, and why it takes this:
-
-- **The plugin and the agent are released signed.** Both come from a public repository, [github.com/redimaker/manyclaws](https://github.com/redimaker/manyclaws), and the agent installs nothing that is not signed with a key kept neither there nor on any server. An agent from before that cannot check what it installs, so it is not updated in place: it is removed, and a new one is installed.
-- **Your passphrase is no longer kept on your computers.** The plugin makes your key from it once and keeps the key in its place, and on a Mac the agent keeps its token and key in your keychain. Removing the old plugin's marketplace takes away what the old plugin kept, your passphrase among it, which is why both are typed again.
-- **A computer does less for a phone or a browser unless you say so there.** Files are opened only from the folders sessions may be started in, and no session is started with its permissions bypassed unless the computer names that mode.
-
-## 1. Before you start: two things from your account
-
-1. **A new API token.** [Make one on your set-up page]({{origin}}/app#/setup). It is shown once, when it is made: leave that tab open until step 4 is done. A token made earlier is shown nowhere, so make a new one; the old one can be taken back on [your account page]({{origin}}/app#/account) once every computer has a new one.
-2. **Your encryption passphrase**: the same one this account already has, which you typed into your browser. A different one would make a different key, and what this computer sends could not be opened on your page. If you have forgotten it, set a new one for your whole account first, on [your account page]({{origin}}/app#/account) (Change passphrase), and give every computer the new one.
-
-## 2. Remove the old marketplace and add the new one
-
-Claude Code can do this part, or you can paste the commands yourself.
+## 1. Look first
 
 ```
-claude plugin marketplace remove manyclaws
-claude plugin marketplace add redimaker/manyclaws
-claude plugin install manyclaws@manyclaws
+claude plugin list
+claude plugin marketplace list
+sed -n "s/^export const VERSION = '\(.*\)'$/\1/p" ~/.manyclaws/agent/service.mjs
+ls ~/.manyclaws/agent/release.json
 ```
 
-The first removes the plugin with the marketplace it came from, and with them the API token and the passphrase the plugin was given: that is meant, and step 4 gives it both again. The other two install the plugin from the public repository. The install reports options that are "not yet set". That is expected: step 4 sets them.
+The first says which plugin the computer has, the second where its marketplace comes from (`redimaker/manyclaws` on GitHub, or {{name}}'s server), the third which agent it has, and the fourth whether that agent was installed from a signed release. A computer with no `~/.manyclaws` has no agent: only the plugin is moved, and the agent is set up afterwards from your page.
 
-{{#elsewhere}}This server is not where the plugin reports by itself. In `~/.claude/settings.json`, make sure `env` has `"MANYCLAWS_URL": "{{origin}}"`, keeping whatever else the file holds.
+## 2. Where the plugin comes from GitHub, and the agent is 5.1.0 or later
 
-{{/elsewhere}}A session that is already open keeps the old plugin until it is closed: the new one is in every session started after step 4.
+1. **The plugin.**
 
-## 3. Remove the old agent and install the new one
+   ```
+   claude plugin marketplace update manyclaws
+   claude plugin update manyclaws@manyclaws
+   ```
 
-A computer that has the agent has `~/.manyclaws/agent.json`. One that never had it skips this step (the guide at {{origin}}/setup.md says how to add one).
+   The API token and the key the plugin has stay as they are.
 
-```
-curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/mod/agent/install.sh | bash -s -- --reinstall --end-sessions
-```
+2. **The agent**, handed over to the copy the new plugin carries. `claude plugin list --json` says where the plugin is installed (its `installPath`):
 
-This stops the old agent and removes it with everything it kept: its files, its index of your transcripts, and its API token and key. Then it installs the newest release in its place, checked against its signature, set up as the old one was: the same computer on your page, with the same name and the same folders. It asks for nothing. The new agent has no token and no key, and waits: it takes both from the plugin once step 4 is done, and reads your transcripts into its index again, which takes a few minutes on a computer with many.
+   ```
+   bash <the plugin's folder>/agent/install.sh --update --from <the plugin's folder>
+   ```
 
-Removing the agent ends the sessions it is running, which are the ones started from your page: `--end-sessions` says that it may, and there is no need to wait for them. Nothing of them is lost. Once the computer is connected again (step 4) each is on your page as it was, and a reply there starts it again where it left off. Run the command in a terminal on the computer, or from a Claude Code session started there in a terminal or VS Code: not from a session started from your page, which the old agent itself is running, and which would end with it before the new agent was there.
+   It checks every file of the agent against the signed list the plugin carries, and the list's signature, before anything is replaced, and keeps everything the computer was set up with: which computer it is, its name, its folders, its token and its key. Where the agent is running sessions started from your page, it does nothing and says how many: starting the agent again ends them. Run it again with `--end-sessions` to end them; a reply on your page resumes each one.
 
-## 4. Give the plugin your token and passphrase
+3. **Check:** `node ~/.manyclaws/agent/agent.mjs verify --here` says the agent and the plugin are each as their release lists them.
 
-This step is yours, and it is the one that matters: until the plugin has both, nothing of this computer shows on your page.
+New Claude Code sessions use the new plugin; sessions already open keep the old one until they are started again.
 
-Using the VS Code Extension for Claude: type `/plugin`, which opens **Manage Plugins**, and press the gear icon beside manyclaws. Fill in **API token** and **Encryption passphrase** from step 1, and leave the other options as they are. In Claude Code in a terminal, type
+## 3. Where the computer was set up before 9 October 2026
 
-```
-/plugin configure manyclaws@manyclaws
-```
+Its marketplace comes from {{name}}'s server, or its agent is older than 5.1.0 and cannot check what it installs.
 
-Then start a new Claude Code session. In its first minute the plugin makes your key from the passphrase (it says so in the session), puts the key in the passphrase's place, and says that the passphrase is no longer kept on the computer. It gives the agent the same token and key, and the agent connects within a few seconds: there is nothing to type into the agent.
+1. **The plugin**, where its marketplace is not `redimaker/manyclaws`:
 
-## 5. Check that it worked
+   ```
+   claude plugin marketplace remove manyclaws
+   claude plugin marketplace add redimaker/manyclaws
+   claude plugin install manyclaws@manyclaws
+   ```
 
-- The new session shows on [your page]({{origin}}/app), and the computer is no longer listed there as one that needs upgrading.
-- On a computer with the agent, this holds what is installed against the signed release, and what {{origin}} hands a browser for its page too:
+   The first removes the old plugin with the marketplace it came from, and with them the API token and the passphrase it was given: here that is meant, and step 3 gives it both again. Where the marketplace is `redimaker/manyclaws` already, update the plugin as section 2 has it instead.
 
-  ```
-  node ~/.manyclaws/agent/agent.mjs verify
-  ```
+2. **The agent**, removed and installed again from the copy the new plugin carries:
 
-- If the agent does not connect, `~/.manyclaws/agent.log` says why.
+   ```
+   bash <the plugin's folder>/agent/install.sh --reinstall --end-sessions --from <the plugin's folder>
+   ```
 
-From here on the computer is kept up to date the ordinary way, which asks for nothing: `claude plugin marketplace update manyclaws` and `claude plugin update manyclaws@manyclaws` for the plugin, and `bash ~/.manyclaws/agent/install.sh --update` for the agent.
+   This stops the old agent and removes it with everything it kept, its API token and key among it, and installs the new one in its place, set up as the old one was: the same computer on your page, with the same name and folders. It ends the sessions the old agent is running, which are the ones started from your page; nothing of them is lost, and a reply there resumes each once the computer is connected again.
+
+3. **Connect the computer again.** Start a new Claude Code session: the plugin, which has no token now, shows a link. Open it in a browser where you are signed in to {{name}}, or on your phone, type your encryption passphrase and press **Connect**. The plugin gives the new agent the same token and key.
+
+4. **Check:** `node ~/.manyclaws/agent/agent.mjs verify --here`.
+
+## From a clone of the repository
+
+Where you installed from source: `git fetch && git checkout release-N` in the clone, check the release as [the set-up guide]({{origin}}/setup) has it, then `bash mod/agent/install.sh --update --from mod`.
 
 ## For Claude Code, when you are asked to follow this guide
 
-- Say first, in a line, what this is: a one-time upgrade after a security change, that it removes and reinstalls the plugin and the agent, and that at the end the person types their API token and their passphrase again. Say sorry for the trouble, once. Then do it.
-- Look before you change anything. `claude plugin list` says whether the plugin is there. `~/.manyclaws/agent.json` being there says the computer has the agent, and `VERSION` in `~/.manyclaws/agent/service.mjs` says which: an agent that is 5.1.0 or later was installed from a signed release already and is not removed. Update it with `bash ~/.manyclaws/agent/install.sh --update` and leave step 3 out. Do not read `~/.manyclaws/agent.json`: the token and the key are in it.
-- Do steps 2 and 3 yourself, without stopping to ask. Neither asks the person for anything.
-- Step 2 is the three commands as they are written, in that order. `claude plugin marketplace remove manyclaws` deletes the API token and the passphrase the plugin was given: here that is what is wanted. If it says there is no such marketplace, go on. Do not edit `extraKnownMarketplaces` by hand instead.
-- Step 3 is the one command, with `--reinstall --end-sessions` and no other option: it keeps how the computer was set up. Do not run the installer with `--uninstall`, or as the set-up guide has it, in its place: either would lose which computer this is, and the folders sessions may be started in.
-- The old agent may be stopped while it is running sessions, and by force. That is what `--end-sessions` is for: do not wait for those sessions to be done, and do not ask first. They are the ones started from the person's page, nothing of them is lost, and each is started again from the page with a reply once the computer is connected. If the old agent is still running when the installer has done with it, or the new one cannot be started because of it, end the old agent's process yourself and run the command again. Say afterwards, in a line, that the sessions started from the page were ended and that a reply on the page starts each again.
-- If the installer says that it was run from a session the agent itself started, nothing was changed: stop there and say so. Say that it is run from a terminal on that computer, or from a session started there in a terminal or VS Code. This is the one case `--end-sessions` does not cover: the installer would end with that session, before the new agent was there.
-- The installer fetches the agent and starts a background service of the person's own user. Where your commands run in a sandbox that refuses that, run this one outside it.
-- Step 4 is the person's, and it is the most important thing you tell them. When steps 2 and 3 are done, say it first and plainly: open **Manage Plugins** (using the VS Code Extension for Claude: type `/plugin`, then the gear icon beside manyclaws; in Claude Code in a terminal: `/plugin configure manyclaws@manyclaws`), fill in **API token** and **Encryption passphrase**, and start a new Claude Code session. Give the link from step 1 where a new token is made, and say that the passphrase is the one their account already has. Give both ways in, the VS Code Extension's and the terminal's, unless you know which of the two they are in.
-- Never ask for the API token or the passphrase, and do not use either if it is offered in the conversation: say that they go into the plugin's own dialog, and nowhere else.
-- Never put a token or a passphrase in a command, in `settings.json`, in an environment variable or in any file.
-- Keep what you say short: what you removed and installed, in a line or two; then step 4, as above; then that you will check it worked once they have started a new session (step 5). Do not explain how the installer works or what is and is not encrypted unless you are asked.
-- Edit `~/.claude/settings.json` by merging: keep every setting that is already there.
-- This session keeps the old plugin until it is closed. Say that the page shows the computer again from the first session started after step 4.
+- Say first, in a line, what this is: a one-time move to the new way of keeping ManyClaws up to date, after which the person approves each update on their page. Then do it.
+- Look first, as step 1 has it, and follow section 2 or section 3, whichever the computer is. Do not read `~/.manyclaws/agent.json`: the token and the key are in it.
+- Section 2: run its commands as they are written. If the installer says the agent is running sessions started from the page, tell the person how many end, and ask whether to end them now; only on a yes, run it again with `--end-sessions`. Otherwise stop there and say that it can be run again once those sessions are done.
+- Section 3: run its commands as they are written, `--end-sessions` with them: the old agent may be stopped while it is running sessions, and nothing of them is lost. `claude plugin marketplace remove manyclaws` deletes the API token and the passphrase the plugin was given: it is run here and nowhere else, and only where the marketplace is not `redimaker/manyclaws`. Do not edit `extraKnownMarketplaces` by hand instead.
+- If the installer says it was run from a session the agent itself started, nothing was changed: stop there and say so. Say that it is run from a terminal on that computer, or from a Claude Code session started there in a terminal, VS Code or the desktop app.
+- In section 3, the last step is the person's: say it first and plainly, once the commands are done. Start a new Claude Code session, open the link the plugin shows there in a browser where they are signed in to {{name}} (or on their phone), type their encryption passphrase on that page and press **Connect**.
+- Never ask for the API token or the passphrase, and do not use either if it is offered in the conversation. Never put a token or a passphrase in a command, in `settings.json`, in an environment variable or in any file.
+- The installer starts a background service of the person's own user. Where your commands run in a sandbox that refuses that, run it outside it.
+- Keep what you say short: what you updated and installed, in a line or two; what `verify --here` said; and that from now on the computer is kept up to date from their page, where they approve each update.
