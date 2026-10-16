@@ -729,7 +729,7 @@ export async function run(config, flags = {}) {
       ...machine,
       agent: VERSION,
       node: process.version,
-      capabilities: ['sessions', 'search', 'measure', 'folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
+      capabilities: ['sessions', 'search', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
       sealed: 3,
       spawn: host.canStart(),
       card: seal(about, sealKey),

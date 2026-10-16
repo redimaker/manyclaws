@@ -199,12 +199,14 @@ export const readDevices = async (text, held) => S.signedDevices(await open(text
 // to the account knows no list, and builds on what it is handed: it is the account's
 // computers that keep a device taken off from coming back. seal.js, devicesMemory.)
 export class OlderList extends Error {}
-export async function devicesAgain(text, held, signer, change, now = Date.now(), since = 0) {
+// `allowed`: what the plugins its owner allowed on a computer are to be, from what they were (kept as they were, where
+// it says nothing)
+export async function devicesAgain(text, held, signer, change, now = Date.now(), since = 0, { allowed = (a) => a } = {}) {
   const was = await readDevices(text, held)
   if (was && was.v < since) throw new OlderList('the server handed over an older list of your devices than the one this browser is on')
   const devices = change((was?.devices ?? []).filter((d) => !(d.until && now > d.until)))
   // (when it was made, and never less than the one before: a computer takes none older than the one it has)
-  return seal(S.signDevices({ v: Math.max(now, (was?.v ?? 0) + 1), devices }, signer), held)
+  return seal(S.signDevices({ v: Math.max(now, (was?.v ?? 0) + 1), devices, allowed: allowed(was?.allowed ?? []) }, signer), held)
 }
 
 // ---- What is held, kept on this device, so a page that's opened again has it without the

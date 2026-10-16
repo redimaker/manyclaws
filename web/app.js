@@ -185,6 +185,10 @@ function sessionOf(s, devices) {
     hosted: !!s.hosted,
     ended: !!s.ended,
     online: !!s.online,
+    // (what its plugin says it is, and what it found Claude Code fetched for it: its own word, held against the release)
+    release: !locked && card.release && typeof card.release === 'object' ? card.release : null,
+    next: !locked && card.next && typeof card.next === 'object' ? card.next : null,
+    attended: !locked && card.attended !== false,
     createdAt: s.createdAt,
     lastActivity: s.lastActivity,
     messageCount: s.messageCount ?? 0,
@@ -269,6 +273,13 @@ function deviceOf(m) {
     shaped: true,
     roots: card.roots ?? [],
     spawn: m.spawn ? (card.spawn ?? { folders: [], modes: [] }) : null,
+    // (the folders a person used, where the agent may say so though it starts nothing yet)
+    folders: card.spawn ?? null,
+    // (what its agent measured of the plugin there, by the keys it was installed with; what release it is; an upgrade waiting)
+    plugins: Array.isArray(card.plugins) ? card.plugins : [],
+    release: card.release && typeof card.release === 'object' ? card.release : null,
+    checks: card.checks === true,
+    upgrade: card.upgrade && typeof card.upgrade === 'object' ? card.upgrade : null,
     stats: card.stats ?? {},
     hosted: (m.hosted ?? []).map((h) => ({ ...part(h.s), sid: h.sid })),
     open: Object.fromEntries(Object.entries(m.open ?? {}).map(([sid, o]) => [sid, { ...part(o?.s), title: typeof o?.named === 'string' && !isLocked(o.named) ? o.named : '' }])),
@@ -405,7 +416,16 @@ const NO_KEY_MACHINE = 'What is asked of this computer is end-to-end encrypted, 
 // and there, the server included, can ask anything of it in this account's name, or ask
 // again what was asked before. `to` is the session or machine asked, `what` the kind of
 // thing asked, `rest` all of it. undefined where this device has not been given the passphrase.
-const orderFor = async (to, what, rest = {}) => (app.key ? vault.makeOrder({ to, do: what, with: rest }, app.key) : undefined)
+// Nothing is signed for a computer whose plugin is no release, until its owner has said on its page what is to be done:
+// the plugin has the account's key, and what would be sent is what is asked of a session. `to`: a session or a
+// machine. Why not, where it is so; else ''
+const blockedFor = (to) => {
+  if (!app.release && !app.devicesList && !app.machines?.size) return ''
+  const s = app.sessions?.get(to)
+  const c = s ? computerOfSession(s) : computerOf(to)
+  return c && noReleaseOn(c) ? `${c.name} is running a ManyClaws plugin that matches no signed release, so nothing is sent to it until you decide what is to be done, on its page` : ''
+}
+const orderFor = async (to, what, rest = {}) => (app.key && !blockedFor(to) ? vault.makeOrder({ to, do: what, with: rest }, app.key) : undefined)
 // A prompt for a session, signed for the one that is to run it: the session's own plugin,
 // or, for a session its machine's agent runs or is to start again (`viaAgent`), that
 // machine's agent. One order has one runner, and so one memory of having been run: what
@@ -1392,6 +1412,9 @@ function connect() {
     pageBuild(snapshot.build)
     // (the plugin and the agent the server hands out now: a computer's own are held against them)
     app.latest = snapshot.latest ?? {}
+    // (and the release this page is of, as the release key signed it; and what the passphrase signed of the account's devices)
+    void loadRelease().then(() => (renderList(), app.computer && renderComputer()))
+    void loadDevicesList().then(() => (renderList(), app.computer && renderComputer()))
     // (the account's own small session is none of its conversations: kept apart, and out of the list)
     app.first = snapshot.sessions.find((s) => s.id === app.firstId) ?? null
     snapshot.sessions = snapshot.sessions.filter((s) => s.id !== app.firstId)
@@ -1571,7 +1594,7 @@ function showNotices() {
   // (computers of the account's that are to be upgraded, once: said for as long as there is one, but on the page that says all of it)
   const old = app.account ? toUpgrade() : []
   el('upgrade-note').hidden = !old.length || location.hash.split('?')[0] === UPGRADE_PAGE
-  el('upgrade-says').textContent = old.length === 1 ? `${machineName(old[0])} needs a one-time upgrade, after a security change.` : `${old.length} of your computers need a one-time upgrade, after a security change.`
+  el('upgrade-says').textContent = old.length === 1 ? `${machineName(old[0])} needs a one-time move to the new way of updating.` : `${old.length} of your computers need a one-time move to the new way of updating.`
   document.body.classList.toggle('noticed', !el('offline').hidden || !el('update').hidden || !el('locked').hidden || !el('upgrade-note').hidden)
   // (how far down the list starts, for when it's shown under a chat being swiped away)
   document.documentElement.style.setProperty('--notices-height', el('notices').offsetHeight + 'px')
@@ -3662,6 +3685,79 @@ setInterval(renderList, 30_000)
 const machineName = (m) => m?.label || m?.name || 'a machine'
 const PAST_PAGE = 15
 
+// ---- The release, as the release key signed it. The server hands out the list of every file of the release its page
+// is of (release.json), with its signature; the page holds the signature to the key written here, which is the one the
+// agent's installer names (SIGNERS, in agent/install.sh: a test holds the two to each other), and so takes nothing the
+// server says of a release that the key did not sign. From the list: which release is the newest, and what its plugin
+// is, as one digest of its files (seal.js, pluginDigest), which is what a computer's plugin is held to.
+const RELEASE_SIGNERS = 'manyclaws namespaces="manyclaws-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMPeEfWVnYHahu/dRpMq7J+2eRNg67sQS+IJh/bH8PDD'
+// (a browser may be told other keys in its own storage: what the page's own code could say, and nothing a server can. The
+// tests' releases are signed with keys of their own.)
+const releaseSigners = () => {
+  try {
+    return localStorage.getItem('mc.releaseSigners') || RELEASE_SIGNERS
+  } catch {
+    return RELEASE_SIGNERS
+  }
+}
+// The newest release ({ release, made, plugin, agent, digest }); { unsigned: true } where the list is not signed by that key
+async function loadRelease() {
+  const [list, sig] = await Promise.all(['/release.json', '/release.json.sig'].map((p) => fetch(p, { cache: 'no-store' }).then((r) => (r.ok ? r.text() : null)).catch(() => null)))
+  if (!list || !sig || !sealing) return void (app.release = null)
+  if (!sealing.sshSigned(list, sig, releaseSigners())) return void (app.release = { unsigned: true })
+  try {
+    const l = JSON.parse(list)
+    app.release = { release: l.release, made: l.made, plugin: l.plugin, agent: l.agent, digest: sealing.pluginDigest(sealing.pluginOfList(l)) }
+  } catch {
+    app.release = null
+  }
+}
+// The list of the account's devices, as the passphrase signed it: which may start sessions, and what plugins the owner
+// allowed on a computer where they are no release
+async function loadDevicesList() {
+  if (!app.key || !vault) return
+  const kept = await devicesKept()
+  app.devicesList = kept ? await vault.readDevices(kept, app.key) : null
+}
+const allowedHere = (c, digest) => !!digest && !!app.devicesList?.allowed?.some((a) => a.machine === c.id && a.hash === digest)
+// What a computer's plugin is, as the best word there is for it says: its agent's, which measured it by the keys it
+// was installed with (`by: 'agent'`); else its sessions' own plugins', each of itself (`by: 'plugin'`). { by, release,
+// digest, as, signed, local } or null. `local`: one loaded from a folder of its own, not from Claude Code's cache
+function releaseOn(c) {
+  if (c.m?.checks) {
+    const p = c.m.plugins.find((x) => x.where === 'started') ?? c.m.plugins.find((x) => x.where === 'installed') ?? c.m.plugins[0]
+    return p ? { by: 'agent', release: p.release, digest: p.digest, as: !!p.as, signed: !!p.signed, local: !!p.dir && !String(p.dir).includes('/plugins/cache/') } : null
+  }
+  const said = c.live.map((s) => s.release).filter((r) => r?.digest)
+  const p = said.find((r) => !r.as) ?? said.at(-1)
+  return p ? { by: 'plugin', release: p.release, digest: p.digest, as: !!p.as, signed: !!p.signed, local: false } : null
+}
+// A plugin on a computer that is no release, and that its owner did not allow there: what its agent measured, what a
+// session's plugin says of itself, or what it found Claude Code had fetched for it. The first that is, or null
+function noReleaseOn(c) {
+  if (c.m?.checks) {
+    const p = c.m.plugins.find((x) => x.checked && !x.as && x.digest && !allowedHere(c, x.digest))
+    if (p) return { digest: p.digest, by: 'agent', release: p.release, signed: !!p.signed }
+    // (and a session's plugin that says it is another than any its agent measured: one of the two is not as it says)
+    const known = new Set(c.m.plugins.map((x) => x.digest))
+    const other = c.live.find((s) => s.release?.digest && c.m.plugins.length && !known.has(s.release.digest) && !allowedHere(c, s.release.digest))
+    if (other) return { digest: other.release.digest, by: 'differ', release: other.release.release, signed: !!other.release.signed }
+    return null
+  }
+  for (const s of c.live) {
+    if (s.release?.digest && !s.release.as && !allowedHere(c, s.release.digest)) return { digest: s.release.digest, by: 'plugin', release: s.release.release, signed: !!s.release.signed }
+    if (s.next?.digest && !s.next.as && !allowedHere(c, s.next.digest)) return { digest: s.next.digest, by: 'fetched', release: s.next.release, signed: !!s.next.signed }
+  }
+  return null
+}
+// Where nothing is sent: a computer whose plugin is no release, until its owner says what is to be done
+const blockedComputer = (c) => (c ? noReleaseOn(c) : null)
+// The computer a session is on, as a computer of this page's (computerOf), or null
+const computerOfSession = (s) => (s ? computerOf(machineOn(s)?.id ?? (s.host ? looseId(s.host) : '')) : null)
+// The plugin and the agent from before they were released signed and carried each other (6.0.0): they cannot be kept up
+// to date from here, and are moved once, by a guide (upgrade.md)
+const MOVE_FROM = '6.0.0'
+
 // ---- What a computer needs done. Its plugin or its agent is older than the one this
 // server hands out now; or its sessions are heard from while its agent is not, so that
 // no session can be started on it. The server says what it hands out (the snapshot's
@@ -3709,10 +3805,24 @@ function needsOf(c) {
   if (!c) return []
   const needs = []
   const plugin = pluginOn(c)
-  if (behind(plugin, app.latest.plugin)) needs.push({ kind: 'plugin-old', has: plugin, newest: app.latest.plugin })
+  // First, and in red: a plugin there that is no release, and that its owner did not allow there. Nothing is sent to the
+  // computer until the owner says what is to be done.
+  const bad = noReleaseOn(c)
+  if (bad) needs.push({ kind: 'alarm', ...bad })
+  // From before releases carried each other: moved once, by the guide. (An agent too old to be heard is said below.)
+  const moving = (c.m && !c.m.refused && versionOf(c.m.agent) && behind(c.m.agent, MOVE_FROM)) || (!c.m && behind(plugin, MOVE_FROM))
+  if (moving) needs.push({ kind: 'move', has: c.m?.agent ?? plugin, what: c.m ? 'agent' : 'plugin' })
+  // A newer release, with another plugin than the one there: asked for here, and done there
+  const newest = app.release?.digest ? app.release : null
+  const runs = releaseOn(c)
+  if (!bad && !moving && newest && runs?.digest && runs.digest !== newest.digest && (runs.release ?? 0) < newest.release && !c.m?.upgrade) needs.push({ kind: 'update', has: runs.release, newest: newest.release, by: runs.by })
+  // An upgrade there waiting for the sessions its agent runs to be done
+  if (c.m?.upgrade) needs.push({ kind: 'upgrade-waiting', release: c.m.upgrade.release, sessions: c.m.hosted?.length ?? 0 })
+  // No agent at all (its sessions' plugins say none is beside them): one can be set up, from the plugin there
+  if (!c.m && !moving && c.live.length && c.live.every((s) => s.agentBeside === null)) needs.push({ kind: 'agent-setup' })
   // Its agent is not running: sessions are heard from on it, and its agent is not (a machine's, for a while now); or it
   // has no machine, and a session's plugin says of the agent beside it that there is none, or names one the account has not
-  const down = c.m ? !c.m.online && Date.now() - (c.m.lastSeen ?? 0) > AGENT_QUIET_MS && c.live.length > 0 : c.live.some((s) => s.agentBeside !== undefined)
+  const down = c.m ? !c.m.online && Date.now() - (c.m.lastSeen ?? 0) > AGENT_QUIET_MS && c.live.length > 0 : c.live.some((s) => s.agentBeside !== undefined && s.agentBeside !== null)
   // Its agent is too old for the server to hear at all (the server says so of a machine whose hello it refused): that is
   // why nothing is heard of it, whatever else is. Else it is not running; else it is older than the newest, by what it
   // says now or, where it is not heard from, by what it last said: a computer that is away is as old when it is back.
@@ -3720,27 +3830,23 @@ function needsOf(c) {
   // still has and whose polls it does not; said here only while that hello is a recent one).
   const stalled = !!c.m?.stalled && !c.m.online && Date.now() - (c.m.lastSeen ?? 0) < 2 * AGENT_QUIET_MS
   if (c.m?.refused) needs.push({ kind: 'agent-refused', has: versionOf(c.m.agent) ? c.m.agent : '', newest: app.latest.agent ?? '' })
-  // (an agent from before releases were signed is not updated: it is upgraded, once, whatever else is so of it)
-  else if (c.m && behind(c.m.agent, UPGRADE_FROM)) needs.push({ kind: 'agent-upgrade', has: c.m.agent, heard: !!c.m.online })
   else if (stalled) needs.push({ kind: 'agent-stalled' })
   else if (down) needs.push({ kind: 'agent-down' })
-  else if (c.m && behind(c.m.agent, app.latest.agent)) needs.push({ kind: 'agent-old', has: c.m.agent, newest: app.latest.agent, heard: !!c.m.online })
   return needs
 }
 
-// ---- The one-time upgrade. Since agent 5.1.0 the plugin and the agent are released
-// signed, and an agent installs nothing that is not: one from before that cannot check
-// what it installs, so it is not updated in place. It is removed and a new one installed,
-// the plugin's marketplace is removed and added again (which takes away what the old
-// plugin kept, the passphrase among it), and the computer is given an API token and the
-// passphrase again. Once, by hand, on the computer. The page says so of an account that
-// has such a computer: on a page of its own, brought up as the page comes in, and in a
-// line across the top that leads to it, for as long as there is one.
-const UPGRADE_FROM = '5.1.0'
+// ---- The one-time move. Since 6.0.0 the plugin carries the agent and the signed list it was released by, and the
+// two are kept up to date from this page: one from before that knows nothing of how that is asked, so the first time is
+// done on the computer, by Claude Code, from a guide (upgrade.md), and every time after that from here. An agent from
+// before releases were signed (5.1.0) is removed and installed again in the same move. The page says so of an
+// account that has such a computer: on a page of its own, brought up as the page comes in, and in a line across the
+// top that leads to it, for as long as there is one.
 const UPGRADE_PAGE = '#/account/upgrade'
-// The account's computers that are to be upgraded: by what each agent says it is now, or last said, and any the server
+// The line the guide is read by
+const moveLine = () => `Read ${app.account?.server ?? location.origin}/upgrade.md and move ManyClaws on this computer to the new release.`
+// The account's computers that are to be moved: by what each agent says it is now, or last said, and any the server
 // would not hear at all for being too old
-const toUpgrade = () => [...app.machines.values()].filter((m) => m.refused || behind(m.agent, UPGRADE_FROM)).sort((a, b) => machineName(a).localeCompare(machineName(b)))
+const toUpgrade = () => [...app.machines.values()].filter((m) => m.refused || behind(m.agent, MOVE_FROM)).sort((a, b) => machineName(a).localeCompare(machineName(b)))
 // Seen to as the account's computers are heard of: the line, the page where it is open, and the page brought up, once
 // in a tab, where the page has come in at its list (someone who came for a session is at it, with the line above)
 function seeToUpgrade() {
@@ -3759,10 +3865,12 @@ function seeToUpgrade() {
 // Each said in a few words, for where the mark is pointed at
 const needSays = (n) =>
   ({
-    'plugin-old': `its plugin is ${n.has}, and ${n.newest} is the newest`,
-    'agent-old': n.heard === false ? `its agent was ${n.has} when it was last heard from, and ${n.newest} is the newest` : `its agent is ${n.has}, and ${n.newest} is the newest`,
+    alarm: n.by === 'differ' ? 'its plugin says it is something its agent did not find there: nothing is sent to it' : 'it is running a ManyClaws plugin that matches no signed release: nothing is sent to it',
+    move: `its ${n.what} is ${n.has}, from before ManyClaws kept itself up to date: it is moved once, by a guide`,
+    update: `release ${n.newest} is out`,
+    'upgrade-waiting': `an update to release ${n.release} is waiting for the sessions started from this page to be done`,
+    'agent-setup': 'it has no agent: your phone cannot start sessions on it',
     'agent-refused': `its agent is ${n.has ? n.has + ', ' : ''}too old for the server to hear`,
-    'agent-upgrade': `its agent is ${n.has}, from before a security change: it needs a one-time upgrade`,
     'agent-down': 'its agent is not running: no session can be started on it',
     'agent-stalled': 'its agent has stopped answering, and wants starting again',
   })[n.kind]
@@ -5720,7 +5828,7 @@ async function answer(r, body, { quiet = false } = {}) {
   // answer. Nothing goes beside it: the session goes by the order. (Handing the asking
   // back to the session's own app says nothing, and needs no passphrase.)
   const order = await orderFor(r.sid, 'answer', { ...body, rid: r.rid, asked: sealing.askedOf(r) })
-  if (!order && body.decision !== 'ask') return quiet ? false : void tell('Not sent', sentence(NO_KEY))
+  if (!order && body.decision !== 'ask') return quiet ? false : void tell('Not sent', sentence(blockedFor(r.sid) || NO_KEY))
   const res = await fetch('/api/requests/' + encodeURIComponent(r.rid), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -7007,7 +7115,7 @@ async function send() {
   const to = app.sessions.get(sid) ?? s
   const order = await promptOrder(sid, to?.machine, !!(to?.ended || to?.hosted), { text: plain, mode })
   if (!order) {
-    node.querySelector('.from').textContent = 'not sent: ' + NO_KEY
+    node.querySelector('.from').textContent = 'not sent: ' + (blockedFor(sid) || NO_KEY)
     return
   }
   // (one that ended with nothing said is, to the server, a session still to be heard from, and a reply to it would wait
@@ -7631,7 +7739,7 @@ async function startOnComputer() {
   const dress = { name: c.name.trim(), favorite: c.favorite }
   // (signed for that computer: where this device cannot sign, nothing is sent)
   const order = await orderFor(c.mid, 'branch', { how: 'new', cwd, mode, listed: wantsListed() })
-  if (!order) return say(NO_KEY_MACHINE)
+  if (!order) return say(blockedFor(c.mid) ? sentence(blockedFor(c.mid)) : NO_KEY_MACHINE)
   c.starting = true
   c.error = ''
   renderComputer()
@@ -7664,17 +7772,171 @@ function watchCswap(m) {
 // What a computer's page has to say of what the computer needs, as one thing to tell a change by (renderList draws the page again on one)
 function computerSaid(id) {
   const c = computerOf(id)
-  return JSON.stringify([needsOf(c), c ? [pluginOn(c), c.live.length, c.m?.online, c.m?.agent, c.m?.refused, c.m?.stalled, c.m?.hosted?.length] : null, app.latest])
+  return JSON.stringify([needsOf(c), c ? [pluginOn(c), c.live.length, c.m?.online, c.m?.agent, c.m?.refused, c.m?.stalled, c.m?.hosted?.length, c.m?.folders, c.m?.plugins, c.m?.upgrade, releaseOn(c)] : null, app.latest, app.release, app.devicesList?.v])
 }
 
 // What it needs, first on its page: each thing said, then the one line to paste into Claude Code on the computer, which
 // does all of it from the guide, and the way to the guide for doing it by hand
-function needsPart(c) {
-  const needs = needsOf(c)
-  if (!needs.length) return null
-  const guide = (app.account?.server ?? location.origin) + '/setup'
+// What this page has said of a computer's upkeep, kept where it outlasts a drawing: on the computer's page as it is open
+const stateOf = (c) => (app.computer?.mid === c.id ? app.computer : (c.state ??= {}))
+// What is done from here, each drawn with its own way of doing it
+function upkeepNode(c, n) {
+  const name = c.name
+  const said = stateOf(c).upkeep ?? {}
+  const told = said.kind === n.kind ? [said.error && h('p', { class: 'form-note error', role: 'alert', 'data-part': 'upkeep-error' }, said.error), said.done && h('p', { class: 'guide-status connected', 'data-part': 'upkeep-done' }, said.done)] : []
+  const button = (part, text, onclick, { primary = true, disabled = false } = {}) => h('button', { type: 'button', class: primary ? 'primary' : 'ghost', 'data-part': part, onclick, disabled: disabled || said.busy ? '' : null }, text)
+  if (n.kind === 'alarm')
+    return h(
+      'div',
+      { class: 'needs-alarm', 'data-need': 'alarm', role: 'alert' },
+      h('p', null, h('b', null, n.by === 'differ' ? `The plugin on ${name} says it is something its agent did not find there.` : `${name} is running a ManyClaws plugin that matches no signed release (${n.digest.slice(0, 12)}).`), ' This page sends it nothing until you decide.'),
+      h('p', null, n.by === 'fetched' ? 'It is what Claude Code fetched when it was asked to update the plugin: no session has loaded it yet. ' : n.by === 'plugin' ? 'That is the plugin’s own word of itself: there is no agent there to look from outside. ' : '', 'If you did not change it yourself, someone else may have: take back its access, and change your passphrase (Account) if you think it could have read it.'),
+      h('div', { class: 'needs-do' }, h('a', { href: '#/account', class: 'button-link primary', 'data-part': 'alarm-revoke' }, `Take back ${name}’s access`), ' ', button('alarm-keep', 'Keep it blocked', () => ((stateOf(c).keptBlocked = true), renderComputer()), { primary: false })),
+      stateOf(c).keptBlocked && h('p', { class: 'muted', 'data-part': 'alarm-kept' }, `Kept blocked: nothing is sent to ${name}, and no session is started on it.`),
+      h('p', null, h('button', { type: 'button', class: 'link', 'data-part': 'alarm-allow', onclick: () => allowPlugin(c, n.digest) }, 'I changed the plugin myself: allow it')),
+      ...told,
+    )
+  if (n.kind === 'move')
+    return h(
+      'div',
+      { 'data-need': 'move' },
+      h('p', null, h('b', null, `${name} needs a one-time move to the new way of updating.`), ` Its ${n.what} is ${n.has}, from before ManyClaws kept itself up to date from this page. On ${name}, start Claude Code and paste this:`),
+      codeBox(moveLine()),
+      h('p', null, h('a', { href: UPGRADE_PAGE, 'data-part': 'needs-upgrade' }, 'What the move is')),
+    )
+  if (n.kind === 'update') {
+    const hosted = c.m?.hosted?.length ?? 0
+    const via = c.m ? null : c.live.find((s) => s.attended && s.online)
+    const lead = h('p', null, h('b', null, `Release ${n.newest} is out.`), n.has ? ` ${name} has release ${n.has}. ` : ' ', h('a', { href: `https://github.com/redimaker/manyclaws/compare/release-${n.has ?? n.newest - 1}...release-${n.newest}`, target: '_blank', rel: 'noopener', 'data-part': 'update-changes' }, 'What changed'))
+    if (c.m && !c.m.capabilities?.includes('upgrade')) return h('div', { 'data-need': 'update' }, lead, h('p', { class: 'muted' }, `The agent on ${name} was not installed from a signed release, so it cannot check one: it is updated as the guide has it.`), ...told)
+    if (c.m && !c.m.online) return h('div', { 'data-need': 'update' }, lead, h('p', { class: 'muted' }, `${name} is not connected now: it is updated from here when it is.`), ...told)
+    if (!c.m && !via)
+      return h(
+        'div',
+        { 'data-need': 'update' },
+        lead,
+        button('update-go', `Update ${name}`, () => {}, { disabled: true }),
+        h('p', { class: 'muted', 'data-part': 'update-no-session' }, `Open Claude Code on ${name} to update it, or paste this into Claude Code there:`),
+        codeBox(`Read ${(app.account?.server ?? location.origin) + '/setup'}.md and update the ManyClaws plugin on this computer.`),
+        ...told,
+      )
+    return h(
+      'div',
+      { 'data-need': 'update' },
+      lead,
+      h('div', { class: 'needs-do' }, ...(hosted ? [button('update-when-done', 'Update when they’re done', () => upgradeComputer(c, { now: false }), { primary: false }), ' ', button('update-now', 'Update now', () => upgradeComputer(c, { now: true }))] : [button('update-go', `Update ${name}`, () => upgradeComputer(c, { now: false }))])),
+      ...told,
+    )
+  }
+  if (n.kind === 'upgrade-waiting')
+    return h(
+      'div',
+      { 'data-need': 'upgrade-waiting' },
+      h('p', null, h('b', null, `An update of ${name} to release ${n.release} is waiting.`), n.sessions ? ` Updating now ends the ${n.sessions === 1 ? 'session' : count(n.sessions, 'session')} started from this page; a reply resumes ${n.sessions === 1 ? 'it' : 'them'}.` : ' It is done in a moment.'),
+      n.sessions ? h('div', { class: 'needs-do' }, button('update-now', 'Update now', () => upgradeComputer(c, { now: true, release: n.release }))) : null,
+      ...told,
+    )
+  if (n.kind === 'agent-setup') {
+    const via = c.live.find((s) => s.attended && s.online)
+    return h(
+      'div',
+      { 'data-need': 'agent-setup' },
+      h('p', null, h('b', null, `${name} has no agent.`), ' Its sessions are on this page while they run. With the agent, your phone can also start sessions there, pick up one that has ended, and search everything Claude Code has done there.'),
+      via ? button('agent-setup-go', `Let my phone start sessions on ${name}`, () => setUpAgent(c, via)) : h('p', { class: 'muted' }, `Open Claude Code on ${name} to set its agent up from here.`),
+      ...told,
+    )
+  }
+  return null
+}
+
+// A plugin that is no release, allowed on a computer by its digest: signed, with the list of the account's devices, by
+// the passphrase, which is typed for it. Only by the one who changed it: the page says so.
+async function allowPlugin(c, digest) {
+  const u = app.account?.user
+  if (!u || !app.key) return
+  const typed = await ask(`Allow ${digest.slice(0, 12)} on ${c.name}?`, {
+    says: [`Allow this only if you changed the plugin on ${c.name} yourself. Its sessions are shown and asked things again, and its agent starts sessions with it. If it changes again it is asked again.`, 'Type your passphrase: what is allowed is signed with it, with the list of your devices.'],
+    text: '',
+    type: 'password',
+    yes: `Allow ${digest.slice(0, 12)} on ${c.name}`,
+    danger: true,
+  })
+  if (!typed) return
+  let made = null
+  try {
+    made = await vault.keysOf(typed, u.id)
+  } catch {
+    return void tell('Not allowed', 'Your key could not be made in this browser.')
+  }
+  if (!made.checker.every((b, i) => b === app.key.checker[i])) {
+    vault.forget(made)
+    return void tell('Not allowed', 'That is not the passphrase this browser was given.')
+  }
+  const why = await putDevices(app.key, made.signer, (devices) => devices, { allowed: (was) => [...was.filter((a) => !(a.machine === c.id && a.hash === digest)), { machine: c.id, hash: digest, at: Date.now() }] })
+  vault.forget(made)
+  if (why) return void tell('Not allowed', sentence(why))
+  stateOf(c).upkeep = { kind: 'alarm', done: '' }
+  renderComputer()
+  renderList()
+}
+
+// A computer brought up to the newest release, on an order for it: its agent has Claude Code fetch the plugin, holds
+// it to that release, and replaces itself, at once (`now`) or once its sessions are done. Where it has no agent, a
+// session's own plugin there does the plugin, and holds what was fetched to its list.
+async function upgradeComputer(c, { now, release }) {
+  const newest = app.release
+  if (!newest?.digest) return
   const name = c.name
   const hosted = c.m?.hosted?.length ?? 0
+  const via = c.m ? null : c.live.find((s) => s.attended && s.online)
+  const says = c.m
+    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions you started there in a terminal, VS Code or the desktop app keep running, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The session' : count(hosted, 'session')} started from this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : ', once they are done'}; a reply resumes ${hosted === 1 ? 'it' : 'them'}.` : ''}`
+    : `Updates the ManyClaws plugin on ${name}, through the Claude Code session in ${via?.project ?? 'its folder'}. Nothing running ends: each session uses the new plugin when it is next started.`
+  if (!(await ask(`Update ${name}?`, { says, yes: now ? 'Update now' : hosted ? 'Update when they’re done' : `Update ${name}` }))) return
+  stateOf(c).upkeep = { kind: release ? 'upgrade-waiting' : 'update', busy: true, done: 'Updating…' }
+  renderComputer()
+  const order = c.m ? await orderFor(c.id, 'upgrade', { release: release ?? newest.release, digest: newest.digest, now }) : await orderFor(via.id, 'call', { method: 'manyclaws.update', args: {} })
+  if (!order) return void ((stateOf(c).upkeep = { kind: stateOf(c).upkeep.kind, error: NO_KEY_MACHINE }), renderComputer())
+  const r = c.m ? await sendJson(`/api/machines/${c.id}/upgrade`, { order }) : await sendJson(`/api/sessions/${encodeURIComponent(via.id)}/call`, { order, timeoutMs: 300_000 })
+  const v = c.m ? r.data : r.data?.value
+  const failed = !r.ok ? r.error : !c.m && r.data?.ok === false ? r.data.error : !c.m && v && v.as === false ? `what Claude Code fetched is no release (${String(v.digest ?? '').slice(0, 12)}): no session there is started with it until you decide` : ''
+  stateOf(c).upkeep = failed
+    ? { kind: stateOf(c).upkeep.kind, error: sentence(failed) }
+    : {
+        kind: stateOf(c).upkeep.kind,
+        done: !c.m ? `Updated: new sessions on ${name} use release ${v?.release ?? newest.release}.` : v?.agent === 'now' ? `Updating: the agent on ${name} starts again in a moment, on release ${v.release}.` : v?.agent === 'unchanged' ? `Updated: new sessions on ${name} use release ${v.release}.` : `The plugin on ${name} is release ${v?.release ?? newest.release}; its agent follows once its sessions are done.`,
+      }
+  renderComputer()
+  renderList()
+}
+
+// The agent set up on a computer that has none, by the plugin of a session there, from the plugin's own folder
+async function setUpAgent(c, via) {
+  const name = c.name
+  const says = `Installs a small background service on ${name}, from the plugin it already has, checked against the signed release. Your phone can then start sessions in the folders you have used Claude Code in there (not your home folder, a temporary one, or one inside a folder whose name starts with a dot). You can turn any of them off on ${name}’s page.`
+  if (!(await ask(`Let your phone start sessions on ${name}?`, { says, yes: 'Set up' }))) return
+  stateOf(c).upkeep = { kind: 'agent-setup', busy: true, done: 'Setting up…' }
+  renderComputer()
+  const order = await orderFor(via.id, 'call', { method: 'manyclaws.agent', args: {} })
+  if (!order) return void ((stateOf(c).upkeep = { kind: 'agent-setup', error: NO_KEY_MACHINE }), renderComputer())
+  const r = await sendJson(`/api/sessions/${encodeURIComponent(via.id)}/call`, { order, timeoutMs: 300_000 })
+  stateOf(c).upkeep = !r.ok || r.data?.ok === false ? { kind: 'agent-setup', error: sentence(r.error ?? r.data?.error ?? 'It was not set up.') } : { kind: 'agent-setup', done: `The agent is set up on ${name}: it connects in a moment.` }
+  renderComputer()
+}
+
+// What is done from here, each with its own way: these are not done by a line pasted into Claude Code
+const DONE_HERE = new Set(['alarm', 'move', 'update', 'upgrade-waiting', 'agent-setup'])
+function needsPart(c) {
+  const all = needsOf(c)
+  if (!all.length) return null
+  const here = all.filter((n) => DONE_HERE.has(n.kind)).map((n) => upkeepNode(c, n))
+  const needs = all.filter((n) => !DONE_HERE.has(n.kind))
+  if (!needs.length) return accountPart('Needs attention', { id: 'computer-needs', 'data-key': 'needs' }, ...here)
+  return h('div', { 'data-key': 'needs-all' }, here.length ? accountPart('Needs attention', { id: 'computer-upkeep', 'data-key': 'upkeep' }, ...here) : null, oldNeedsPart(c, needs))
+}
+function oldNeedsPart(c, needs) {
+  const guide = (app.account?.server ?? location.origin) + '/setup'
+  const name = c.name
   const said = {
     'agent-down': () => [h('b', null, `The agent isn't running on ${name}.`), ' No new session can be started on it, and its past sessions cannot be opened or searched, until it is. The sessions heard from there now go on as they are.'],
     'agent-stalled': () => [
@@ -7685,43 +7947,24 @@ function needsPart(c) {
       h('code', null, 'systemctl --user restart manyclaws-agent'),
       '.',
     ],
-    'agent-old': (n) =>
-      n.heard === false
-        ? [h('b', null, `The agent on ${name} was ${n.has} when it was last heard from, and ${n.newest} is the newest.`), ` ${name} is not connected now: update it there when it is.`]
-        : [
-            h('b', null, `The agent on ${name} is ${n.has}, and ${n.newest} is the newest.`),
-            hosted
-              ? ` Updating it starts it again, which ends the ${hosted === 1 ? 'session it is running now, one started from this page' : hosted + ' sessions it is running now, the ones started from this page'}. Do it from a session started on ${name} itself, in a terminal or VS Code: one started from this page is run by the agent, and cannot update it.`
-              : ` Updating it starts it again. Do it from a session started on ${name} itself, in a terminal or VS Code: one started from this page is run by the agent, and cannot update it.`,
-          ],
     'agent-refused': (n) => [
       h('b', null, `The agent on ${name} is ${n.has ? n.has + ', ' : ''}too old for this server to hear.`),
       `${n.newest ? ` The newest is ${n.newest}.` : ''} Until it is upgraded, no session can be started on ${name} from here, and its past sessions cannot be opened or searched. It is from before a change to how ManyClaws is secured, and is upgraded once, by hand, on the computer: the line below does it, its plugin with it. Sorry for the trouble.`,
     ],
-    'plugin-old': (n) => [h('b', null, `The plugin on ${name} is ${n.has}, and ${n.newest} is the newest.`), ' A session that is already open keeps the plugin it started with: once the plugin is updated, this is gone as soon as a new session starts there.'],
-    'agent-upgrade': (n) => [
-      h('b', null, `The agent on ${name} ${n.heard === false ? 'was' : 'is'} ${n.has}, from before a change to how ManyClaws is secured.`),
-      ' It is not updated in place: it is upgraded once, by hand, on the computer, and is given an API token and your passphrase again. Sorry for the trouble. ',
-      h('a', { href: UPGRADE_PAGE, 'data-part': 'needs-upgrade' }, 'What the upgrade is, and how it is done'),
-    ],
   }
-  // (what the line asks for: what is old is updated, and an agent that is not running is got running)
   const has = (kind) => needs.some((n) => n.kind === kind)
-  // (an agent too old to be heard, on a computer no session is heard from either: its plugin is taken to be as old)
-  const old = [has('plugin-old') || (has('agent-refused') && !c.live.length) ? 'plugin' : '', has('agent-old') || has('agent-refused') ? 'agent' : ''].filter(Boolean)
   const down = has('agent-down')
   const stalled = has('agent-stalled')
-  const tasks = [old.length ? `update the ManyClaws ${old.join(' and ')}` : '', down ? (old.length ? 'get its agent running' : 'get the ManyClaws agent running') : '', stalled ? (old.length ? 'start its agent again' : 'start the ManyClaws agent again') : ''].filter(Boolean)
-  // (a computer that is to be upgraded is upgraded, which sees to the rest: by the guide for that, which is another)
-  const upgrade = has('agent-upgrade') || has('agent-refused')
-  const upgradeGuide = (app.account?.server ?? location.origin) + '/upgrade'
+  // (an agent too old to be heard is moved once, by the guide for that, which sees to the rest)
+  const moving = has('agent-refused')
+  const tasks = [down ? 'get the ManyClaws agent running' : '', stalled ? 'start the ManyClaws agent again' : ''].filter(Boolean)
   return accountPart(
     'Needs attention',
     { id: 'computer-needs', 'data-key': 'needs' },
     h('div', { class: 'needs' }, ...needs.map((n) => h('p', { 'data-need': n.kind }, ...said[n.kind](n)))),
-    h('p', { 'data-part': 'needs-say' }, upgrade ? `On ${name}, start Claude Code in a terminal or in VS Code and paste this:` : `On ${name}, start Claude Code and paste this:`),
-    codeBox(upgrade ? `Read ${upgradeGuide}.md and upgrade ManyClaws on this computer.` : `Read ${guide}.md and ${tasks.join(' and ')} on this computer.`),
-    h('p', null, upgrade ? h('a', { href: UPGRADE_PAGE, id: 'computer-guide' }, 'Or upgrade it by hand') : h('a', { href: guide + '#keeping-it-up-to-date-and-running', target: '_blank', rel: 'noopener', id: 'computer-guide' }, down || stalled ? 'How to get the agent running' : 'Or update it by hand')),
+    h('p', { 'data-part': 'needs-say' }, moving ? `On ${name}, start Claude Code in a terminal or in VS Code and paste this:` : `On ${name}, start Claude Code and paste this:`),
+    codeBox(moving ? moveLine() : `Read ${guide}.md and ${tasks.join(' and ')} on this computer.`),
+    moving ? null : h('p', null, h('a', { href: guide + '#keeping-it-up-to-date-and-running', target: '_blank', rel: 'noopener', id: 'computer-guide' }, down || stalled ? 'How to get the agent running, by hand' : 'How to do it by hand')),
   )
 }
 
@@ -7739,9 +7982,21 @@ function versionsPart(c) {
         : m.online
           ? `Agent ${m.agent}${stands(m.agent, app.latest.agent)}.`
           : `Agent ${m.agent}, when it was last heard from${behind(m.agent, app.latest.agent) ? `: ${app.latest.agent} is the newest` : ''}.`
+  // (and what release it is, as the best word there is for it says, held against the newest the release key signed)
+  const runs = releaseOn(c)
+  const newest = app.release?.digest ? app.release : null
+  const bad = noReleaseOn(c)
+  const release = !runs
+    ? null
+    : bad
+      ? `It runs a plugin that matches no signed release (${bad.digest.slice(0, 12)}).`
+      : !runs.as
+        ? runs.signed ? `Release ${runs.release}, with files that are not as its list has them: allowed here by you.` : 'It runs a plugin that carries no release signed by the release key: allowed here by you.'
+        : `Release ${runs.release} · ${runs.local ? 'from a local copy, ' : ''}${runs.by === 'agent' ? 'verified by its agent' : 'checked by the plugin itself'}${newest && newest.release > (runs.release ?? 0) && newest.digest !== runs.digest ? ` · release ${newest.release} is the newest` : ''}.`
   return accountPart(
     'Plugin and agent',
     { id: 'computer-versions', 'data-key': 'versions' },
+    release && h('p', { 'data-part': 'release-state' }, release),
     h('p', { 'data-part': 'agent-version' }, agent),
     h('p', { 'data-part': 'plugin-version' }, plugin ? `Plugin ${plugin}${stands(plugin, app.latest.plugin)}, as the ${count(c.live.length, 'session')} heard from there now ${c.live.length === 1 ? 'says' : 'say'}.` : `Plugin: it is a session that says which, and none on ${c.name} is heard from now.`),
   )
@@ -7779,7 +8034,7 @@ function renderComputer() {
     h('p', { class: 'muted' }, 'Wherever a session says which computer it is on, ', m.color ? whereLabel(name, m.id) : name, m.color ? ' is a label in this color: in the list, over a chat, and in what a search finds.' : ' is said plainly. Give it a color and it is a label in that color: in the list, over a chat, and in what a search finds.'),
     c.colorError && h('p', { class: 'form-note error', role: 'alert' }, c.colorError),
   )
-  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), colors, newPart(c, m), versionsPart(at), cswapPart(m)].filter(Boolean))
+  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), colors, newPart(c, m), foldersPart(c, m), versionsPart(at), cswapPart(m)].filter(Boolean))
   // (what is chosen is this page's to say: a drawing leaves what a hand has changed as it is)
   const set = (id, value) => el(id) && el(id).value !== value && (el(id).value = value)
   set('computer-project', c.cwd)
@@ -7787,6 +8042,45 @@ function renderComputer() {
   set('computer-session-name', c.name)
   if (el('computer-favorite')) el('computer-favorite').checked = c.favorite
   if (el('computer-listed')) el('computer-listed').checked = wantsListed()
+}
+
+// The folders sessions may be started in from here: the ones set on the computer, and, where its owner allows them, the
+// ones a person has used Claude Code in there (the agent works those out, within its own limits: never the home folder
+// or one above it, a temporary one, or one inside a folder whose name starts with a dot). Each of those can be turned
+// off from here, by an order, and the whole lot allowed or not; a folder of any other kind is set on the computer.
+function foldersPart(c, m) {
+  if (!m.capabilities?.includes('auto-folders') || !m.online) return null
+  const f = m.folders ?? {}
+  const name = machineName(m)
+  const set = (f.folders ?? []).length ? h('p', { 'data-part': 'folders-set' }, `Set on ${name}: `, ...f.folders.flatMap((x, i) => [i ? ', ' : '', h('code', null, x)]), '.') : null
+  const asking = async (asked, says) => {
+    c.foldersSaid = ''
+    const order = await orderFor(m.id, 'folders', asked)
+    if (!order) return void ((c.foldersSaid = blockedFor(m.id) ? sentence(blockedFor(m.id)) : NO_KEY_MACHINE), renderComputer())
+    const r = await sendJson(`/api/machines/${m.id}/folders`, { order })
+    c.foldersSaid = r.ok ? says : sentence(r.error)
+    renderComputer()
+  }
+  const off = f.autoOff ?? []
+  const said = c.foldersSaid && h('p', { class: 'form-note', 'data-part': 'folders-said' }, c.foldersSaid)
+  if (!Array.isArray(f.auto))
+    return accountPart(
+      'Folders',
+      { id: 'computer-folders', 'data-key': 'folders' },
+      set ?? h('p', { class: 'muted' }, `No folder is set on ${name} for sessions to start in.`),
+      h('p', null, h('button', { type: 'button', class: 'ghost', 'data-part': 'folders-allow', onclick: () => asking({ auto: true }, 'Allowed: the folders you have used Claude Code in are listed here in a moment.') }, 'Also allow the folders I’ve used Claude Code in')),
+      said,
+    )
+  return accountPart(
+    'Folders',
+    { id: 'computer-folders', 'data-key': 'folders' },
+    set,
+    h('p', null, `The folders you have used Claude Code in on ${name}, in the last 90 days, where a session may be started from here:`),
+    ...(f.auto.length ? f.auto.map((x) => h('div', { class: 'person', 'data-folder': x }, h('code', null, x), h('button', { type: 'button', class: 'ghost', 'data-part': 'folder-off', onclick: () => asking({ off: [...off, x] }, `Turned off: no session is started in ${x} from here.`) }, 'Turn off'))) : [h('p', { class: 'muted' }, 'None yet.')]),
+    ...off.map((x) => h('div', { class: 'person muted', 'data-folder-off': x }, h('code', null, x), h('button', { type: 'button', class: 'ghost', 'data-part': 'folder-on', onclick: () => asking({ off: off.filter((y) => y !== x) }, `Turned on again: ${x}.`) }, 'Turn on'))),
+    h('p', null, h('button', { type: 'button', class: 'link', 'data-part': 'folders-stop', onclick: () => asking({ auto: false }, 'Not allowed: sessions are started only in the folders set on the computer.') }, 'Stop allowing the folders I’ve used')),
+    said,
+  )
 }
 
 // A new session on it: the project, what it may do without asking, what it is to be called and whether it is a favorite, and New
@@ -8519,7 +8813,7 @@ async function devicesKept() {
 // the one the server has: '' when it is kept, or why it is not. Another device may change
 // it at the same moment: the server takes a list only in place of the one it was made
 // from, so it is made again from the newer one.
-async function putDevices(held, signer, change) {
+async function putDevices(held, signer, change, more = {}) {
   // (the list this browser is on, by the key it has had until now: one older than that is not built on, keys.js)
   const since = Math.max(held.since ?? 0, app.key?.checker?.every((b, i) => b === held.checker[i]) ? (app.key.since ?? 0) : 0)
   for (let tries = 0; tries < 4; tries++) {
@@ -8527,7 +8821,7 @@ async function putDevices(held, signer, change) {
     if (was === null) return 'the server could not be reached'
     let devices
     try {
-      devices = await vault.devicesAgain(was, held, signer, change, Date.now(), since)
+      devices = await vault.devicesAgain(was, held, signer, change, Date.now(), since, more)
     } catch (err) {
       if (err instanceof vault.OlderList) return err.message
       throw err
@@ -8537,6 +8831,8 @@ async function putDevices(held, signer, change) {
       // (which list this device is on from: one older than that says nothing of it, whoever hands it over)
       const list = await vault.readDevices(devices, held)
       if (sealing.deviceIn(list, held.device.key)) held.since = list.v
+      // (and what the list says the owner allowed, and who may start sessions, as it stands now)
+      if (held === app.key) app.devicesList = list
       return ''
     }
     if (r?.status !== 409) return (await r?.json().catch(() => null))?.error ?? 'the server could not be reached'
@@ -8630,11 +8926,39 @@ function devicesPart(redraw) {
           return h(
             'div',
             { class: 'person', 'data-device': d.key, 'data-here': here ? 'yes' : 'no' },
-            h('div', null, h('b', null, d.name || 'A device'), here ? ' (this one)' : '', h('div', { class: 'muted' }, [`since ${day(d.at)}`, d.until ? `not its owner’s own: one of them until ${hour(d.until)}` : ''].filter(Boolean).join(' · '))),
+            h('div', null, h('b', null, d.name || 'A device'), here ? ' (this one)' : '', h('div', { class: 'muted', 'data-part': 'device-starts' }, d.until ? 'cannot start sessions on your computers' : d.start === false ? 'starting sessions on your computers is turned off' : 'may start sessions on your computers'), h('div', { class: 'muted' }, [`since ${day(d.at)}`, d.until ? `not its owner’s own: one of them until ${hour(d.until)}` : ''].filter(Boolean).join(' · '))),
+            // (one that is its owner's own may start sessions on the account's computers unless that is turned off, with the passphrase)
+            d.until ? null : h('button', { type: 'button', class: 'ghost', 'data-part': 'device-start', onclick: () => startsOrNot(d) }, d.start === false ? 'Let it start sessions' : 'Stop it starting sessions'),
             h('button', { type: 'button', class: 'ghost', 'data-part': 'device-remove', onclick: () => remove(d, here) }, 'Remove'),
           )
         }),
     )
+  }
+  // Whether a device may start sessions on the account's computers: signed into the list with the passphrase
+  const startsOrNot = async (d) => {
+    const name = d.name || 'this device'
+    const on = d.start === false
+    const typed = await ask(on ? `Let ${name} start sessions on your computers?` : `Stop ${name} starting sessions on your computers?`, {
+      says: [on ? `${name} can then start a new session on any of your computers that allows it, and pick up one that has ended.` : `${name} can still read your sessions, reply to the ones that are running, and answer what they ask. It cannot start a new one, or pick up one that has ended.`, 'Type your passphrase: the list of your devices is signed with it.'],
+      text: '',
+      type: 'password',
+      yes: on ? 'Let it' : 'Stop it',
+    })
+    if (!typed) return
+    let made = null
+    try {
+      made = await vault.keysOf(typed, u.id)
+    } catch {
+      return void tell('Not changed', 'Your key could not be made in this browser.')
+    }
+    if (!made.checker.every((b, i) => b === app.key.checker[i])) {
+      vault.forget(made)
+      return void tell('Not changed', 'That is not the passphrase this browser was given.')
+    }
+    const why = await putDevices(app.key, made.signer, (devices) => devices.map((x) => (x.key !== d.key ? x : on ? (({ start: _, ...rest }) => rest)(x) : { ...x, start: false })))
+    vault.forget(made)
+    if (why) return void tell('Not changed', sentence(why))
+    draw()
   }
   draw()
   return [says, box]
@@ -8952,27 +9276,23 @@ function renderUpgrade() {
   if (!a) return
   el('account-sub').textContent = accountSays(a.user)
   const old = toUpgrade()
-  const origin = a.server ?? location.origin
-  const guide = origin + '/upgrade'
+  const guide = (a.server ?? location.origin) + '/upgrade'
   const body = el('account-body')
   const at = body.querySelector('[data-part=upgrade]') ? body.scrollTop : 0
   const these = old.length === 1 ? 'this computer' : 'each of these computers'
-  const step = (n, title, ...says) => h('div', { class: 'upgrade-step', 'data-step': String(n) }, h('h3', null, `${n}. ${title}`), ...says)
   fill(
     body,
     accountHead(
-      'One-time upgrade',
-      !old.length ? 'No computer needs upgrading' : old.length === 1 ? 'One of your computers needs upgrading' : `${old.length} of your computers need upgrading`,
-      old.length ? 'A one-time step, after a change to how ManyClaws is secured.' : 'Every computer of yours that has the agent has one that was released signed.',
+      'One-time move',
+      !old.length ? 'No computer needs moving' : old.length === 1 ? 'One of your computers needs moving to the new release' : `${old.length} of your computers need moving to the new release`,
+      old.length ? 'Once, on the computer: from then on its plugin and agent are kept up to date from this page.' : 'Every computer of yours that has the agent is kept up to date from this page.',
     ),
     ...(old.length
       ? [
           accountPart(
             old.length === 1 ? 'The computer' : 'The computers',
             { id: 'upgrade-computers', 'data-part': 'upgrade' },
-            // (said here, in the page's own words, and not only over it: the heading is not shown in every look)
-            h('p', { 'data-part': 'upgrade-sorry' }, h('b', null, 'Sorry for the trouble.'), ' This is a one-time step, after a change to how ManyClaws is secured: it is done once on a computer and is not needed again.'),
-            h('p', null, `The agent on ${these} is old, and needs upgrading:`),
+            h('p', null, `The agent on ${these} is from before ManyClaws kept itself up to date:`),
             ...old.map((m) =>
               h(
                 'div',
@@ -8981,48 +9301,23 @@ function renderUpgrade() {
                 h('a', { href: '#/computer/' + encodeURIComponent(m.id) }, 'Its page'),
               ),
             ),
-            h('p', { class: 'muted' }, 'A computer is gone from this list once it has been upgraded and its new agent has connected.'),
+            h('p', { class: 'muted' }, 'A computer is gone from this list once it has been moved and its new agent has connected.'),
           ),
           accountPart(
             'Why',
             { id: 'upgrade-why' },
-            h('p', null, 'The plugin and the agent are now released signed, from a public repository, and an agent installs nothing that is not signed. An agent from before that cannot check what it installs, so it is not updated in place: the old one is removed and a new one is installed.'),
-            h('p', null, 'Your passphrase is no longer kept on your computers once your key is made from it. Removing the old plugin takes away what it kept, your passphrase among it. So each computer is signed in again, with an API token and your passphrase: that is the part that is yours.'),
+            h('p', null, 'The plugin now carries the agent, and the signed list of every file it was released with. Your page asks a computer to update, you approve each release here, and nothing is installed that the release key did not sign. A computer from before knows nothing of being asked, so the first time is done on it.'),
           ),
           accountPart(
             'The short way',
             { id: 'upgrade-short' },
-            h('p', null, `On ${these}, start Claude Code in a terminal or in VS Code (not a session started from this page, which the old agent itself is running) and paste this:`),
-            codeBox(`Read ${guide}.md and upgrade ManyClaws on this computer.`),
-            h('p', null, 'Claude removes the old plugin and agent and installs the new ones. Then it asks you for the one step that is yours: step 3, below.'),
-          ),
-          accountPart(
-            'By hand',
-            { id: 'upgrade-by-hand' },
-            step(1, 'Remove the old marketplace and add the new one', h('p', null, 'In a terminal on the computer. The first line removes the old plugin with the marketplace it came from, and the API token and passphrase it was given with them; the other two install the plugin from the public repository.'), codeBox('claude plugin marketplace remove manyclaws\nclaude plugin marketplace add redimaker/manyclaws\nclaude plugin install manyclaws@manyclaws')),
-            step(
-              2,
-              'Remove the old agent and install the new one',
-              h('p', null, 'One command does both. It removes the old agent with everything it kept, its API token and key among it, and installs the newest release in its place, checked against its signature and set up as the old one was: the same computer here, with the same name and folders.'),
-              codeBox('curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/mod/agent/install.sh | bash -s -- --reinstall'),
-              h('p', { class: 'muted' }, 'It ends the sessions the old agent is running, the ones started from this page: while there are any it does nothing and says so. Add --end-sessions to end them.'),
-            ),
-            step(
-              3,
-              'Sign the computer in again',
-              h('p', null, 'This step is yours. In Claude Code on the computer, type /plugin configure manyclaws@manyclaws (in the VS Code extension: /plugin, then the gear beside manyclaws), and give the plugin two things:'),
-              h(
-                'ul',
-                null,
-                h('li', null, h('b', null, 'A new API token. '), h('a', { href: '#/setup', 'data-part': 'upgrade-token' }, 'Make one here'), ': it is shown once, as it is made. The one the computer had can be taken back under Account once every computer has a new one.'),
-                h('li', null, h('b', null, 'Your encryption passphrase'), ': the one your account already has, which you typed into this browser.'),
-              ),
-              h('p', null, 'Then start a new Claude Code session. The plugin makes your key and gives the new agent the same token and key: there is nothing to type into the agent.'),
-            ),
-            h('p', null, h('a', { href: guide, target: '_blank', rel: 'noopener', 'data-part': 'upgrade-guide' }, 'The whole guide'), ', which says what each step does.'),
+            h('p', null, `On ${these}, start Claude Code in a terminal, in VS Code or in the desktop app (not a session started from this page, which the agent itself is running) and paste this:`),
+            codeBox(moveLine()),
+            h('p', null, 'Claude updates the plugin and hands the agent over to the copy the new plugin carries. Where it would end sessions this page started there, it asks you first. There is nothing to type, unless the computer is from before releases were signed: then its plugin shows a link that connects it again, which you open here.'),
+            h('p', null, h('a', { href: guide, target: '_blank', rel: 'noopener', 'data-part': 'upgrade-guide' }, 'The guide'), ', which says what each step does, and how to do it by hand.'),
           ),
         ]
-      : [accountPart('Up to date', { id: 'upgrade-computers', 'data-part': 'upgrade' }, h('p', { class: 'guide-status connected' }, '✓ None of your computers needs the one-time upgrade.'))]),
+      : [accountPart('Up to date', { id: 'upgrade-computers', 'data-part': 'upgrade' }, h('p', { class: 'guide-status connected' }, '✓ None of your computers needs the one-time move.'))]),
     h('p', { class: 'upgrade-later' }, h('a', { href: '#', 'data-part': 'upgrade-later' }, old.length ? 'Not now: back to my sessions' : 'Back to my sessions')),
   )
   body.scrollTop = at

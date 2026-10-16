@@ -286,6 +286,12 @@ pre, code { font-family: var(--mono); }
 .needs { margin: 0 0 12px; padding: 10px 12px; border-radius: 6px; background: var(--attention-bg); box-shadow: inset 3px 0 0 var(--attention); }
 .needs p { margin: 0; }
 .needs p + p { margin-top: 8px; }
+/* What is done from a computer's page: each thing with its own buttons; and a plugin that is no release, in red */
+[data-need] + [data-need] { margin-top: 14px; }
+[data-need] p { margin: 0 0 8px; }
+.needs-do { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.needs-alarm { padding: 10px 12px; border-radius: 6px; background: color-mix(in srgb, var(--error) 12%, transparent); box-shadow: inset 3px 0 0 var(--error); }
+.needs-alarm b { color: var(--error); }
 .api-token.off { opacity: .6; }
 
 /* The plans to subscribe to: one button each, with what it costs */
