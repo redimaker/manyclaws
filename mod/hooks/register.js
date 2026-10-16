@@ -55,7 +55,7 @@ import {
   isAttended,
   randomId,
 } from './lib.js'
-import { seal, open, isSealed, openBytes, keysFromText, keysText, contentKey, nameOf, toB64, fromB64, sha256, keysFromPassphrase, isOrder, readOrder, takeOrder, orderMemory, devicesMemory, askedOf, OrderRefused, sshSigned, pluginDigest, pluginOfList, notPlugin, hexSha256, mayStart } from './seal.js'
+import { seal, open, isSealed, openBytes, keysFromText, keysText, contentKey, nameOf, toB64, fromB64, sha256, keysFromPassphrase, isOrder, readOrder, takeOrder, orderMemory, devicesMemory, askedOf, OrderRefused, sshSigned, pluginDigest, pluginOfList, notPlugin, hexSha256, mayStart, x25519Keys, openFrom } from './seal.js'
 import { messageRows, resultRow, historyRows, summarizeInput } from './rows.js'
 
 const FLUSH_MS = 250 // how often what is in the queue is sent
@@ -134,8 +134,14 @@ const added = new Set() // the names of its own tools that are before Claude (OW
 
 export function register(on, options) {
   on('session.start', async ($, e, next) => {
+    void $.command.register({ name: 'manyclaws', description: 'Connect this computer to ManyClaws, or disconnect it', argumentHint: 'connect | disconnect' }).catch(() => {})
+    startedWith = e
     const given = await readGiven($, options)
-    if (!given) return next(e)
+    // (with no token, where someone is at the session: the link that connects this computer from the page)
+    if (!given) {
+      if (!(await tokenOf($, options))) void offerConnect($, e)
+      return next(e)
+    }
     const here = await keysHere($, given)
     if (here) await begin($, e, given, here)
     // The key is still to be made from the passphrase: in the first session on this
@@ -350,6 +356,9 @@ export function register(on, options) {
     return next(e)
   })
 
+  // /manyclaws, for connecting this computer and disconnecting it
+  on('command.run', { command: 'manyclaws' }, async ($, e) => manyclawsCommand($, e))
+
   on('session.end', async ($, e, next) => {
     if (config) {
       sendDeltas()
@@ -487,8 +496,13 @@ async function begin($, e, given, keys) {
 // What the plugin was given: where it reports, what it signs in with, and the passphrase
 // its key is made from. null where it has no token or no passphrase: a session is told of
 // sealed or not at all, so with null nothing is sent and nothing is asked for.
+// The token this plugin signs in with, or '' (one it was disconnected from is none: NO_TOKEN)
+async function tokenOf($, options) {
+  const token = options?.token || (await $.env.get('MANYCLAWS_TOKEN')) || ''
+  return token === NO_TOKEN ? '' : String(token)
+}
 async function readGiven($, options) {
-  const token = options?.token || (await $.env.get('MANYCLAWS_TOKEN'))
+  const token = await tokenOf($, options)
   if (!token) return null
   // (`typed`: it came from the plugin's own options, where a person types it and where the key can be put in its place)
   const typed = String(options?.key || '').trim()
@@ -1076,6 +1090,79 @@ async function tellAgent($) {
     if ((kept.token === config.token && kept.key === key) || kept.has === has) return
     await $.fs.write(home + '/from-plugin.json', JSON.stringify({ server: config.url, token: config.token, key }))
   } catch {}
+}
+
+// ---- Connecting this computer from the page, with nothing typed into Claude Code
+//
+// With no token, a session someone is at offers a link: the plugin makes a pair of keys for the asking, and the link
+// has the public one in it after the #, which a browser does not send anywhere. So it goes from this session to the
+// person's browser, opened there, and never to the server. The page, given the passphrase, makes a token for this
+// computer, seals it and the account's key (written out, mcf_…) to that key, and puts that on the server under a name
+// drawn from the key, which is what the plugin asks for, every two seconds for two minutes. Nothing but the pair's
+// other half, which is only here, opens it. The two are then kept as a person typing them would have them kept
+// (`claude plugin configure`), and the session is taken up at once.
+const NO_TOKEN = 'none' // what is kept in the token's place once this computer is disconnected: no token
+const CONNECT_MS = 2 * 60_000
+const CONNECT_EVERY_MS = 2000
+let connecting = null // { secret, id, url, until, e }
+let startedWith = null // how this session started: what it is taken up with once it is connected
+async function offerConnect($, e, { asked = false } = {}) {
+  if (!isAttended(e.isInteractive, (await $.env.get('CLAUDE_CODE_ENTRYPOINT')) || undefined)) return asked ? 'this session is one a program runs: connect this computer from a session started on it, in a terminal, an editor or the desktop app' : undefined
+  const url = String((await $.env.get('MANYCLAWS_URL')) || SERVER).replace(/\/+$/, '')
+  const pair = x25519Keys()
+  const name = (await output($, ['hostname'])).trim().replace(/\.local$/, '') || 'this computer'
+  const link = `${url}/app#/connect/${toB64(pair.public)}/${encodeURIComponent(name)}`
+  connecting = { secret: pair.secret, id: toB64(sha256(pair.public)).slice(0, 22), url, until: (await $.clock.now()) + CONNECT_MS, e: startedWith ?? e }
+  const said = `ManyClaws: this computer is not connected yet. Open this link to connect it, in a browser where you are signed in to ManyClaws (or on your phone): ${link}\nIt works once, for two minutes; /manyclaws connect makes another.`
+  $.ui.log(said)
+  $.ui.status(`ManyClaws: connect this computer → ${link}`)
+  $.clock.after(CONNECT_EVERY_MS, () => void askConnect($))
+  return said
+}
+async function askConnect($) {
+  const c = connecting
+  if (!c) return
+  if ((await $.clock.now()) > c.until) {
+    connecting = null
+    $.ui.status(undefined)
+    return void $.ui.log('ManyClaws: the link to connect this computer has run out. /manyclaws connect makes another.')
+  }
+  let sealed = null
+  try {
+    const r = await $.http.fetch(`${c.url}/api/connect/${c.id}`)
+    if (r.status === 200) sealed = JSON.parse(r.text).sealed
+  } catch {}
+  if (!sealed) return void $.clock.after(CONNECT_EVERY_MS, () => void askConnect($))
+  connecting = null
+  $.ui.status(undefined)
+  const got = openFrom(c.secret, sealed)
+  const keys = keysFromText(got?.key)
+  if (!got || typeof got.token !== 'string' || !got.token || !keys) return void $.ui.log('ManyClaws: what came back to connect this computer did not open with the key its link was made with, so nothing of it was taken. /manyclaws connect makes another link.')
+  // (kept where a person typing them would have them kept: the key written out in the passphrase's place)
+  let kept = false
+  try {
+    const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
+    kept = (await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ token: got.token, key: got.key }), timeoutMs: 60_000 })).exitCode === 0
+  } catch {}
+  const account = typeof got.account === 'string' && got.account ? `the account of ${got.account}` : 'your ManyClaws account'
+  $.ui.log(`ManyClaws: connected to ${account}. This session is on your page.${kept ? '' : ' (Claude Code would not keep the two among the plugin\'s options here, so the next session asks again.)'} Not your account? Type /manyclaws disconnect.`)
+  if (!config) await begin($, c.e, { url: c.url, token: got.token, passphrase: got.key, label: '', capabilities: 'default' }, keys)
+}
+// /manyclaws: connect (another link), disconnect (no token from here on: Claude Code cannot clear an option, so `none`
+// is kept in its place)
+async function manyclawsCommand($, e) {
+  const what = String(e.args ?? '').trim().split(/\s+/)[0]
+  if (what === 'connect') {
+    if (config) return { text: 'This computer is connected already. /manyclaws disconnect, then /manyclaws connect, connects it to another account.' }
+    return { text: (await offerConnect($, { isInteractive: true }, { asked: true })) ?? '' }
+  }
+  if (what === 'disconnect') {
+    const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
+    const r = await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ token: NO_TOKEN, key: NO_TOKEN }), timeoutMs: 60_000 }).catch((err) => ({ exitCode: 1, stderr: String(err?.message ?? err) }))
+    if (r.exitCode !== 0) return { text: 'Claude Code would not change the plugin\'s options: ' + lastLine(r) }
+    return { text: 'Disconnected: from the next session on, this computer reports to no account, and offers the link that connects it again. This session goes on as it is until it ends. Take its API token back on your page (Account, API tokens).' }
+  }
+  return { text: '/manyclaws connect: a link that connects this computer to your account, from your page. /manyclaws disconnect: this computer reports to no account from the next session on.' }
 }
 
 // ---- What this plugin is, and keeping it and the agent beside it up to date

@@ -27,7 +27,7 @@
   <link rel="modulepreload" href="/seal.js" integrity="sha384-jcDlODIznMAow2oYmPCz6+HbtIdNIQudXOuvumF4xWpbVsP+YQ0dE0jjJczfqw8b">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-vjYD0/zLU+HzcLnhWRAepZlgvqGIWMy7uD1jWGWYGt58IbWv+uEbZfg1YMEjH1UB">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-w+/fVzQtEtgcqsDZth00TL3NiGQ8L7PE5ffHkCqrGaekGoOy5O6yNiwwkdLXXgzP">
-  <script src="app.js" defer integrity="sha384-AsW+Z35apkxuzNNIx0u3E3eT2HCEUVY/Kuga55oiwADhBN4t/3t+fm+6Q4hYH/CA"></script>
+  <script src="app.js" defer integrity="sha384-hWuOru6RWLhZCTV2phck+KudRpxhcZ3TzTwYdSQJVUCIK4luSebzLGAU2UdOgANg"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -282,6 +282,22 @@
           </div>
         </header>
         <div id="setup-body" class="guide"></div>
+      </section>
+      <!-- A computer connected from the link its plugin showed (#/connect/<its key>/<its name>): the passphrase, and
+           Connect. Laid out as the account's page is. -->
+      <section id="connect" class="new-session" hidden>
+        <header class="bar chat-head">
+          <a href="#" class="back" aria-label="Back to sessions"><span aria-hidden="true">‹</span><span class="back-word">Sessions</span></a>
+          <a href="#" class="acct-mark" aria-label="ManyClaws: back to sessions">
+            <svg viewBox="0 0 179.4 136.1" aria-hidden="true"><path d="M70.5 136.1C61.7 120.4 49.3 108.6 32.4 99.1C13.8 88.2 3.3 64.4 3.4 46.5C-1.8 29 -1.6 11.1 7.5 0C13.1 16.2 21.9 31.9 37 44.6C36.2 31.6 38.2 17.3 44.6 3C57 12.6 71.1 30.1 74.9 53.9C80.1 73.6 78 101.3 86.7 128.2ZM108.9 136.1C117.7 120.4 130.1 108.6 147 99.1C165.7 88.2 176.2 64.4 176 46.5C181.2 29 181 11.1 172 0C166.3 16.2 157.5 31.9 142.4 44.6C143.2 31.6 141.3 17.3 134.9 3C122.4 12.6 108.3 30.1 104.5 53.9C99.3 73.6 101.4 101.3 92.7 128.2Z"/></svg>
+            <span>ManyClaws</span>
+          </a>
+          <div class="chat-title">
+            <div class="chat-name">Connect a computer</div>
+            <div class="chat-sub">From the link its ManyClaws plugin showed in Claude Code.</div>
+          </div>
+        </header>
+        <div id="connect-body" class="guide"></div>
       </section>
       <!-- The account: its email and the way to its password, its tokens, signing out; and for the admin,
            who else is here. On a server with a front door it is dressed as that is (site/account.css),

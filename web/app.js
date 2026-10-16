@@ -1812,6 +1812,8 @@ function route() {
   el('setup').hidden = path !== '#/setup'
   el('account').hidden = !ACCOUNT_PAGES.includes(path)
   el('settings-page').hidden = path !== '#/settings'
+  const connect = /^#\/connect\/([A-Za-z0-9_-]{43})(?:\/([^/]*))?$/.exec(path)
+  el('connect').hidden = !connect
   if (path !== '#/account') app.passwordSaid = ''
   if (path !== '#/account') app.passphraseChanging = false
   // (a computer's Claude accounts had a page of their own, #/cswap/<machine>: they are a part of the computer's now)
@@ -1823,6 +1825,7 @@ function route() {
   if (computer) return openComputer(decodeURIComponent(computer[1]))
   if (path === '#/setup' || ACCOUNT_PAGES.includes(path)) return openGuide(path.slice(2))
   if (path === '#/settings') return openSettings()
+  if (connect) return openConnect(connect[1], decodeURIComponent(connect[2] ?? ''))
   if (live) return openSession(decodeURIComponent(live[1]))
   if (past) {
     const q = new URLSearchParams(query)
@@ -3420,6 +3423,78 @@ function renderRow(s, { favorite = false, due = false } = {}) {
 // session's tile says, and this device's notifications. All of it is this device's own,
 // kept in its browser: another device has its own. (Until 2026-10-08 they opened over the
 // foot of the list, and were the first three of these.)
+
+// ---- A computer connected from the link its ManyClaws plugin showed in Claude Code
+// (#/connect/<its key>/<its name>). The plugin, with no token, made a pair of keys for the asking, and the link has the
+// public one in it after the #, which a browser sends nowhere: so it came from that session to this browser, and the
+// server has never had it. Given the passphrase, this page makes an API token for the computer and seals it and the
+// account's key, written out as a computer keeps it, to that key; and puts that on the server under a name drawn from
+// the key, which the plugin asks for. Nothing but the plugin that showed the link opens it. The passphrase is asked for
+// because what this browser holds of the key cannot be read back out of it (keys.js): the computer is given the key
+// made again from what is typed, which has to make the checker this browser has.
+async function openConnect(keyText, named) {
+  leaveChat()
+  const body = el('connect-body')
+  const u = app.account?.user
+  let key = null
+  try {
+    key = sealing.fromB64(keyText)
+  } catch {}
+  const name = String(named || 'this computer').trim().slice(0, 60) || 'this computer'
+  if (!u || !sealing || !vault || key?.length !== 32) return void fill(body, h('p', { 'data-part': 'connect-not' }, 'This is not a link a computer’s ManyClaws plugin makes. Start Claude Code on the computer again: it shows the link that connects it.'))
+  const id = sealing.toB64(sealing.sha256(key)).slice(0, 22)
+  const box = h('input', { 'data-part': 'connect-passphrase', type: 'password', placeholder: 'Your encryption passphrase', autocomplete: 'current-password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' })
+  const note = h('span', { class: 'form-note', 'data-part': 'connect-note' })
+  const go = h('button', { type: 'submit', class: 'primary', 'data-part': 'connect-go' }, 'Connect')
+  const failed = (why) => ((note.textContent = why), (note.className = 'form-note error'), (go.disabled = false))
+  const form = h(
+    'form',
+    { class: 'guide-form', 'data-part': 'connect-form' },
+    h('p', { 'data-part': 'connect-asks' }, 'Connect ', h('b', null, name), ' to your account?'),
+    h('p', { 'data-part': 'connect-warns' }, 'This gives your API token and your encryption key to the Claude Code session that showed you this link. If you did not just open one there, close this page.'),
+    h('div', { class: 'passphrase-box' }, box),
+    h('div', null, go, ' ', note),
+  )
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    if (!box.value) return
+    go.disabled = true
+    note.textContent = 'Making your key…'
+    note.className = 'form-note'
+    let made = null
+    try {
+      made = await vault.keysOf(box.value, u.id)
+    } catch {
+      return failed('Your key could not be made in this browser.')
+    }
+    // (what was typed makes the checker this browser was given, or it is not the passphrase)
+    if (app.key && !made.checker.every((b, i) => b === app.key.checker[i])) {
+      vault.forget(made)
+      return failed('That is not the passphrase this browser was given.')
+    }
+    const written = sealing.keysText({ key: made.key, checker: made.checker })
+    vault.forget(made)
+    box.value = ''
+    const t = await sendJson('/api/account/tokens', { name, days: 0 })
+    if (!t.ok) return failed('No API token could be made for it: ' + t.error)
+    const sealed = sealing.sealTo(key, { token: t.data.token, key: written, account: String(u.email ?? ''), name })
+    const r = await fetch('/api/connect/' + id, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sealed }) }).catch(() => null)
+    if (!r?.ok) {
+      // (the token made for it goes again: nothing has it)
+      await fetch('/api/account/tokens/' + t.data.id, { method: 'DELETE' }).catch(() => {})
+      return failed(r?.status === 409 ? 'That link has been answered already: start a new one on the computer (/manyclaws connect).' : 'It could not be handed over: ' + ((await r?.json().catch(() => null))?.error ?? 'the server could not be reached'))
+    }
+    await loadAccount().catch(() => {})
+    fill(
+      body,
+      h('p', { 'data-part': 'connect-done', class: 'guide-status connected' }, '✓ ', h('b', null, name), ' is connecting. Its session is in your list in a moment, and Claude Code there says which account it joined.'),
+      h('p', null, 'It signs in with an API token of its own, named for it under Account, API tokens: take that back to disconnect it.'),
+      h('p', null, h('a', { href: '#' }, 'Back to your sessions')),
+    )
+  })
+  fill(body, form)
+  box.focus()
+}
 
 function openSettings() {
   leaveChat()

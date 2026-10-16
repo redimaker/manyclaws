@@ -150,12 +150,24 @@ async function until(clock: any, there: () => boolean) {
 
 // ---- A session is told of sealed, or not at all
 
-test('without a token the mod does nothing', async ($, on) => {
+test('without a token the mod sends nothing of the session: it offers the link that connects this computer, with a key of its own after the #, and asks the server for what the page sealed to it by a name drawn from that key, for two minutes', async ($, on) => {
   const { clock, sent, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: WORDS } })
   await start($)
   await clock.advance(30_000)
-  expect(sent.length).toBe(0)
-  expect(said.length).toBe(0)
+  const offered = said.map((l) => JSON.parse(l).text ?? JSON.parse(l)).find((l) => String(l).includes('/app#/connect/'))
+  const [, key] = /https:\/\/mc\.test\/app#\/connect\/([A-Za-z0-9_-]{43})\/this%20computer/.exec(String(offered)) ?? []
+  expect(key).toBeTruthy()
+  const name = toB64(sha256(fromB64(key))).slice(0, 22)
+  // (what it asks for: that name, and nothing of the session; the key itself is said to nobody)
+  expect(sent.length).toBeGreaterThan(5)
+  expect(sent.every((s) => s.url === 'https://mc.test/api/connect/' + name && s.body === null)).toBe(true)
+  expect(sent.some((s) => s.url.includes(key))).toBe(false)
+  // (and once the two minutes are over, it says so and asks no more)
+  await clock.advance(120_000)
+  const asked = sent.length
+  await clock.advance(30_000)
+  expect(sent.length).toBe(asked)
+  expect(said.some((l) => l.includes('the link to connect this computer has run out'))).toBe(true)
 })
 
 test('with a token and no passphrase the mod sends nothing and asks for nothing, whatever happens in the session: it says once that it needs the passphrase, and where to give it', async ($, on) => {
@@ -1051,7 +1063,8 @@ test('a session puts its own two tools before Claude and no other, whatever a se
   await clock.advance(2000)
   expect(tools.map((t) => t.split(':')[0])).toEqual(['notify_user', 'view_attachment'])
   expect(tools.join(' ')).not.toMatch(/what the server says/)
-  expect(commands).toEqual([])
+  // (its one command of its own, written into it, and none of the server's)
+  expect(commands).toEqual(['manyclaws'])
 })
 
 // ---- The machine's agent beside the plugin: given what the plugin was given, once the
