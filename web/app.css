@@ -473,6 +473,8 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .ns-listed span { display: grid; gap: 1px; }
 .ns-listed b { font-weight: 500; font-size: 15px; color: var(--n-text); }
 .ns-listed i { font-style: normal; font-size: 13px; line-height: 1.4; color: var(--n-muted); }
+.ns-opens { margin: 14px 0 0; font-size: 13px; line-height: 1.4; color: var(--n-muted); }
+.ns-opens:empty { display: none; }
 .ns-listed:has(input:disabled) { cursor: default; }
 .ns-listed:has(input:disabled) b { color: var(--n-muted); }
 /* Three ways, one under another: each is all button */

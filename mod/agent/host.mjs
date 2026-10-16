@@ -1,8 +1,13 @@
-// Sessions the agent runs itself. Started or resumed on request, they run headless
-// (Claude Code's stream-json mode, the way an editor hosts it) and stay open for more
-// prompts until they've sat idle for a while. With the ManyClaws mod installed they
-// report to the server like any session, and their permission prompts go to the page.
-import { spawn, execFileSync } from 'node:child_process'
+// Sessions the agent starts, on request. Each opens in a terminal of its own: a Terminal
+// window on a Mac (or the app spawn.terminal names), a tmux session elsewhere, a console
+// window on Windows. There it is an ordinary interactive Claude Code session, the
+// terminal's and not the agent's: it runs until it is closed there, whatever becomes of
+// the agent, which can be stopped, started again or updated under it. With the ManyClaws
+// plugin installed it reports to the server like any session, and what the page says to
+// it reaches it through the plugin, as it reaches one a person started in a terminal.
+// A search (`background`) is the one kind the agent still runs itself, headless (Claude
+// Code's stream-json mode, the way an editor hosts it): it does its one turn and ends.
+import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -36,12 +41,15 @@ export class Host {
   // (`usedFolder`: the rule a folder a person used is judged by, mayBeUsedFolder; given in its place only by a test, whose
   // own folders are under one whose name starts with a dot)
   // (`startedFile`: where what it started is remembered; with none, as the tests' own hosts have, it is not written down)
-  constructor(config, { store, onChange = () => {}, log = () => {}, usedFolder = mayBeUsedFolder, startedFile = null }) {
+  // (`launchDir`: where what opens a session in a terminal is written for the moment, which is in the agent's own folder)
+  constructor(config, { store, onChange = () => {}, log = () => {}, usedFolder = mayBeUsedFolder, startedFile = null, launchDir = null }) {
     this.config = config
     // args and env are added to every session the agent starts: a default model, say.
-    // max: how many it runs at once. One left idle keeps its place until it is closed
-    // (idleMinutes), so the number is of those started in that long, working or not: at
-    // 4 the fifth asked for within a quarter of an hour was refused. 64 is the owner's number.
+    // max: how many of the sessions it started may be open at once, working or not: one
+    // stays open until it is closed in its terminal. 64 is the owner's number.
+    // terminal: what a session is opened in. On a Mac the name of an app that runs a
+    // .command file it is given (Terminal, the default; iTerm), or tmux; tmux elsewhere
+    // (tmuxPrefix: what its tmux sessions' names start with). Windows has a console window.
     // modes: the permission modes a session may be started in or switched to. With no list
     // of its own a machine allows every one but bypassPermissions: a session with its
     // permissions bypassed does whatever it is prompted to, with nobody asked, so one is
@@ -51,11 +59,11 @@ export class Host {
     // auto: the folders a person has used Claude Code in (autoFolders, below) are allowed too, and autoOff names the
     // ones of those that are not; folders: the ones the owner listed. A session may be started anywhere under either,
     // and a new folder made only under one the owner listed.
-    this.spawnConfig = { enabled: false, folders: [], auto: false, autoOff: [], modes: DEFAULT_MODES, idleMinutes: 30, max: 64, args: [], env: {}, ...(config.spawn ?? {}) }
+    this.spawnConfig = { enabled: false, folders: [], auto: false, autoOff: [], modes: DEFAULT_MODES, max: 64, args: [], env: {}, terminal: process.platform === 'darwin' ? 'Terminal' : 'tmux', tmuxPrefix: 'manyclaws-', ...(config.spawn ?? {}) }
     this.store = store
     this.onChange = onChange
     this.log = log
-    this.hosted = new Map() // sid -> { sid, proc, cwd, state, startedAt, lastActive, timer, tail }
+    this.hosted = new Map() // the searches it runs itself: sid -> { sid, proc, cwd, state, startedAt, lastActive, tail }
     this.env = null
     // What is checked before any session is started here (the service's: that the plugin it loads is a release, or allowed)
     this.guard = null
@@ -64,6 +72,8 @@ export class Host {
     this.usedFolder = usedFolder
     // The sessions this agent has started, kept across restarts: what they ran in is not a folder a person chose
     this.startedFile = startedFile
+    // Where what starts a session in its terminal is written, for the moment until it runs
+    this.launchDir = launchDir ?? path.join(os.homedir(), '.manyclaws', 'launch')
     try {
       this.started = new Set(startedFile ? JSON.parse(fs.readFileSync(startedFile, 'utf8')) : [])
     } catch {
@@ -71,13 +81,14 @@ export class Host {
     }
   }
 
-  // What the server and the page are told about them
+  // What the server and the page are told about the searches it runs
   list() {
     return [...this.hosted.values()].map(({ sid, cwd, state, startedAt, lastActive, proc, mode, model, effort }) => ({ sid, cwd, state, startedAt, lastActive, pid: proc.pid, mode, model, effort }))
   }
 
   // Every session open in a Claude Code process on this machine, the agent's own or
   // not, from the records Claude Code keeps: sid -> { pid, status, kind, entrypoint, cwd, name }
+  // (`mine`: a search it runs itself; `started`: one it started, in a terminal or as a search)
   open() {
     const out = {}
     for (const root of this.config.roots) {
@@ -90,7 +101,7 @@ export class Host {
           const r = JSON.parse(fs.readFileSync(path.join(root, 'sessions', name), 'utf8'))
           if (!r.sessionId || !alive(r.pid)) continue
           const mine = this.hosted.get(r.sessionId)?.proc.pid === r.pid // one the agent runs itself
-          out[r.sessionId] = { pid: r.pid, status: r.status ?? '', kind: r.kind ?? '', entrypoint: r.entrypoint ?? '', cwd: r.cwd ?? '', name: r.name ?? '', updatedAt: r.updatedAt ?? 0, mine }
+          out[r.sessionId] = { pid: r.pid, status: r.status ?? '', kind: r.kind ?? '', entrypoint: r.entrypoint ?? '', cwd: r.cwd ?? '', name: r.name ?? '', updatedAt: r.updatedAt ?? 0, mine, started: this.started.has(r.sessionId) }
         } catch {}
       }
     }
@@ -102,15 +113,19 @@ export class Host {
   // `create`: the folder is made if it isn't there (a new project), inside a folder the owner listed.
   // `like`, in place of `cwd`: the folder a session ran in on another machine, for the one
   // here that is most like it. `idle`: started with nothing to do yet, waiting for its first prompt.
-  // `listed`: whether Claude Code's own lists of sessions to resume are to show it (see setListing)
-  start({ cwd, like, prompt, mode, model, effort, name, create = false, idle = false, listed }) {
+  // `background`: a search, run by the agent itself and ended with its turn, not opened in a terminal.
+  start({ cwd, like, prompt, mode, model, effort, name, create = false, idle = false, background = false }) {
     this.allow(mode)
     this.allowEffort(effort)
-    if (!idle && !String(prompt ?? '').trim()) throw new HostError('a prompt is required')
+    if ((background || !idle) && !String(prompt ?? '').trim()) throw new HostError('a prompt is required')
     const folder = String(cwd ?? '').trim() ? this.folder(cwd, { create: create === true }) : this.folderLike(like)
     const sid = crypto.randomUUID()
-    this.launch({ sid, cwd: folder, args: ['--session-id', sid], mode, model, effort, name, prompt, listed })
-    return { sid, cwd: folder }
+    const how = { sid, cwd: folder, args: ['--session-id', sid], mode, model, effort, name, prompt }
+    if (background) {
+      this.launch(how)
+      return { sid, cwd: folder }
+    }
+    return { sid, cwd: folder, ...this.window(how) }
   }
 
   // The folder here that a session from elsewhere would run in: the same path if this
@@ -155,10 +170,10 @@ export class Host {
   }
 
   // A transcript from another machine, written here as a session of this one, in the
-  // folder most like the one it ran in, and opened: idle, with all it knew, waiting for
-  // its next prompt. Its lines are given the new session's id and folder, as Claude
-  // Code would have written them had it run here.
-  importSession({ packed, like, mode, model, effort, listed }) {
+  // folder most like the one it ran in, and opened in a terminal: idle, with all it knew,
+  // waiting for its next prompt. Its lines are given the new session's id and folder, as
+  // Claude Code would have written them had it run here.
+  importSession({ packed, like, mode, model, effort }) {
     this.allow(mode)
     this.allowEffort(effort)
     let lines
@@ -186,77 +201,39 @@ export class Host {
       rows++
     }
     if (!rows) throw new HostError('the transcript that arrived is empty')
-    // (written here, it is marked here: shown or not, whatever the one it was copied from was)
-    if (typeof listed === 'boolean') out[0] = relabelled(out, listed)
+    // (opened in a terminal, it is a session as one started there is, and Claude Code's own lists show it, whatever the
+    // one it was copied from was)
+    out[0] = relabelled(out, true)
     const root = this.config.roots[0] ?? path.join(os.homedir(), '.claude')
     const dir = path.join(root, 'projects', projectFolder(folder))
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, sid + '.jsonl'), out.join('\n') + '\n', { mode: 0o600 })
-    this.launch({ sid, cwd: folder, root, args: ['--resume', sid], mode, model, effort, listed })
-    return { sid, cwd: folder, rows }
+    return { sid, cwd: folder, rows, ...this.window({ sid, cwd: folder, root, args: ['--resume', sid], mode, model, effort }) }
   }
 
-  // A reply to a session nobody has open: Claude Code is started on it again. One that
-  // is open elsewhere would get a second writer, so that takes `fork`, which continues
-  // in a copy under a new id.
+  // A reply to a session nobody has open: Claude Code is started on it again, in a
+  // terminal. One that is open elsewhere would get a second writer, so that takes `fork`,
+  // which continues in a copy under a new id.
   // (`idle`, with `fork`: the copy is opened with nothing to do yet, waiting for its first prompt)
-  async resume({ sid, prompt, mode, model, effort, fork = false, idle = false, listed }) {
-    this.allow(mode, { counted: false })
+  async resume({ sid, prompt, mode, model, effort, fork = false, idle = false }) {
+    this.allow(mode)
     this.allowEffort(effort)
     if (!(fork && idle) && !String(prompt ?? '').trim()) throw new HostError('a prompt is required')
-    let mine = this.hosted.get(sid)
-    // One that's on its way out is waited for: a reply written to it now would be lost
-    if (mine?.closing) {
-      await new Promise((done) => mine.proc.once('exit', done))
-      mine = null
-    }
-    // (a reply to one it is running starts nothing, and one that has just gone left its place: neither is refused for room)
-    if (mine && !fork) return this.send({ sid, text: prompt })
-    this.room()
+    const mine = this.hosted.get(sid)
+    // A search on its way out is waited for: it is about to be a session nobody has open
+    if (mine?.closing) await new Promise((done) => mine.proc.once('exit', done))
+    else if (mine && !fork) throw new HostError('this session is a search the agent here is running: it ends with its turn, and can be replied to then')
     const session = this.store.session(sid)
     if (!session) throw new HostError('no such session on this machine')
     const elsewhere = this.open()[sid]
     if (elsewhere && !elsewhere.mine && !fork) throw new HostError(`this session is open in another Claude Code (pid ${elsewhere.pid}${elsewhere.entrypoint ? ', ' + elsewhere.entrypoint : ''}); reply there, or continue in a copy`)
     const folder = this.folder(session.cwd)
     const id = fork ? crypto.randomUUID() : sid
-    // (a copy is shown or not as asked; a session resumed in place stays as it was)
-    this.launch({ sid: id, cwd: folder, root: session.root, args: fork ? ['--resume', sid, '--fork-session', '--session-id', id] : ['--resume', sid], mode, model, effort, prompt, listed: fork ? listed : undefined })
-    return { sid: id, forked: fork, cwd: folder }
+    const opened = this.window({ sid: id, cwd: folder, root: session.root, args: fork ? ['--resume', sid, '--fork-session', '--session-id', id] : ['--resume', sid], mode, model, effort, prompt })
+    return { sid: id, forked: fork, cwd: folder, ...opened }
   }
 
-  send({ sid, text }) {
-    const h = this.hosted.get(sid)
-    if (!h || h.closing) throw new HostError('the agent is not running this session')
-    if (!String(text ?? '').trim()) throw new HostError('a prompt is required')
-    h.proc.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: String(text) } }) + '\n')
-    this.active(h, 'working')
-    return { sid }
-  }
-
-  // A running session's permission mode is changed the way an editor changes it: a
-  // control request down the session's input, answered on its output
-  setMode({ sid, mode }) {
-    const h = this.hosted.get(sid)
-    if (!h || h.closing) throw new HostError('the agent is not running this session')
-    this.allowMode(mode)
-    if (!mode) throw new HostError('a permission mode is required')
-    const id = crypto.randomUUID()
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        h.asked.delete(id)
-        reject(new HostError('Claude Code did not answer'))
-      }, 15_000)
-      h.asked.set(id, (response) => {
-        clearTimeout(timer)
-        if (response?.subtype !== 'success') return reject(new HostError(String(response?.error ?? 'Claude Code refused the change')))
-        h.mode = mode
-        this.onChange()
-        resolve({ sid, mode })
-      })
-      h.proc.stdin.write(JSON.stringify({ type: 'control_request', request_id: id, request: { subtype: 'set_permission_mode', mode } }) + '\n')
-    })
-  }
-
+  // A search is ended: the agent's own, and no other
   stop({ sid }) {
     const h = this.hosted.get(sid)
     if (!h) throw new HostError('the agent is not running this session')
@@ -277,10 +254,9 @@ export class Host {
 
   // ---- The rules
 
-  // (`counted`: whether room for one more is looked for here, or by the caller once it knows a session is to be started)
-  allow(mode, { counted = true } = {}) {
+  allow(mode) {
     if (!this.canStart()) throw new HostError('starting sessions is turned off on this machine (spawn.enabled in agent.json)')
-    if (counted) this.room()
+    this.room()
     this.allowMode(mode)
   }
 
@@ -288,7 +264,12 @@ export class Host {
   // beside whichever device is chosen there, which need not be the one that refused.
   room() {
     const c = this.spawnConfig
-    if (this.hosted.size >= c.max) throw new HostError(`${this.config.label || os.hostname()} is already running ${c.max} sessions for ManyClaws, the most it runs at once (spawn.max in its agent.json)`)
+    if (this.running() >= c.max) throw new HostError(`${this.config.label || os.hostname()} already has ${c.max} sessions open that were started for ManyClaws, the most it has at once (spawn.max in its agent.json): close one in its terminal first`)
+  }
+
+  // How many of the sessions it started are open now: in their terminals, or searches it runs
+  running() {
+    return new Set([...Object.keys(this.open()).filter((sid) => this.started.has(sid)), ...this.hosted.keys()]).size
   }
 
   allowEffort(effort) {
@@ -427,21 +408,17 @@ export class Host {
 
   // ---- The process
 
-  launch({ sid, cwd, root, args, mode, model, effort, name, prompt, listed }) {
+  // A search, run here headless: its prompt is its first and only one, and it ends with its turn
+  launch({ sid, cwd, root, args, mode, model, effort, name, prompt }) {
     this.guard?.()
-    const claude = this.config.claude || findClaude(this.shellEnv())
-    if (!claude) throw new HostError('claude was not found on this machine; set "claude" in agent.json')
-    const env = sessionEnv(this.shellEnv())
-    Object.assign(env, this.spawnConfig.env)
-    if (root && path.resolve(root) !== path.join(os.homedir(), '.claude')) env.CLAUDE_CONFIG_DIR = root
+    const claude = this.claude()
+    const env = this.sessionEnv(root)
     const argv = sessionArgs(this.spawnConfig, { args, mode, model, effort, name })
     const proc = spawn(claude, argv, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
-    // (one started with nothing to do is idle from the first, and is closed in time like any other left idle)
-    const waiting = !String(prompt ?? '').trim()
-    const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', startedAt: Date.now(), lastActive: Date.now(), timer: null, tail: '', asked: new Map(), listed: typeof listed === 'boolean' ? listed : undefined }
+    const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', startedAt: Date.now(), lastActive: Date.now(), tail: '' }
     this.hosted.set(sid, h)
     this.remember(sid)
-    this.log(`started ${sid} in ${cwd} (pid ${proc.pid})`)
+    this.log(`started ${sid} in ${cwd}, in the background (pid ${proc.pid})`)
     let buffered = ''
     proc.stdout.on('data', (chunk) => {
       buffered += chunk
@@ -455,110 +432,144 @@ export class Host {
         } catch {
           continue
         }
-        // An answer to something the agent asked of it
-        if (msg.type === 'control_response') {
-          const answer = h.asked.get(msg.response?.request_id)
-          h.asked.delete(msg.response?.request_id)
-          answer?.(msg.response)
-          continue
-        }
         // The mode it's in, as it says at the start and whenever that changes
         if (msg.type === 'system' && typeof msg.permissionMode === 'string' && msg.permissionMode !== h.mode) {
           h.mode = msg.permissionMode
           this.onChange()
         }
-        // A turn ends with a result; until the next prompt the session is idle
-        if (msg.type === 'result') this.active(h, 'idle')
-        else if (msg.type === 'assistant' || msg.type === 'user') this.active(h, 'working')
-        // (by its first reply its transcript is written, and can be marked)
-        if (msg.type === 'assistant' || msg.type === 'result') this.mark(h)
+        // A turn ends with a result: its one turn, after which it has nothing more to read, and exits
+        if (msg.type === 'result') {
+          this.active(h, 'idle')
+          this.close(h)
+        } else if (msg.type === 'assistant' || msg.type === 'user') this.active(h, 'working')
       }
     })
     proc.stderr.on('data', (chunk) => (h.tail = (h.tail + chunk).slice(-2000)))
     proc.on('error', (err) => (h.tail += '\n' + err.message))
     proc.on('exit', (code) => {
-      clearTimeout(h.timer)
       if (this.hosted.get(h.sid) === h) this.hosted.delete(h.sid)
-      // (what couldn't be marked in place while Claude Code was writing it is marked now)
-      this.mark(h, { whole: true })
       this.log(`${h.sid} exited (${code})${code ? ': ' + h.tail.trim().split('\n').at(-1) : ''}`)
       this.onChange()
     })
     proc.stdin.on('error', () => {})
-    if (waiting) this.active(h, 'idle')
-    else proc.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: String(prompt) } }) + '\n')
+    proc.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: String(prompt) } }) + '\n')
     this.onChange()
     return h
-  }
-
-  // A session started to be shown, or not, in Claude Code's own lists: its transcript is
-  // marked once it is written. In place where that fits, which is safe while Claude Code
-  // adds to the file's end; otherwise when the process has gone.
-  mark(h, { whole = false } = {}) {
-    if (h.listed === undefined || (h.marked && !whole)) return
-    try {
-      const file = this.transcriptOf(h)
-      if (!file) return
-      // (written again only when nothing else has it open: another Claude Code may have taken it up)
-      const did = setListing(file, h.listed, { whole: whole && !this.open()[h.sid] })
-      if (did === 'ok') h.marked = true
-      if (did === 'ok' || whole) this.log(`${h.sid} ${did === 'ok' ? 'is marked to be ' + (h.listed ? 'shown in' : 'left out of') + " Claude Code's own lists" : 'could not be marked (' + did + ')'}`)
-      // (marked to be shown while it runs: a list that is open now is given cause to read again)
-      if (did === 'ok' && h.listed && !whole) this.haveListsRead(h)
-    } catch (err) {
-      this.log(`${h.sid} could not be marked: ${err.message}`)
-    }
-  }
-
-  // A list of sessions already open in VS Code reads again (see saysTerminal): the
-  // session's record says for a moment that a terminal has it, and then what it said
-  haveListsRead(h) {
-    try {
-      const record = this.recordOf(h)
-      if (!record || !saysTerminal(record, true)) return
-      this.log(`${h.sid} says for a moment that a terminal has it, so that a list of sessions open in VS Code reads again`)
-      setTimeout(() => {
-        try {
-          saysTerminal(record, false)
-        } catch {} // (the session has gone, and its record with it)
-      }, LISTS_READ_MS).unref()
-    } catch (err) {
-      this.log(`${h.sid} is marked, and a list that is open was not given cause to read again: ${err.message}`)
-    }
-  }
-
-  // Claude Code's own record of a session the agent runs, among those of its open sessions
-  recordOf(h) {
-    for (const root of [h.root, ...this.config.roots, path.join(os.homedir(), '.claude')]) {
-      if (!root) continue
-      const file = path.join(root, 'sessions', h.proc.pid + '.json')
-      try {
-        if (JSON.parse(fs.readFileSync(file, 'utf8')).sessionId === h.sid) return file
-      } catch {}
-    }
-    return null
-  }
-
-  // Where Claude Code writes a session's transcript: as the index has it, else where one in that folder goes
-  transcriptOf(h) {
-    const known = this.store?.session?.(h.sid)?.path
-    if (known && fs.existsSync(known)) return known
-    for (const root of [h.root, ...this.config.roots, path.join(os.homedir(), '.claude')]) {
-      if (!root) continue
-      const file = path.join(root, 'projects', projectFolder(h.cwd), h.sid + '.jsonl')
-      if (fs.existsSync(file)) return file
-    }
-    return null
   }
 
   active(h, state) {
     const changed = h.state !== state
     h.state = state
     h.lastActive = Date.now()
-    clearTimeout(h.timer)
-    // Left idle long enough, it's closed; a later reply resumes it
-    if (state === 'idle') h.timer = setTimeout(() => this.close(h), this.spawnConfig.idleMinutes * 60_000)
     if (changed) this.onChange()
+  }
+
+  // A session opened in a terminal of its own, and left to it. What starts it there is
+  // written to a file the terminal runs, which removes itself as it does: so nothing of
+  // the prompt, or of the environment, is on a command line the terminal is started with.
+  // What it is opened in is said back: { terminal } ('tmux', with the session's name there).
+  window({ sid, cwd, root, args, mode, model, effort, name, prompt }) {
+    this.guard?.()
+    const claude = this.claude()
+    const env = this.sessionEnv(root)
+    const argv = windowArgs(this.spawnConfig, { args, mode, model, effort, name, prompt })
+    // (a folder Claude Code has not been told it may trust asks that first, and nobody may be at the computer to say: told
+    // so in the config folder the session is to be in, its own where it has one, else the usual one)
+    trust(cwd, env.CLAUDE_CONFIG_DIR, this.log)
+    fs.mkdirSync(this.launchDir, { recursive: true, mode: 0o700 })
+    this.tidyLaunches()
+    const terminal = String(this.spawnConfig.terminal || 'tmux')
+    let opened
+    if (process.platform === 'win32') opened = this.console({ sid, cwd, env, claude, argv })
+    else if (terminal === 'tmux') opened = this.tmux({ sid, cwd, env, claude, argv })
+    else opened = this.app(terminal, { sid, cwd, env, claude, argv })
+    this.remember(sid)
+    this.log(`opened ${sid} in ${cwd}, in ${opened.tmux ? 'tmux (' + opened.tmux + ')' : opened.terminal}`)
+    this.onChange()
+    return opened
+  }
+
+  // On a Mac: a window of the app named (Terminal, iTerm), which runs a .command file it is opened with
+  app(terminal, { sid, cwd, env, claude, argv }) {
+    const file = this.launchFile(sid + '.command', starter({ cwd, env, claude, argv }))
+    const r = spawnSync('open', ['-a', terminal, file], { encoding: 'utf8', timeout: 20_000 })
+    if (r.status !== 0) {
+      fs.rmSync(file, { force: true })
+      throw new HostError(`${terminal} did not open a window for the session: ${String(r.stderr || r.error?.message || '').trim() || 'open said nothing of why'} (spawn.terminal in agent.json names what a session is opened in)`)
+    }
+    return { terminal }
+  }
+
+  // A tmux session, left detached for anyone to attach to (tmux attach -t <name>). Where the agent runs under systemd,
+  // the tmux it starts is put in a scope of its own: in the agent's own, it would be ended when the agent is.
+  tmux({ sid, cwd, env, claude, argv }) {
+    const tmux = this.config.tmux || findTool('tmux', this.shellEnv())
+    if (!tmux) throw new HostError('tmux was not found on this machine, and a session started for ManyClaws opens in tmux here: install it, or set "tmux" in agent.json')
+    // (named for the session; where that name is taken, as by a pane tmux keeps after what ran in it has ended, the next free one)
+    const taken = (n) => spawnSync(tmux, ['has-session', '-t', '=' + n], { stdio: 'ignore', env: sessionEnv(this.shellEnv()) }).status === 0
+    const base = this.spawnConfig.tmuxPrefix + sid.slice(0, 8)
+    let name = base
+    for (let n = 2; taken(name) && n < 100; n++) name = base + '-' + n
+    const file = this.launchFile(sid + '.sh', starter({ cwd, env, claude, argv }))
+    const command = [tmux, 'new-session', '-d', '-s', name, '-x', '200', '-y', '50', '-c', cwd, 'exec /bin/sh ' + shellQuote(file)]
+    const scoped = process.platform === 'linux' && process.env.INVOCATION_ID && findTool('systemd-run', this.shellEnv())
+    // (tmux itself is given what a terminal has, and not the session's own settings: a tmux server it starts keeps what it
+    // was started with for every pane it has. What the session runs with is in the file it runs.)
+    const run = (cmd) => spawnSync(cmd[0], cmd.slice(1), { encoding: 'utf8', env: sessionEnv(this.shellEnv()), cwd, timeout: 20_000 })
+    let r = scoped ? run([scoped, '--user', '--scope', '--quiet', '--collect', ...command]) : null
+    // (where systemd would not have it, as where the account has no session bus, it is started without)
+    if (!r || (r.status !== 0 && !taken(name))) r = run(command)
+    if (r.status !== 0) {
+      fs.rmSync(file, { force: true })
+      throw new HostError(`tmux did not start the session: ${String(r.stderr || r.error?.message || '').trim() || 'it said nothing of why'}`)
+    }
+    return { terminal: 'tmux', tmux: name }
+  }
+
+  // On Windows: a console window of its own, in which the agent's launch.mjs runs Claude Code with what it was given in
+  // a file. Nothing of it but the names of files is on the line cmd reads: a prompt there would be read as commands.
+  console({ sid, cwd, env, claude, argv }) {
+    const file = this.launchFile(sid + '.json', JSON.stringify({ cwd, env, claude, argv }))
+    const parts = [process.execPath, path.join(import.meta.dirname, 'launch.mjs'), file]
+    if (parts.some((p) => /["%^&|<>]/.test(p))) throw new HostError('a console window could not be opened from where the agent is: its path has a character cmd reads as a command')
+    const shell = process.env.ComSpec || 'cmd.exe'
+    const proc = spawn(shell, ['/d', '/s', '/c', '"start "ManyClaws" ' + parts.map((p) => '"' + p + '"').join(' ') + '"'], { windowsVerbatimArguments: true, detached: true, stdio: 'ignore', windowsHide: true })
+    proc.on('error', (err) => this.log(`${sid} could not be opened: ${err.message}`))
+    proc.unref()
+    return { terminal: 'console' }
+  }
+
+  // A file in the launch folder, for the owner alone
+  launchFile(name, text) {
+    const file = path.join(this.launchDir, name)
+    fs.writeFileSync(file, text, { mode: 0o700 })
+    fs.chmodSync(file, 0o700)
+    return file
+  }
+
+  // What was written for a terminal that never ran it: gone after a minute
+  tidyLaunches() {
+    try {
+      for (const name of fs.readdirSync(this.launchDir)) {
+        const file = path.join(this.launchDir, name)
+        if (Date.now() - fs.statSync(file).mtimeMs > 60_000) fs.rmSync(file, { force: true })
+      }
+    } catch {}
+  }
+
+  claude() {
+    const claude = this.config.claude || findClaude(this.shellEnv())
+    if (!claude) throw new HostError('claude was not found on this machine; set "claude" in agent.json')
+    return claude
+  }
+
+  // What a session it starts runs with: what a terminal would have, its own settings (spawn.env), and the folder of
+  // Claude Code's own that the session is in, where that is not the usual one
+  sessionEnv(root) {
+    const env = sessionEnv(this.shellEnv())
+    Object.assign(env, this.spawnConfig.env)
+    if (root && path.resolve(root) !== path.join(os.homedir(), '.claude')) env.CLAUDE_CONFIG_DIR = root
+    return env
   }
 
   // The environment a terminal would give: launchd and systemd start the agent with
@@ -581,57 +592,10 @@ export class Host {
   }
 }
 
-// ---- Whether Claude Code's own lists of sessions to resume show a session (VS Code's
-// session list, for one). They leave out the ones a program started: those whose
-// transcript says so where it first says how the session was started, which is the
-// first "entrypoint" in its first 64 KB (sdk-cli for anything started headless, as the
-// agent starts them; Claude Code sets that itself, whatever it is told). That one word
-// is all they go by, so it is all that is changed: the session runs as it did, and
-// says of itself to everyone else what it did.
-
-const LISTING_HEAD = 65536
-const UNLISTED = new Set(['sdk-cli', 'sdk-ts', 'sdk-py'])
-const ENTRY = Buffer.from('"entrypoint":"')
-
-// Marks a transcript to be shown (`listed`) or left out. 'ok' when it is as asked;
-// 'none' when it says nothing yet; 'later' when it can't be done in place (the word
-// would be longer than the one there, or the first 64 KB have none), which `whole`
-// does by writing the file again: only for a file nothing else is writing.
-export function setListing(file, listed, { whole = false } = {}) {
-  const want = listed ? 'cli' : 'sdk-cli'
-  const fd = fs.openSync(file, 'r+')
-  try {
-    const head = Buffer.alloc(LISTING_HEAD)
-    const n = fs.readSync(fd, head, 0, LISTING_HEAD, 0)
-    if (!n) return 'none'
-    const at = head.subarray(0, n).indexOf(ENTRY)
-    const from = at + ENTRY.length
-    const to = at < 0 ? -1 : head.subarray(0, n).indexOf(0x22, from)
-    if (at >= 0 && to >= 0) {
-      const now = head.toString('utf8', from, to)
-      if (UNLISTED.has(now) !== listed) return 'ok'
-      // In place: the word and its closing quote, then spaces, which JSON allows there
-      if (want.length <= now.length) {
-        const patch = Buffer.from(want + '"' + ' '.repeat(now.length - want.length))
-        fs.writeSync(fd, patch, 0, patch.length, from)
-        return 'ok'
-      }
-    } else if (n < LISTING_HEAD && !head.subarray(0, n).includes(0x0a)) return 'none'
-  } finally {
-    fs.closeSync(fd)
-  }
-  if (!whole) return 'later'
-  // Written again, with the word at the very start of its first line
-  const text = fs.readFileSync(file, 'utf8')
-  const nl = text.indexOf('\n')
-  const first = nl < 0 ? text : text.slice(0, nl)
-  const next = file + '.marking'
-  fs.writeFileSync(next, relabelled([first], listed) + (nl < 0 ? '' : text.slice(nl)), { mode: 0o600 })
-  fs.renameSync(next, file)
-  return 'ok'
-}
-
-// A transcript's first line, saying at its start whether the session is to be shown
+// A transcript's first line, saying at its start whether Claude Code's own lists of
+// sessions to resume (VS Code's, for one) are to show the session. They leave out the
+// ones a program started: those whose transcript says so where it first says how the
+// session was started, the first "entrypoint" (sdk-cli for anything started headless).
 export function relabelled(lines, listed) {
   let row
   try {
@@ -644,38 +608,6 @@ export function relabelled(lines, listed) {
   return JSON.stringify({ entrypoint: listed ? 'cli' : 'sdk-cli', ...rest })
 }
 
-// ---- Having a list that is already open read again. VS Code's list of a project's
-// sessions reads when it is opened, and after that of itself only for a session of its
-// own or for one in that project, not in the list, that is open in a terminal: which is
-// what it takes a session to be whose record among Claude Code's open sessions has cli
-// for its "entrypoint". It does not read for one a program runs (sdk-cli), as the agent
-// runs these, since it would leave that out. So a session just marked to be shown was
-// in no list that was open until something else had the list read. The session's own
-// record is made to say cli for a moment, in place and to the same length, as the
-// transcript's word is; the list reads, and has the session from then on; and the
-// record says what it said. VS Code reads within a quarter of a second of the change.
-
-const AS_STARTED = Buffer.from('"entrypoint":"sdk-cli"')
-const AS_A_TERMINAL = Buffer.from('"entrypoint":"cli"    ')
-const LISTS_READ_MS = 3000
-
-// Has the record of an open session say that a terminal has it (`on`), or what Claude
-// Code wrote of it. False, and nothing written, where it does not say the other.
-export function saysTerminal(file, on) {
-  const [from, to] = on ? [AS_STARTED, AS_A_TERMINAL] : [AS_A_TERMINAL, AS_STARTED]
-  const fd = fs.openSync(file, 'r+')
-  try {
-    const head = Buffer.alloc(8192)
-    const n = fs.readSync(fd, head, 0, head.length, 0)
-    const at = head.subarray(0, n).indexOf(from)
-    if (at < 0) return false
-    fs.writeSync(fd, to, 0, to.length, at)
-    return true
-  } finally {
-    fs.closeSync(fd)
-  }
-}
-
 // The largest transcript carried to another machine, packed (one with many screenshots in it packs to tens of megabytes)
 export const CARRY_MAX = 96 * 1024 * 1024
 
@@ -683,12 +615,22 @@ export const CARRY_MAX = 96 * 1024 * 1024
 // transcripts in: the folder's path, with everything that isn't a letter or a digit made a dash
 export const projectFolder = (cwd) => String(cwd).replace(/[^A-Za-z0-9]/g, '-')
 
-// What Claude Code is started with for a session the agent runs: headless, the way an
-// editor hosts it. Where the machine allows bypassing permissions, the session is told
-// it may be switched to that later; Claude Code refuses the switch otherwise.
-export function sessionArgs(spawnConfig, { args = [], mode, model, effort, name } = {}) {
+// What Claude Code is started with for a search the agent runs: headless, the way an
+// editor hosts it
+export function sessionArgs(spawnConfig, how = {}) {
+  return ['--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', ...options(spawnConfig, how)]
+}
+
+// And for a session opened in a terminal: interactive, with its first prompt, where it has one, as the one thing after
+// the options (after --, so that nothing in it is read as one)
+export function windowArgs(spawnConfig, { prompt, ...how } = {}) {
+  return [...options(spawnConfig, how), ...(String(prompt ?? '').trim() ? ['--', String(prompt)] : [])]
+}
+
+// Where the machine allows bypassing permissions, a session is told it may be switched
+// to that later; Claude Code refuses the switch otherwise.
+function options(spawnConfig, { args = [], mode, model, effort, name } = {}) {
   return [
-    '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
     ...args,
     ...(spawnConfig.args ?? []),
     ...(mode ? ['--permission-mode', mode] : []),
@@ -697,6 +639,65 @@ export function sessionArgs(spawnConfig, { args = [], mode, model, effort, name 
     ...(effort ? ['--effort', effort] : []),
     ...(name ? ['--name', name] : []),
   ]
+}
+
+// What a terminal runs to start a session, as a shell reads it (a .command file, or what
+// tmux runs): it removes itself, goes to the session's folder, and runs Claude Code with
+// the environment the agent made for it, beside what the terminal says of itself, and
+// nothing else of the terminal's. Every word the agent puts in it is quoted whole.
+export function starter({ cwd, env, claude, argv }) {
+  const pairs = Object.entries({ ...env, PWD: cwd })
+    .filter(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !OF_THE_TERMINAL.includes(k) && !SHELL_OWN.includes(k) && v !== undefined)
+    .map(([k, v]) => shellQuote(`${k}=${v}`))
+  return [
+    '#!/bin/sh',
+    '# A Claude Code session the ManyClaws agent opened here, as one of your devices asked. This file removes itself.',
+    'rm -f -- "$0"',
+    `cd -- ${shellQuote(cwd)} || exit 1`,
+    'set --',
+    'for v in ' + OF_THE_TERMINAL.join(' ') + '; do eval "if [ -n \\"\\${$v+x}\\" ]; then set -- \\"\\$@\\" \\"$v=\\${$v}\\"; fi"; done',
+    `exec env -i "$@" ${pairs.join(' ')} ${[claude, ...argv].map(shellQuote).join(' ')}`,
+    '',
+  ].join('\n')
+}
+// What the terminal says of itself, which the session is to have as the terminal has it
+const OF_THE_TERMINAL = ['TERM', 'COLORTERM', 'TERM_PROGRAM', 'TERM_PROGRAM_VERSION', 'TERM_SESSION_ID', 'TMUX', 'TMUX_PANE', 'LC_TERMINAL', 'LC_TERMINAL_VERSION', 'ITERM_SESSION_ID', 'ITERM_PROFILE', '__CFBundleIdentifier', 'COLUMNS', 'LINES', 'SSH_TTY', 'SSH_CONNECTION', 'SSH_CLIENT', 'DISPLAY', 'WAYLAND_DISPLAY']
+// And what a shell keeps of its own, which is the agent's in what it made
+const SHELL_OWN = ['OLDPWD', 'SHLVL', '_']
+
+export const shellQuote = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'"
+
+// A folder Claude Code asks about before anything else, where it has not been told it may trust it or a folder above it:
+// "Do you trust the files in this folder?". A session started headless never asked; one in a terminal would wait on
+// it, with nobody there to answer. A folder a session is started in is one the machine's owner listed, or used Claude
+// Code in, so it is said to be trusted, as answering there would have it: in Claude Code's own record of folders.
+export function trust(cwd, root, log = () => {}) {
+  const file = !root || path.resolve(root) === path.join(os.homedir(), '.claude') ? path.join(os.homedir(), '.claude.json') : path.join(root, '.claude.json')
+  let text
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch {
+    return false
+  }
+  let config
+  try {
+    config = JSON.parse(text)
+  } catch {
+    return false
+  }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return false
+  const projects = config.projects && typeof config.projects === 'object' ? config.projects : (config.projects = {})
+  for (let p = cwd; ; p = path.dirname(p)) {
+    if (projects[p]?.hasTrustDialogAccepted === true) return false
+    if (path.dirname(p) === p) break
+  }
+  projects[cwd] = { ...(projects[cwd] ?? {}), hasTrustDialogAccepted: true }
+  // (written whole and put in place in one step, as Claude Code writes it)
+  const next = `${file}.manyclaws.${process.pid}`
+  fs.writeFileSync(next, JSON.stringify(config, null, 2), { mode: fs.statSync(file).mode & 0o777 })
+  fs.renameSync(next, file)
+  log(`${cwd} is trusted by Claude Code now, as a folder sessions are started in from ManyClaws`)
+  return true
 }
 
 // ~ and ~/x (or ~\x) are the account's home
@@ -736,12 +737,15 @@ function alive(pid) {
 }
 
 // The first claude on the PATH that isn't one npm left in a node_modules/.bin
-export function findClaude(env = process.env) {
+export const findClaude = (env = process.env) => findTool('claude', env, { npm: false })
+
+// A program on the PATH, by name
+export function findTool(name, env = process.env, { npm = true } = {}) {
   // A copy of Windows' environment keeps the name as it was set: Path
   const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH')
   for (const dir of String((key && env[key]) ?? '').split(path.delimiter)) {
-    if (!dir || dir.includes('node_modules')) continue
-    const candidate = path.join(dir, process.platform === 'win32' ? 'claude.exe' : 'claude')
+    if (!dir || (!npm && dir.includes('node_modules'))) continue
+    const candidate = path.join(dir, process.platform === 'win32' ? name + '.exe' : name)
     try {
       fs.accessSync(candidate, fs.constants.X_OK)
       return candidate

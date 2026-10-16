@@ -74,9 +74,10 @@
 #                       is older than that, or one that is not running. Everything the machine
 #                       was set up with is kept, and nothing is asked. Where the
 #                       agent reports is what it was set up with, unless --server names another.
-#                       Starting the agent again ends the sessions it is running (the ones
-#                       started from the page), so while there are any nothing is done
-#   --end-sessions      with --update or --reinstall: do it all the same, and end those sessions
+#                       Starting the agent again ends the searches it is running (a Haiku search
+#                       from the page), so while there are any nothing is done. The sessions it
+#                       started are in terminals of their own, and go on as they are
+#   --end-sessions      with --update or --reinstall: do it all the same, and end those searches
 #   --wait-start SECS   with --update: once the new agent is started, wait this long for it to say so
 #                       (agent.started); where it does not, put the agent that was there back and
 #                       start that again. What the agent's own upgrade from the page runs
@@ -87,7 +88,7 @@
 #                       ManyClaws plugin to give it both again. The one-time upgrade of a machine
 #                       whose agent is from before releases were signed (before 5.1.0), which
 #                       cannot check what it installs. Like --update it does nothing while the
-#                       agent is running sessions, or from one of them
+#                       agent is running searches, or from one of its sessions
 #   --uninstall         stop the service and remove ~/.manyclaws
 #
 # Run again with new options to change them. The machine keeps its identity. Run again
@@ -151,14 +152,15 @@ agent_pid() {
   ps -axww -o pid=,command= 2>/dev/null | grep -F -- "$HOME_DIR/agent/agent.mjs run" | grep -v grep | awk '{ print $1 }' | head -1
 }
 running="$(agent_pid || true)"
-# A session the agent itself started (one started from the page) runs under the agent:
-# stopping the agent ends that session, and this run with it, before the agent is started
-# again. So from one of those nothing here is done, and it says so.
+# A search the agent runs itself (one started from the page) runs under the agent:
+# stopping the agent ends it, and this run with it, before the agent is started again.
+# So from one of those nothing here is done, and it says so. (A session the agent started
+# for the page is in a terminal of its own, not under the agent.)
 if [ -n "$running" ]; then
   p=$$
   while [ -n "$p" ] && [ "$p" -gt 1 ]; do
     if [ "$p" = "$running" ]; then
-      echo "This was run from a session the ManyClaws agent itself started (one started from your page). Stopping the agent ends that session, and this run with it, before the agent is started again: nothing was changed. Run it in a terminal on this machine, or from a Claude Code session started there in a terminal or VS Code." >&2
+      echo "This was run from a search the ManyClaws agent itself runs (one started from your page). Stopping the agent ends it, and this run with it, before the agent is started again: nothing was changed. Run it in a terminal on this machine, or from a Claude Code session there." >&2
       exit 3
     fi
     p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ' || true)"
@@ -179,11 +181,12 @@ fi
 
 if [ "$update" = 1 ]; then
   [ -f "$HOME_DIR/agent.json" ] || { echo "There is no ManyClaws agent on this machine to $([ "$reinstall" = 1 ] && echo 'remove and install again' || echo update): $HOME_DIR/agent.json is not there. Install it as the guide's step 3 has it." >&2; exit 2; }
-  # Starting it again ends the sessions it is running: each a Claude Code the agent started, under it
+  # Starting it again ends the searches it is running: each a Claude Code the agent runs headless, under it (a session it
+  # started for the page is in a terminal of its own, and is not)
   if [ -n "$running" ] && [ "$end_sessions" = 0 ]; then
     hosted="$(ps -axww -o ppid=,command= 2>/dev/null | awk -v agent="$running" '$1 == agent' | grep -c -- '--input-format stream-json' || true)"
     if [ "${hosted:-0}" -gt 0 ]; then
-      echo "The ManyClaws agent is running $hosted session(s) started from your page, and starting it again ends them: nothing was changed. Run this again when they are done, or with --end-sessions to end them now." >&2
+      echo "The ManyClaws agent is running $hosted search(es) started from your page, and starting it again ends them: nothing was changed. Run this again when they are done, or with --end-sessions to end them now." >&2
       exit 3
     fi
   fi
@@ -422,6 +425,10 @@ else
   [ ${#spawn[@]} -eq 0 ] || echo "The page may start and resume sessions in: ${spawn[*]}"
   [ "$auto_folders" = 0 ] || echo "The page may start and resume sessions in the folders you have used Claude Code in on this machine (not your home folder, a temporary one or one inside a folder whose name starts with a dot; used in the last 90 days). It lists them, and can turn any of them off."
   case " ${modes[*]:-} " in *" bypassPermissions "*) echo "Sessions may be started with their permissions bypassed, as you asked (--mode bypassPermissions)." ;; *) echo "Sessions are not started with their permissions bypassed (--mode bypassPermissions allows it)." ;; esac
+  # (each opens in a terminal of its own, which is not the agent's: on a Mac a Terminal window, elsewhere tmux)
+  if [ "$(uname)" = Darwin ]; then echo "Each session started from the page opens in a Terminal window here (\"terminal\" in \"spawn\" in agent.json names another app, or tmux)."
+  elif command -v tmux >/dev/null 2>&1; then echo "Each session started from the page opens in a tmux session here, named manyclaws-…: tmux ls lists them, and tmux attach -t <name> opens one."
+  else echo "Each session started from the page opens in tmux here, which is not installed: install it (apt install tmux, or dnf install tmux) before a session is started." >&2; fi
 fi
 if [ ${#files[@]} -gt 0 ]; then echo "The page may open files from: ${files[*]}"
 elif [ ${#spawn[@]} -gt 0 ] || [ "$auto_folders" = 1 ]; then echo "The page may open files from those folders, and from nowhere else on this machine (--files DIR names others)."

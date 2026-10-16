@@ -20,14 +20,14 @@
        and holding it against the public repository's is holding all of it. The modules the script goes on to
        import are named too, each fetched and checked before the script asks for it (seal.js before keys.js, which
        imports it). -->
-  <link rel="stylesheet" href="app.css" integrity="sha384-Z/rPHhFDqaVfCu7Hhlgpj4lDvuF8zICWiFaL0UxhCj8gUtw19zaGY99SbHSpBChE">
+  <link rel="stylesheet" href="app.css" integrity="sha384-SQLzRZUq/g3o2zSUiriWXeQ6qHVh5UEI6DphJkONIooRrEUkFKvp7y80+tGwnlA7">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-ZBAepwzX59yX/T4v2jPhynXRXQmV/WgAsqIknvZ9LHWeO3OB7xBW1UPhZ3X31Yzv">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-wQtSoQAWNwwDAYJwxuIIPqr6TL1K8ebV0gRVOQI5yE0Dl16fXzUuAPtg3iKL3rwO">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-GOAdfHj2KRKDuh4CCSdozP2kz8+gEJQezxFGrKLC5GTZ0VodozXf+2FVih0u4Vnw">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
-  <script src="app.js" defer integrity="sha384-EbvbqTIr8TLF+yphnIT4+Galm3T9OpkcRZwQc0+R+o7R4Nw5l7plMOMd7HBS/7Y+"></script>
+  <script src="app.js" defer integrity="sha384-UT38T6krtu9jtiP4TL4NdR8xtwHSr/5tms9yMFUuDCq1XiTryxovtJl05QEFRARz"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -174,7 +174,7 @@
             <button type="button" data-set-view="terminal">Terminal</button>
           </div>
           <button id="stop" class="stop" hidden title="Interrupts what Claude is doing. The Escape key does the same.">Stop</button>
-          <button id="release" class="ghost" hidden title="Ends the copy this machine's agent is running. The session stays on the machine, where a reply here, or claude --resume in a terminal, picks it up again.">Exit</button>
+          <button id="release" class="ghost" hidden title="Ends this search, which this machine's agent is running. The session stays on the machine, where a reply here, or claude --resume in a terminal, picks it up again.">Exit</button>
           <button id="remove" class="ghost" hidden>Remove</button>
         </header>
         <div id="attention" class="attention-banner" hidden></div>
@@ -254,7 +254,7 @@
               <input id="new-name" maxlength="80" autocomplete="off" spellcheck="false">
             </label>
             <label class="check"><input id="new-favorite" type="checkbox"> Favorite: kept at the top of the list</label>
-            <label class="check" id="new-listed-row"><input id="new-listed" type="checkbox" checked> Show in VS Code's resume list</label>
+            <p id="new-opens" class="muted"></p>
             <div class="new-row">
               <label>Permissions <select id="new-mode"></select></label>
               <label>Model <select id="new-model"></select></label>
@@ -450,7 +450,7 @@
         <input id="ns-name" maxlength="80" autocomplete="off" spellcheck="false">
       </label>
       <label class="ns-listed"><input id="ns-favorite" type="checkbox"><span><b>Favorite</b><i>Kept at the top of the list.</i></span></label>
-      <label class="ns-listed"><input id="ns-listed" type="checkbox" checked><span><b>Show in VS Code's resume list</b><i id="ns-listed-hint"></i></span></label>
+      <p id="ns-opens" class="ns-opens"></p>
       <div class="ns-ways">
         <button type="button" data-how="new"><b>New</b><span>An empty session in that project.</span></button>
         <button type="button" data-how="refer" hidden><b>New with reference to this session</b><span>An empty one, told where this session's transcript is and how far it had got, to read what it needs of it.</span></button>

@@ -227,8 +227,8 @@ function sessionOf(s, devices) {
     since: card.since ?? s.lastActivity,
     shaped: true,
     machine: s.machine ?? onHost,
-    // Someone can be there to reply to: a terminal, VS Code, Desktop; not claude -p. One the machine's agent runs takes replies through the agent.
-    attended: (card.attended ?? card.interactive !== false) || !!s.hosted,
+    // Someone can be there to reply to: a terminal, VS Code, Desktop; not claude -p, or a search the machine's agent runs
+    attended: card.attended ?? card.interactive !== false,
     // (the server says only that it has ended or is not heard from: while it is heard from, its card says how it stands)
     state: s.state === 'ended' || s.state === 'offline' ? s.state : (card.state ?? 'idle'),
     agents: s.ended || !s.online || !Array.isArray(card.agents) ? [] : card.agents,
@@ -428,9 +428,9 @@ const blockedFor = (to) => {
 }
 const orderFor = async (to, what, rest = {}) => (app.key && !blockedFor(to) ? vault.makeOrder({ to, do: what, with: rest }, app.key) : undefined)
 // A prompt for a session, signed for the one that is to run it: the session's own plugin,
-// or, for a session its machine's agent runs or is to start again (`viaAgent`), that
-// machine's agent. One order has one runner, and so one memory of having been run: what
-// was signed for the one is refused by the other, and by every other machine.
+// or, for a session its machine's agent is to start again (`viaAgent`), that machine's
+// agent. One order has one runner, and so one memory of having been run: what was signed
+// for the one is refused by the other, and by every other machine.
 const promptOrder = (sid, machine, viaAgent, rest) => (viaAgent ? orderFor(machine, 'prompt', { ...rest, sid }) : orderFor(sid, 'prompt', rest))
 // What follows "?" when a machine is asked to read something: one sealed thing (`c`).
 // Which session, which folder, what words and how many are not the server's to read, and
@@ -1466,11 +1466,9 @@ function connect() {
     for (const s of app.sessions.values()) if (s.machine === m.id) settle(s)
     lookAgain()
     seeToUpgrade()
-    // Its sessions are read again when it comes online, and when what it runs changes
-    if (m.online && Date.now() - (app.catalog.get(m.id)?.at ?? 0) > 3000) {
-      loadCatalog(m.id)
-      if (app.pastBy === 'project') loadProjects(m.id)
-    }
+    // Its sessions are read again when it comes online, and when what it runs changes: not more than every three seconds,
+    // and then once those are up, so that what it said within them is not left unread
+    if (m.online) catalogSoon(m.id)
     renderListSoon()
     if (el('ns-box').open) drawNewDevices()
     if (app.computer?.mid === m.id) renderComputer()
@@ -2192,8 +2190,8 @@ function rowTime(s) {
 }
 // What started a session that is running, for its tile: its person, there, in a terminal or an editor, said in a word
 // after the project and the computer, with the rest for whoever points at it; or the computer's own agent, which runs
-// it itself (one started or taken up again from this page: the ones Exit ends), which is said by ManyClaws' own mark
-// before the time (agentMark). Of a session that is not running there is nothing to say.
+// it itself (a search from this page: the ones Exit ends), which is said by ManyClaws' own mark before the time
+// (agentMark). Of a session that is not running there is nothing to say.
 function startedBy(s) {
   if (!s || s.ended || !s.online || s.hosted) return null
   const e = s.entrypoint ?? ''
@@ -2201,13 +2199,19 @@ function startedBy(s) {
   return h('span', { class: 'row-by', title: 'Started on its computer, ' + says }, word)
 }
 
-// ManyClaws' mark on the tile of a running session its computer's agent runs: the two claws beside the page's name,
-// small, at the end of the tile's first line, before the time (unless this device's settings leave it off). What it means is said to whoever points at it, or has it read out.
-const BY_AGENT = 'Started from this page: the ManyClaws agent on its computer runs it, and Exit ends it'
+// ManyClaws' mark on the tile of a running session that was started from this page: one its computer's agent opened in
+// a terminal there, or a search the agent runs itself. The two claws beside the page's name, small, at the end of the
+// tile's first line, before the time (unless this device's settings leave it off). What it means is said to whoever
+// points at it, or has it read out.
+const BY_AGENT = 'A search started from this page: the ManyClaws agent on its computer runs it, and Exit ends it'
+const FROM_PAGE = 'Started from this page: it is open in a terminal on its computer, and is closed there'
 function agentMark(s) {
-  if (!s || s.ended || !s.online || !s.hosted) return null
-  return h('span', { class: 'row-agent', role: 'img', 'aria-label': BY_AGENT, title: BY_AGENT }, document.querySelector('.brand svg').cloneNode(true))
+  if (!s || s.ended || !s.online || !(s.hosted || openedHere(s))) return null
+  const says = s.hosted ? BY_AGENT : FROM_PAGE
+  return h('span', { class: 'row-agent', role: 'img', 'aria-label': says, title: says }, document.querySelector('.brand svg').cloneNode(true))
 }
+// Whether the computer's agent opened this session, as that computer says of the sessions open there
+const openedHere = (s) => !!s?.fromPage || !!app.machines.get(s?.machine)?.open?.[s?.id]?.started
 
 // How many subagents a session has running, for a row of the list
 const agentsMark = (s) => (s?.agents?.length ? h('span', { class: 'agents-mark', title: s.agents.map(agentLabel).join('\n') }, count(s.agents.length, 'subagent')) : null)
@@ -2761,7 +2765,7 @@ function drawNewDevices(keep = true) {
   newBusy(busy)
   drawNewWays()
   drawNewProjects()
-  drawNewListed()
+  drawNewOpens()
   if (busy) return
   if (!able.length) newNote(NO_DEVICE[online.length ? 1 : 0], true)
   else if (NO_DEVICE.includes(el('ns-note').textContent)) newNote('')
@@ -2813,27 +2817,17 @@ async function drawNewProjects() {
   select.value = every.find((cwd) => from?.cwd && sameFolder(cwd, from.cwd)) ?? every.find((cwd) => name && folderName(cwd).toLowerCase() === name) ?? every[0]
 }
 
-// Whether Claude Code's own list of sessions to resume (VS Code's) is to show a session
-// started from here. It leaves out the ones a program started, which is how a machine's
-// agent starts them; asked to, the agent marks the new one's transcript as an ordinary
-// session's, and the list shows it. Shown unless turned off, and as it was last left.
-const LISTED_HINT = "VS Code leaves out sessions a program started, as these are. Ticked, this one is marked on its computer as an ordinary session, so it is listed there."
-const wantsListed = () => {
-  try {
-    return localStorage.getItem('mc.listed') !== '0'
-  } catch {
-    return true
-  }
+// Where a session started on a computer opens: in a terminal there, which is not the agent's, as the computer says
+// (a terminal app's name on a Mac, tmux, or a console window on Windows)
+function opensIn(m) {
+  const t = m?.spawn?.terminal
+  const there = m ? ` on ${machineName(m)}` : ''
+  if (t === 'tmux') return `It opens in tmux${there} (tmux ls lists it there), and runs until it is closed there.`
+  if (t === 'console') return `It opens in a console window${there}, and runs until it is closed there.`
+  return `It opens in ${t && t !== 'Terminal' ? 'a ' + t : 'a Terminal'} window${there}, and runs until it is closed there.`
 }
-function keepListed(on) {
-  try {
-    localStorage.setItem('mc.listed', on ? '1' : '0')
-  } catch {}
-}
-function drawNewListed() {
-  el('ns-listed').checked = wantsListed()
-  el('ns-listed').disabled = el('ns-box').dataset.busy === '1'
-  el('ns-listed-hint').textContent = LISTED_HINT
+function drawNewOpens() {
+  el('ns-opens').textContent = app.machines.has(el('ns-device').value) ? opensIn(app.machines.get(el('ns-device').value)) : ''
 }
 
 // One with a reference to this session is offered on this session's own computer alone: it is told of a file there
@@ -2864,7 +2858,7 @@ function newBusy(on) {
   if (on) box.dataset.busy = '1'
   else delete box.dataset.busy
   const none = !el('ns-device').value
-  for (const id of ['ns-device', 'ns-project', 'ns-name', 'ns-favorite', 'ns-listed']) el(id).disabled = on
+  for (const id of ['ns-device', 'ns-project', 'ns-name', 'ns-favorite']) el(id).disabled = on
   for (const b of box.querySelectorAll('[data-how]')) b.disabled = on || none
 }
 
@@ -2923,7 +2917,6 @@ async function newSession(how) {
   if (!from || !m) return
   // (the project chosen, if its device's projects were read and it's that device's still)
   const cwd = el('ns-project').dataset.machine === mid ? el('ns-project').value : ''
-  const listed = { listed: el('ns-listed').checked }
   const dress = newDress()
   // Signed: for the computer the new session is to be on, all that it is to be (in the
   // mode the first is in, where that one allows it); and for the session asked to write
@@ -2932,14 +2925,14 @@ async function newSession(how) {
   const was = modeOf(asking)
   const mode = m.spawn?.modes?.includes(was) ? was : undefined
   const there = app.machines.get(from.machine)
-  if (how === 'refer') return newReferring(from, m, { cwd: cwd || from.cwd, mode, ...listed }, dress)
+  if (how === 'refer') return newReferring(from, m, { cwd: cwd || from.cwd, mode }, dress)
   // (that machine's own copy of a session, in the project it is in: anything else is its transcript carried, to another machine or another project)
   const fork = from.machine === mid && (!cwd || folderKey(cwd) === folderKey(from.cwd))
   const carried = how === 'clone' && !fork && !!from.machine
   const signed = {
-    order: await orderFor(mid, 'branch', { how, from: from.id, like: from.cwd, cwd: cwd || undefined, mode, ...listed }),
-    // (asked of the session itself where it is running with someone at it; through its machine's agent where the agent runs it or has to start it again)
-    ...(how === 'handoff' ? { askOrder: await promptOrder(from.id, from.machine, !(asking && !asking.ended && asking.online && !asking.hosted), { text: HANDOFF_ASK, mode: there?.spawn?.modes?.includes(was) ? was : undefined }) } : {}),
+    order: await orderFor(mid, 'branch', { how, from: from.id, like: from.cwd, cwd: cwd || undefined, mode }),
+    // (asked of the session itself where it is running with someone at it; through its machine's agent where the agent has to start it again)
+    ...(how === 'handoff' ? { askOrder: await promptOrder(from.id, from.machine, !(asking && !asking.ended && asking.online), { text: HANDOFF_ASK, mode: there?.spawn?.modes?.includes(was) ? was : undefined }) } : {}),
     // (a machine hands a transcript over only for whoever signed for it: which session's is in the order)
     ...(carried ? { fromOrder: await orderFor(from.machine, 'export', { sid: from.id }) } : {}),
   }
@@ -2947,7 +2940,7 @@ async function newSession(how) {
   // (whether a session can be asked now is on its card, which the server cannot read: so it is looked at here)
   if (how === 'handoff' && asking && !asking.ended && asking.online) {
     if (asking.state !== 'idle') return newNote('This session is busy: ask for a handoff when it has finished what it is doing.', true)
-    if (!asking.hosted && !asking.attended) return newNote('This is a headless session (claude -p or an SDK script): nothing is waiting for a prompt.', true)
+    if (!asking.attended) return newNote('This is a headless session (claude -p, an SDK script or a search): nothing is waiting for a prompt.', true)
   }
   newBusy(true)
   newNote(how === 'new' ? `Starting on ${machineName(m)}…` : how === 'clone' ? `Copying this session to ${machineName(m)}…` : 'Asking this session for a handoff…')
@@ -3048,12 +3041,11 @@ el('ns-box').addEventListener('close', () => el('ns-open').setAttribute('aria-ex
 el('ns-device').addEventListener('change', () => {
   drawNewWays()
   drawNewProjects()
-  drawNewListed()
+  drawNewOpens()
 })
 // (Enter in the name is not a way chosen: the box stays as it is)
 el('ns-name').addEventListener('keydown', (ev) => ev.key === 'Enter' && !ev.isComposing && ev.preventDefault())
 for (const id of ['ns-name', 'new-name']) el(id).placeholder = NAME_ASKS
-el('ns-listed').addEventListener('change', () => keepListed(el('ns-listed').checked))
 el('ns-form').addEventListener('click', (ev) => {
   const how = ev.target.closest('[data-how]')?.dataset.how
   if (how) newSession(how)
@@ -3520,7 +3512,7 @@ const TILE_SAMPLE = {
   host: 'Mac Studio',
   // (running, and started from this page: its tile has ManyClaws' mark, where this device's tiles have it)
   online: true,
-  hosted: true,
+  fromPage: true,
   lastPrompt: 'Find out why the login test is flaky on CI and fix it. Run the suite fifty times before you call it done, and tell me what the cause was.',
   lastReply: 'Reproduced it: the test taps before the keyboard has finished animating. Waiting on the field’s focus fixes it, and fifty runs in a row pass now where one in six failed before.',
 }
@@ -3782,7 +3774,7 @@ function needsOf(c) {
   const newest = app.release?.digest ? app.release : null
   const runs = releaseOn(c)
   if (!bad && !moving && newest && runs?.digest && runs.digest !== newest.digest && (runs.release ?? 0) < newest.release && !c.m?.upgrade) needs.push({ kind: 'update', has: runs.release, newest: newest.release, by: runs.by })
-  // An upgrade there waiting for the sessions its agent runs to be done
+  // An upgrade there waiting for the searches its agent runs to be done
   if (c.m?.upgrade) needs.push({ kind: 'upgrade-waiting', release: c.m.upgrade.release, sessions: c.m.hosted?.length ?? 0 })
   // No agent at all (its sessions' plugins say none is beside them): one can be set up, from the plugin there
   if (!c.m && !moving && c.live.length && c.live.every((s) => s.agentBeside === null)) needs.push({ kind: 'agent-setup' })
@@ -3868,6 +3860,17 @@ function looseNodes(c) {
 // A machine's past sessions, newest first; `more` adds the next page
 // What is said under a computer whose answer this browser's key does not open
 const OTHER_KEY = 'This computer answered with something this browser cannot open: it has another key than this browser’s. Connect it again, from the link its plugin shows.'
+const catalogWaits = new Map() // mid -> the timer a computer's sessions are read again by
+function catalogSoon(mid) {
+  const wait = 3000 - (Date.now() - (app.catalog.get(mid)?.at ?? 0))
+  if (wait > 0) {
+    if (!catalogWaits.has(mid)) catalogWaits.set(mid, setTimeout(() => (catalogWaits.delete(mid), app.machines.get(mid)?.online && catalogSoon(mid)), wait + 50))
+    return
+  }
+  loadCatalog(mid)
+  if (app.pastBy === 'project') loadProjects(mid)
+}
+
 async function loadCatalog(mid, more = false) {
   // (a machine reads only what was sealed for it: where this device has no key, there is nothing to ask it with)
   if (!app.key) return void (app.catalog.set(mid, { sessions: [], more: false, loaded: false, failed: false, locked: true, at: Date.now() }), renderList())
@@ -4562,7 +4565,7 @@ async function askHaiku() {
 async function haikuStart(hk, run) {
   const m = app.machines.get(run.mid)
   const mode = m?.spawn?.modes?.includes('default') ? 'default' : undefined
-  const order = await orderFor(run.mid, 'start', { prompt: haikuAsk(hk.q, run.folders), model: 'haiku', ...(hk.effort ? { effort: hk.effort } : {}), mode, name: 'Haiku search', listed: false })
+  const order = await orderFor(run.mid, 'start', { prompt: haikuAsk(hk.q, run.folders), model: 'haiku', ...(hk.effort ? { effort: hk.effort } : {}), mode, name: 'Haiku search', background: true })
   const r = order ? await fetch(`/api/machines/${run.mid}/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order }) }).catch(() => null) : null
   const data = (await r?.json().catch(() => ({}))) ?? {}
   if (run.state !== 'starting') return
@@ -4922,20 +4925,6 @@ function modePicker({ id, allowed, mode, title, onPick }) {
   drawFootMenu()
 }
 
-// The mode of a session the machine's agent is running, changed as it runs. Refused
-// (the machine doesn't allow it, the model doesn't have it), the reason is shown and
-// the picker goes back to what the session is in.
-async function setSessionMode(s, mode) {
-  // (which mode is in an order for the machine, signed here: where this device cannot sign, nothing is sent)
-  const order = await orderFor(s.machine, 'mode', { sid: s.id, mode })
-  const r = order ? await fetch(`/api/machines/${s.machine}/sessions/${encodeURIComponent(s.id)}/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order }) }).catch(() => null) : null
-  if (r?.ok) return void (app.modeError = null)
-  const { error } = order ? ((await r?.json().catch(() => ({}))) ?? {}) : { error: NO_KEY }
-  app.modeError = { sid: s.id, text: 'The mode was not changed: ' + (error ?? 'the machine did not answer') + '.', until: Date.now() + 15_000 }
-  delete el('foot-mode').dataset.modes
-  if (app.current === s.id) renderHeader()
-}
-
 // A reply to a past session: the machine's agent starts Claude Code on it again. One
 // that's open in a terminal there is continued in a copy instead.
 async function resumePast(text) {
@@ -4954,7 +4943,7 @@ async function resumePast(text) {
   // The reply goes signed, and nothing beside it: for the machine, to open the session
   // with it; or, where the session is running after all, for the session (one order and
   // not both: either would be run by whoever was handed it)
-  const signed = isReporting(p.sid) && !fork ? { reply: await promptOrder(p.sid, p.mid, !!app.sessions.get(p.sid)?.hosted, { text, mode }) } : { order: await orderFor(p.mid, 'open', { sid: p.sid, prompt: text, mode, fork }) }
+  const signed = isReporting(p.sid) && !fork ? { reply: await promptOrder(p.sid, p.mid, false, { text, mode }) } : { order: await orderFor(p.mid, 'open', { sid: p.sid, prompt: text, mode, fork }) }
   // (where this device cannot sign, nothing is sent)
   const unsigned = !signed.reply && !signed.order
   const r = unsigned ? null : await fetch(`/api/machines/${p.mid}/sessions/${encodeURIComponent(p.sid)}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signed) }).catch(() => null)
@@ -5047,8 +5036,7 @@ async function openNew(mid) {
   fill(el('new-mode'), (m?.spawn?.modes ?? ['default']).map((mode) => [mode, PERMISSION_MODES[mode]?.[0] ?? mode]), last.mode)
   fill(el('new-model'), MODELS, last.model)
   fill(el('new-effort'), EFFORTS, last.effort)
-  el('new-listed').checked = wantsListed()
-  el('new-listed-row').title = LISTED_HINT
+  el('new-opens').textContent = opensIn(m)
   el('new-name').value = ''
   el('new-favorite').checked = false
   const project = el('new-project')
@@ -5097,7 +5085,6 @@ el('new-project').addEventListener('change', () => {
   if (!el('new-other').hidden) el('new-cwd').focus()
 })
 
-el('new-listed').addEventListener('change', () => keepListed(el('new-listed').checked))
 
 el('new-form').addEventListener('submit', async (ev) => {
   ev.preventDefault()
@@ -5108,7 +5095,7 @@ el('new-form').addEventListener('submit', async (ev) => {
   el('new-error').hidden = true
   // What the computer is to start is signed, and its first prompt goes in the order alone, which the server can't
   // read. Where this device cannot sign, nothing is sent.
-  const order = await orderFor(mid, 'start', { cwd, prompt: el('new-prompt').value, ...picked, create: other && el('new-create').checked, listed: el('new-listed').checked })
+  const order = await orderFor(mid, 'start', { cwd, prompt: el('new-prompt').value, ...picked, create: other && el('new-create').checked })
   const r = order ? await fetch(`/api/machines/${mid}/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order }) }).catch(() => null) : null
   const data = order ? ((await r?.json().catch(() => ({}))) ?? {}) : { error: NO_KEY_MACHINE }
   if (!r?.ok) {
@@ -5167,20 +5154,17 @@ function renderHeader() {
   renderBanner(s)
   setWorking(s.state === 'working')
 
-  // The session's permission mode. One the machine's agent is running can be switched
-  // from here, to a mode the machine allows, as an editor switches the one it hosts.
-  // One running in a terminal or an editor is switched there: a mod can't set it.
+  // The session's permission mode. One running in a terminal or an editor is switched
+  // there: a mod can't set it. That is every one a person can be at, the ones started
+  // from this page among them, which are in terminals of their own.
   const inMode = modeOf(s) ?? 'default'
   const m = app.machines.get(s.machine)
-  const modes = m?.spawn?.modes ?? []
   // One that has exited is started again by a reply, where its machine's agent can do
   // that: in the mode picked here, as one opened from its transcript is
   const resumes = s.ended && !!m?.online && !!m.spawn
   el('composer').dataset.permissionMode = inMode
   if (resumes) {
     renderResumeMode(m, s)
-  } else if (s.hosted && s.online && !s.ended && modes.length) {
-    modePicker({ id: 'session-mode', allowed: modes.includes(inMode) ? modes : [inMode, ...modes], mode: inMode, title: 'What this session may do without asking. A change takes effect at once.', onPick: (to) => setSessionMode(s, to) })
   } else {
     // (drawn already: drawing it again would take the button from under a finger)
     const drawn = 'shown|' + inMode + '|' + s.ended
@@ -5342,7 +5326,7 @@ const put = (node, ...children) => node.replaceChildren(...children.flat().filte
 
 // Whether a session's model and effort can be set from here: it is running and reachable,
 // and its computer lets the page run commands in it
-const canSetOptions = (s) => !!s && !app.past && !!s.online && !s.ended && (s.attended || s.hosted) && (s.capabilities ?? []).includes('chat')
+const canSetOptions = (s) => !!s && !app.past && !!s.online && !s.ended && s.attended && (s.capabilities ?? []).includes('chat')
 // The one asked for and not yet shown by the session, if it is of this kind
 const asked = (s, kind) => (s && app.setting?.sid === s.id && app.setting.kind === kind ? app.setting.value : null)
 
@@ -5423,24 +5407,11 @@ function menuRow({ title, says, mark, on, pending, disabled, onclick, ...data })
 }
 
 // Under the modes, where none of them can be picked. A session that runs in an app (VS
-// Code, a terminal) has its mode changed there: a mod can't set it. A clone of it is run
-// by a machine's agent, which can, so the way to one is offered: the New session box, as
-// the button in the header opens it, with Full context clone the one Enter presses
+// Code, a terminal) has its mode changed there: a mod can't set it.
 const MODE_CHANGED_WITH = { 'VS Code': ', with the mode button', 'the terminal': ', with shift+tab' }
-function modeNote(s, clones) {
+function modeNote(s) {
   if (!s || s.hosted) return h('p', { class: 'menu-note' }, 'A session in a terminal or an editor has its mode changed there: shift+tab in a terminal, this menu in an editor.')
-  const where = appName(s)
-  const clone = () => {
-    closeFootMenu()
-    openNewBox()
-    el('ns-box').querySelector('[data-how="clone"]')?.focus()
-  }
-  return h(
-    'p',
-    { class: 'menu-note' },
-    `This session runs in ${where}, so its mode is changed there${MODE_CHANGED_WITH[where] ?? ''}.`,
-    ...(clones ? [' ', h('button', { type: 'button', class: 'menu-link', onclick: clone }, 'Clone it to a new session'), ` outside ${where === 'its own app' ? 'it' : where} to change the mode from here.`] : []),
-  )
+  return h('p', { class: 'menu-note' }, `This session runs in ${appName(s)}, so its mode is changed there${MODE_CHANGED_WITH[appName(s)] ?? ''}.`)
 }
 
 // What is open over the reply box, drawn in the look's own way
@@ -5462,11 +5433,10 @@ function drawFootMenu() {
   const modes = app.modeMenu ?? { mode: 'default', allowed: [], onPick: null }
   const row = live ? app.modelRows.get(live.id) : null
   // (a clone needs a device that is online and starts sessions)
-  const clones = [...app.machines.values()].some((m) => m.online && !cantTake(m))
   // (drawn already: drawing it again would take it from under a finger)
   // Auto approve, under the modes: whether it is on for this session, how long yet, and why it cannot be where it cannot
   const auto = live ? { on: !!autoUntil(live.id), left: autoUntil(live.id) ? autoLeft(live.id) : '', bars: autoBars(live) } : null
-  const drawn = JSON.stringify([kind, app.view, live?.id, live?.model, level, can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto, clones])
+  const drawn = JSON.stringify([kind, app.view, live?.id, live?.model, level, can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto])
   if (box.dataset.drawn === drawn) return
   box.dataset.drawn = drawn
   box.dataset.kind = kind
@@ -5525,7 +5495,7 @@ function drawFootMenu() {
             },
           }),
         ),
-        modes.onPick ? null : modeNote(live, clones),
+        modes.onPick ? null : modeNote(live),
         // Not one of the session's own modes: what this browser does about what the session asks, in whichever mode it is
         auto && h('div', { class: 'menu-sep', role: 'separator' }),
         auto &&
@@ -7076,7 +7046,7 @@ async function send() {
   entry.said = !files.length ? 'See the attached photo.' : photos.length || files.length > 1 ? 'See what is attached.' : 'See the attached file.'
   const plain = [text || entry.said, ...photos.map(photoNote), ...files.map(fileNoteOf)].join('\n\n').trim()
   const to = app.sessions.get(sid) ?? s
-  const order = await promptOrder(sid, to?.machine, !!(to?.ended || to?.hosted), { text: plain, mode })
+  const order = await promptOrder(sid, to?.machine, !!to?.ended, { text: plain, mode })
   if (!order) {
     node.querySelector('.from').textContent = 'not sent: ' + (blockedFor(sid) || NO_KEY)
     return
@@ -7701,7 +7671,7 @@ async function startOnComputer() {
   // (what it is to be called here, and whether it is a favorite from the first: put on it when it is made, as the box over a chat does)
   const dress = { name: c.name.trim(), favorite: c.favorite }
   // (signed for that computer: where this device cannot sign, nothing is sent)
-  const order = await orderFor(c.mid, 'branch', { how: 'new', cwd, mode, listed: wantsListed() })
+  const order = await orderFor(c.mid, 'branch', { how: 'new', cwd, mode })
   if (!order) return say(blockedFor(c.mid) ? sentence(blockedFor(c.mid)) : NO_KEY_MACHINE)
   c.starting = true
   c.error = ''
@@ -7795,7 +7765,7 @@ function upkeepNode(c, n) {
     return h(
       'div',
       { 'data-need': 'upgrade-waiting' },
-      h('p', null, h('b', null, `An update of ${name} to release ${n.release} is waiting.`), n.sessions ? ` Updating now ends the ${n.sessions === 1 ? 'session' : count(n.sessions, 'session')} started from this page; a reply resumes ${n.sessions === 1 ? 'it' : 'them'}.` : ' It is done in a moment.'),
+      h('p', null, h('b', null, `An update of ${name} to release ${n.release} is waiting.`), n.sessions ? ` Updating now ends the ${n.sessions === 1 ? 'search' : n.sessions + ' searches'} its agent is running for this page.` : ' It is done in a moment.'),
       n.sessions ? h('div', { class: 'needs-do' }, button('update-now', 'Update now', () => upgradeComputer(c, { now: true, release: n.release }))) : null,
       ...told,
     )
@@ -7830,7 +7800,7 @@ async function allowPlugin(c, digest) {
 }
 
 // A computer brought up to the newest release, on an order for it: its agent has Claude Code fetch the plugin, holds
-// it to that release, and replaces itself, at once (`now`) or once its sessions are done. Where it has no agent, a
+// it to that release, and replaces itself, at once (`now`) or once the searches it runs are done. Where it has no agent, a
 // session's own plugin there does the plugin, and holds what was fetched to its list.
 async function upgradeComputer(c, { now, release }) {
   const newest = app.release
@@ -7839,7 +7809,7 @@ async function upgradeComputer(c, { now, release }) {
   const hosted = c.m?.hosted?.length ?? 0
   const via = c.m ? null : c.live.find((s) => s.attended && s.online)
   const says = c.m
-    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions you started there in a terminal, VS Code or the desktop app keep running, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The session' : count(hosted, 'session')} started from this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : ', once they are done'}; a reply resumes ${hosted === 1 ? 'it' : 'them'}.` : ''}`
+    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions there keep running, the ones started from this page among them, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The search' : hosted + ' searches'} its agent is running for this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : ', once done'}.` : ''}`
     : `Updates the ManyClaws plugin on ${name}, through the Claude Code session in ${via?.project ?? 'its folder'}. Nothing running ends: each session uses the new plugin when it is next started.`
   if (!(await ask(`Update ${name}?`, { says, yes: now ? 'Update now' : hosted ? 'Update when they’re done' : `Update ${name}` }))) return
   stateOf(c).upkeep = { kind: release ? 'upgrade-waiting' : 'update', busy: true, done: 'Updating…' }
@@ -7853,7 +7823,7 @@ async function upgradeComputer(c, { now, release }) {
     ? { kind: stateOf(c).upkeep.kind, error: sentence(failed) }
     : {
         kind: stateOf(c).upkeep.kind,
-        done: !c.m ? `Updated: new sessions on ${name} use release ${v?.release ?? newest.release}.` : v?.agent === 'now' ? `Updating: the agent on ${name} starts again in a moment, on release ${v.release}.` : v?.agent === 'unchanged' ? `Updated: new sessions on ${name} use release ${v.release}.` : `The plugin on ${name} is release ${v?.release ?? newest.release}; its agent follows once its sessions are done.`,
+        done: !c.m ? `Updated: new sessions on ${name} use release ${v?.release ?? newest.release}.` : v?.agent === 'now' ? `Updating: the agent on ${name} starts again in a moment, on release ${v.release}.` : v?.agent === 'unchanged' ? `Updated: new sessions on ${name} use release ${v.release}.` : `The plugin on ${name} is release ${v?.release ?? newest.release}; its agent follows once the searches it runs are done.`,
       }
   renderComputer()
   renderList()
@@ -7990,7 +7960,6 @@ function renderComputer() {
   set('computer-mode', c.mode)
   set('computer-session-name', c.name)
   if (el('computer-favorite')) el('computer-favorite').checked = c.favorite
-  if (el('computer-listed')) el('computer-listed').checked = wantsListed()
 }
 
 // The folders sessions may be started in from here: the ones set on the computer, and, where its owner allows them, the
@@ -8075,11 +8044,10 @@ function newPart(c, m) {
       h('label', { class: 'guide-field' }, 'Permissions', h('select', { id: 'computer-mode', disabled: c.starting, onchange: (ev) => (c.mode = ev.target.value) }, ...modes.map((mode) => h('option', { value: mode }, PERMISSION_MODES[mode]?.[0] ?? mode)))),
       h('label', { class: 'guide-field' }, 'Name', h('input', { id: 'computer-session-name', maxlength: '80', autocomplete: 'off', spellcheck: 'false', placeholder: NAME_ASKS, disabled: c.starting, oninput: (ev) => (c.name = ev.target.value) })),
       h('label', { class: 'guide-check' }, h('input', { type: 'checkbox', id: 'computer-favorite', disabled: c.starting, onchange: (ev) => (c.favorite = ev.target.checked) }), 'Favorite: kept at the top of the list'),
-      h('label', { class: 'guide-check', title: LISTED_HINT }, h('input', { type: 'checkbox', id: 'computer-listed', disabled: c.starting, onchange: (ev) => keepListed(ev.target.checked) }), "Show in VS Code's resume list"),
       h('div', { class: 'guide-end' }, h('button', { type: 'submit', class: 'primary', id: 'computer-start', disabled: c.starting || !all.length }, c.starting ? `Starting on ${name}…` : 'New')),
       c.error && h('p', { class: 'form-note error', role: 'alert', id: 'computer-error' }, c.error),
     ),
-    h('p', { class: 'muted' }, 'An empty session in that project: it opens here, and waits for its first prompt. ', h('a', { href: '#/new/' + m.id, id: 'computer-longer' }, 'Start one with a first prompt, a model, or in another folder')),
+    h('p', { class: 'muted' }, 'An empty session in that project, which waits for its first prompt: it opens here, and ' + opensIn(m).replace(/^It opens in /, 'in ') + ' ', h('a', { href: '#/new/' + m.id, id: 'computer-longer' }, 'Start one with a first prompt, a model, or in another folder')),
   )
 }
 

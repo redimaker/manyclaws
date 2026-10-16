@@ -51,6 +51,8 @@ The first session after that starts at once, and the computer is on your page. T
 
 The plugin shows a computer's sessions while they run. The agent is a small background service that adds the rest: it lets you start a new session on that computer from your phone, pick up one that has ended, and search everything Claude Code has done there. It needs Node.js 22.13 or later (`node --version`), and runs on macOS and Linux.
 
+A session started from your phone opens on the computer as any session does: on a Mac in a Terminal window, on Linux in a tmux session (`tmux ls` lists them, `tmux attach -t manyclaws-…` opens one; tmux has to be installed). It is that terminal's, not the agent's: it runs until it is closed there, whatever happens to the agent, and you can sit down at it and carry on. `"terminal"` under `"spawn"` in `~/.manyclaws/agent.json` names another app on a Mac (`"iTerm"`), or `"tmux"`. Claude Code is told it may trust the folder it is started in, which is one you allowed, as answering its question there would have it.
+
 **From your page:** the computer's line in your list has a gear; on its page, press **Let my phone start sessions on** it. The plugin there installs the agent from its own folder, where it is carried: the installer checks every file against the signed list, and the list's signature, before anything is installed. Sessions may then be started from your phone in the folders you have used Claude Code in on that computer, and in no other: never your home folder or one above it, a temporary one, or one inside a folder whose name starts with a dot, and only one used in the last 90 days. The computer's page lists them, and turns any of them off.
 
 **By hand**, from the copy of the agent the plugin carries (`claude plugin list --json` says where the plugin is installed: its `installPath`):
@@ -91,7 +93,7 @@ By hand:
   bash <the plugin's folder>/agent/install.sh --update --from <the plugin's folder>
   ```
 
-  It takes nothing that is not signed by a key the agent already has, and no release older than the one it has. Everything the computer was set up with is kept, and nothing is asked. Starting the agent again ends the sessions it is running, which are the ones started from your page: so while there are any, the installer does nothing and says so. Add `--end-sessions` to end them. Run it in a terminal on the computer, or from a Claude Code session started there: a session started from your page is run by the agent, and the installer does nothing from one.
+  It takes nothing that is not signed by a key the agent already has, and no release older than the one it has. Everything the computer was set up with is kept, and nothing is asked. Sessions started from your page are in terminals of their own, and go on as they are. Starting the agent again ends only a search it is running for your page: while there is one, the installer does nothing and says so. Add `--end-sessions` to end it.
 - **A computer set up before plugin 6.0.0** is moved once, as [the move guide]({{origin}}/upgrade) has it (for Claude Code: `{{origin}}/upgrade.md`). From then on it is kept up to date from your page.
 - If the agent will not stay running, `~/.manyclaws/agent.log` says why.
 
@@ -128,7 +130,7 @@ Claude Code loads the plugin from that folder as it is, so nothing changes until
 - Edit `~/.claude/settings.json` by merging: keep every setting that is already there.
 - If `claude plugin marketplace add` says a marketplace named `manyclaws` is already there, go on. If it says that its source does not match its `extraKnownMarketplaces` entry, the computer was set up from {{name}}'s server long ago: it is moved as `{{origin}}/upgrade.md` has it, which is another guide than this one, so say so and stop. Never run `claude plugin marketplace remove manyclaws` here: it deletes the API token and the key the plugin was given. If `claude plugin install` says the plugin is already installed, run `claude plugin update manyclaws@manyclaws` and go on.
 - Asked to update the plugin or the agent, or to get the agent running, on a computer that is already set up (**Keeping it up to date and running**): do what was asked and no more. `claude plugin list` says which plugin the computer has. Update the agent, or start one that is not running, with `--update --from` the plugin's folder and no other option: it keeps what the computer was set up with. An agent from before 6.0.0 (`VERSION` in `~/.manyclaws/agent/service.mjs`) is moved as `{{origin}}/upgrade.md` has it. Never run the installer as step 4 has it on a computer that already has an agent (`~/.manyclaws/agent.json` is there). Do not read `~/.manyclaws/agent.json`: the token and the key are in it.
-- If the installer says the agent is running sessions, or that it was run from a session the agent itself started, nothing was changed: stop there and say so. Use `--end-sessions` only when the person has said to end those sessions.
+- If the installer says the agent is running searches, or that it was run from one, nothing was changed: stop there and say so. Use `--end-sessions` only when the person has said to end those searches.
 - The installer starts a background service of the person's own user. Where your commands run in a sandbox that refuses that, run it outside it.
 
 ## Taking a computer off again

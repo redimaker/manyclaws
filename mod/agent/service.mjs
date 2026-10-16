@@ -111,9 +111,7 @@ const OPEN_ANSWER = {
   'session.resume': ['sid'],
   'session.seed': ['sid'],
   'session.import': ['sid'],
-  'session.send': ['sid'],
   'session.stop': ['sid'],
-  'session.mode': ['sid'],
   'session.export': ['id', 'parts', 'sealed'],
   'session.export.part': ['data'],
   'session.import.part': ['part'],
@@ -165,7 +163,7 @@ export async function run(config, flags = {}) {
   }
   let announce = () => {}
   let tokenRefused = false // the server would not take this machine's token (401): the plugin's is taken in its place
-  const host = new Host(config, { store, log, onChange: () => announce(), startedFile: path.join(process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws'), 'started.json') })
+  const host = new Host(config, { store, log, onChange: () => announce(), startedFile: path.join(process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws'), 'started.json'), launchDir: path.join(process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws'), 'launch') })
   const cswap = new Cswap(config, { fail: (text) => new HostError(text) })
   // What it signs in with and what it seals with. With all three it is this account's
   // machine; without one of them it says nothing to anybody, and waits (see the end).
@@ -283,9 +281,9 @@ export async function run(config, flags = {}) {
   }
   // ---- An upgrade, on an order for it: the plugin as Claude Code fetches it, held against the release the order names
   // before anything of it is gone by; then, where that release has other files for the agent, this agent's own, by the
-  // installer the release carries, in a job of its own: stopping the agent ends whatever the agent started, so what
-  // replaces it does not run under it. That is done once the agent runs no sessions, or at once where the order says
-  // so (it ends them: the page said how many). The installer puts the agent before it back where the new one does not
+  // installer the release carries, in a job of its own: stopping the agent ends whatever runs under it, so what
+  // replaces it does not. That is done once the agent runs no searches (the sessions it started are in terminals of
+  // their own, and go on), or at once where the order says so (it ends them: the page said how many). The installer puts the agent before it back where the new one does not
   // start. What is waiting to be done is kept (upgrade.json), and said, sealed.
   const upgradeFile = path.join(ownHome, 'upgrade.json')
   let waitingUpgrade = null
@@ -338,7 +336,7 @@ export async function run(config, flags = {}) {
   }
   const replaceAgent = async (w, { endSessions }) => {
     w.tried = Date.now()
-    log(`the agent is to be replaced by release ${w.release}'s, from ${w.dir}${endSessions ? ', ending the sessions it runs' : ''}`)
+    log(`the agent is to be replaced by release ${w.release}'s, from ${w.dir}${endSessions ? ', ending the searches it runs' : ''}`)
     await startJob(['/bin/bash', path.join(w.dir, 'agent', 'install.sh'), '--update', '--from', w.dir, '--wait-start', '60', ...(endSessions ? ['--end-sessions'] : [])])
   }
   // (waiting for its sessions to be done: tried once there are none, and again a while later where it is still here)
@@ -638,7 +636,7 @@ export async function run(config, flags = {}) {
       incoming.set(id, got)
       return { part }
     },
-    'session.import': ({ id, like, mode, model, effort, listed } = {}) => {
+    'session.import': ({ id, like, mode, model, effort } = {}) => {
       const got = held(incoming).get(id)
       incoming.delete(id)
       if (!got) throw new HostError('no transcript arrived to start from')
@@ -647,12 +645,12 @@ export async function run(config, flags = {}) {
       if (!isSealedBytes(packed)) throw new HostError('the transcript did not come sealed, so it was not taken')
       const opened = openBytes(new Uint8Array(packed), sealKey)
       if (!opened) throw new HostError(NO_KEY)
-      return host.importSession({ packed: Buffer.from(opened), like, mode, model, effort, listed })
+      return host.importSession({ packed: Buffer.from(opened), like, mode, model, effort })
     },
     // A new session that starts from words: a handoff another session wrote (`text`), or
     // what the server kept of a chat whose transcript can't be had (`rows`). They arrive
     // here opened, where they were sealed.
-    'session.seed': ({ like, text, rows, mode, model, effort, listed } = {}) => {
+    'session.seed': ({ like, text, rows, mode, model, effort } = {}) => {
       if (unopened(text) || unopened(rows)) throw new HostError(NO_KEY)
         // (a session's handoff comes as its turn ended, with how it ended: whether it is one is said here, where it can be read)
       if (text && typeof text === 'object') {
@@ -662,11 +660,10 @@ export async function run(config, flags = {}) {
       }
       const said = (Array.isArray(rows) ? chatText(rows) : typeof text === 'string' ? text : '').trim()
       if (!said) throw new HostError('there is nothing to start the new session from')
-      return host.start({ like, prompt: (Array.isArray(rows) ? CHAT_LEAD : HANDOFF_LEAD) + '\n\n---\n\n' + said, mode, model, effort, listed })
+      return host.start({ like, prompt: (Array.isArray(rows) ? CHAT_LEAD : HANDOFF_LEAD) + '\n\n---\n\n' + said, mode, model, effort })
     },
-    'session.send': (args) => host.send(args ?? {}),
+    // (a search the agent runs, and no other session: the rest are their terminals')
     'session.stop': (args) => host.stop(args ?? {}),
-    'session.mode': (args) => host.setMode(args ?? {}),
     // cswap, where the machine has it: the Claude accounts here, and a switch to one of them
     'cswap.list': () => cswap.list(),
     'cswap.switch': ({ to } = {}) => cswap.switchTo(to),
@@ -707,12 +704,13 @@ export async function run(config, flags = {}) {
     const about = {
       roots: config.roots,
       // (the folders the owner listed, and the ones a person used where those are allowed, with the ones turned off)
-      spawn: host.canStart() || host.spawnConfig.auto ? { folders: host.spawnConfig.enabled ? host.spawnConfig.folders : [], auto: host.spawnConfig.auto ? host.autoList : null, autoOff: host.spawnConfig.autoOff ?? [], modes: host.spawnConfig.modes } : null,
+      // (and what a session started here opens in: a terminal app's name, tmux, or a console window)
+      spawn: host.canStart() || host.spawnConfig.auto ? { folders: host.spawnConfig.enabled ? host.spawnConfig.folders : [], auto: host.spawnConfig.auto ? host.autoList : null, autoOff: host.spawnConfig.autoOff ?? [], modes: host.spawnConfig.modes, terminal: process.platform === 'win32' ? 'console' : String(host.spawnConfig.terminal || 'tmux') } : null,
       // (what the plugin here is, and what release this agent is)
       plugins: measure().map(({ wrong, extra, ...m }) => ({ ...m, wrong: wrong?.length ?? 0, extra: extra?.length ?? 0 })),
       release: agentRelease(),
       checks: checks(),
-      // (an upgrade of this agent waiting for its sessions to be done)
+      // (an upgrade of this agent waiting for the searches it runs to be done)
       upgrade: waitingUpgrade ? { release: waitingUpgrade.release, at: waitingUpgrade.at } : null,
       // (the folders a file may be opened from, and the ones a file is taken into)
       files: filesFrom ?? [],
@@ -723,13 +721,12 @@ export async function run(config, flags = {}) {
     // device of its own, and are in the open: among them that it seals all it says (2),
     // and does what it is asked on a signed order alone. Its folders, what it has indexed,
     // and everything of the sessions it runs or has open are sealed: of those the server
-    // is told which sessions they are (it passes a reply on to the machine that runs
-    // one), and nothing of them.
+    // is told which sessions they are, and nothing of them.
     return {
       ...machine,
       agent: VERSION,
       node: process.version,
-      capabilities: ['sessions', 'search', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
+      capabilities: ['sessions', 'search', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
       sealed: 3,
       spawn: host.canStart(),
       card: seal(about, sealKey),
@@ -863,18 +860,11 @@ export async function run(config, flags = {}) {
   // session it is about: one signed for a session's own plugin, or for another machine's
   // agent, is not taken here, so an order has one runner and that runner's memory of it.
   const ORDERED = {
-    // A reply, for a session this machine runs
-    'session.send': (a) => {
-      const w = take(a.order, machine.id, ['prompt']).with
-      return { sid: String(w.sid ?? ''), text: String(w.text ?? '') }
-    },
     'session.resume': (a) => {
       const what = asks(a.order)
-      // A reply to a session that has exited, which starts it again (a reply to one this machine is running goes to it)
+      // A reply to a session that has exited, which starts it again
       if (what === 'prompt') {
-        const o = take(a.order, machine.id, ['prompt'])
-        const w = o.with
-        if (!host.hosted.has(String(w.sid ?? ''))) startedBy(o)
+        const w = startedBy(take(a.order, machine.id, ['prompt'])).with
         return { sid: String(w.sid ?? ''), prompt: String(w.text ?? ''), mode: w.mode }
       }
       // One opened from its transcript: signed for this machine
@@ -884,20 +874,21 @@ export async function run(config, flags = {}) {
       }
       // A copy of one that is here
       const w = branch(a, 'clone')
-      return { sid: w.from, fork: true, idle: true, mode: w.mode, listed: w.listed }
+      return { sid: w.from, fork: true, idle: true, mode: w.mode }
     },
     'session.start': (a) => {
       if (asks(a.order) === 'branch') {
         const w = branch(a, 'new')
-        return { ...(w.cwd ? { cwd: w.cwd } : { like: w.like }), idle: true, mode: w.mode, listed: w.listed }
+        return { ...(w.cwd ? { cwd: w.cwd } : { like: w.like }), idle: true, mode: w.mode }
       }
+      // (`background`: a search, which the agent runs itself and which ends with its turn)
       const w = startedBy(take(a.order, machine.id, ['start'])).with
-      return { cwd: w.cwd, prompt: w.prompt, mode: w.mode, model: w.model, effort: w.effort, name: w.name, create: w.create === true, listed: w.listed }
+      return { cwd: w.cwd, prompt: w.prompt, mode: w.mode, model: w.model, effort: w.effort, name: w.name, create: w.create === true, background: w.background === true }
     },
     // Which of the folders a person used sessions may be started in: allowed or not, and those turned off. Any of the
     // account's devices may narrow that; widening it is starting sessions where they could not be, which is for one
     // that may start them
-    // An upgrade to a release, named with what its plugin is (its digest); `now`: the sessions this agent runs are ended
+    // An upgrade to a release, named with what its plugin is (its digest); `now`: the searches this agent runs are ended
     // for it, where it has to be started again, rather than waited for
     'agent.upgrade': (a) => {
       const w = startedBy(take(a.order, machine.id, ['upgrade'])).with
@@ -923,18 +914,14 @@ export async function run(config, flags = {}) {
             .map((row) => ({ role: row.role, text: row.text, ...(typeof row.tool === 'string' ? { tool: row.tool } : {}) }))
         : undefined
       const w = rows ? branch(a, 'clone') : branch(a, 'handoff')
-      return { like: w.cwd || w.like, text: rows ? undefined : a.text, rows, mode: w.mode, listed: w.listed }
+      return { like: w.cwd || w.like, text: rows ? undefined : a.text, rows, mode: w.mode }
     },
     'session.import': (a) => {
       const w = branch(a, 'clone')
-      return { id: a.id, like: w.cwd || w.like, mode: w.mode, listed: w.listed }
+      return { id: a.id, like: w.cwd || w.like, mode: w.mode }
     },
     // A transcript is packed to leave here for whoever signed for it: which session's, the order says
     'session.export': (a) => ({ sid: String(take(a.order, machine.id, ['export']).with.sid ?? '') }),
-    'session.mode': (a) => {
-      const w = take(a.order, machine.id, ['mode']).with
-      return { sid: String(w.sid ?? ''), mode: String(w.mode ?? '') }
-    },
     'cswap.switch': (a) => ({ to: take(a.order, machine.id, ['cswap']).with.to }),
     // A file is read for whoever signed for it: which file, and where its session runs, are the order's to say
     'file.read': (a) => {
