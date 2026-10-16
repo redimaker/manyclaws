@@ -1,41 +1,35 @@
-// Sealing: end-to-end encryption of what an account's sessions say. Each of the account's
-// devices derives the same key from the passphrase its owner types there and the
-// account's id, and encrypts ("seals") and decrypts ("opens") with it. The server stores
-// and forwards what was sealed and cannot open it.
+// Sealing: end-to-end encryption of what an account's sessions say. Every device of an
+// account has the same key, and encrypts ("seals") and decrypts ("opens") with it. The
+// server stores and forwards what was sealed and cannot open it.
 //
-// The server is given nothing made from the passphrase: no hash or verifier of it or of
-// its key, not its length, and no record that one has been set. The only way to tell that
-// a passphrase is the right one is to open something that was sealed with it.
-//
-// The salt is not a secret and is not stored anywhere. It is computed from the account's
-// id, which the server assigns and tells each device (GET /api/agent/account for a
-// computer, GET /api/account for the page). So every device computes the same salt, and
-// the server could compute it too. Its job is to make the key depend on the account as
-// well as the passphrase. It does not slow guessing: whoever holds what was sealed can
-// try passphrases at their own pace. What slows that is Argon2id: each guess fills 64 MiB
-// of memory three times over, which a graphics card does little faster than a phone. An
-// account is still only as safe as its passphrase is hard to guess.
+// The key is drawn from the account's root: 32 random bytes, made by its first phone or
+// browser. There is no passphrase. A device gets the key from one the account has
+// already, approved there (with Face ID, Touch ID or another passkey), sealed to a key the
+// new device made for that and showed in a link: so the server hands it over and cannot
+// open it. The root, written out, is the account's recovery key, for when every device is
+// lost: shown to the person once, kept by them, and never sent anywhere. The server is
+// given nothing of it, and has nothing to guess it from: it is not made from anything a
+// person chose.
 //
 // This file is kept as three identical copies (a test compares them): mod/hooks/seal.js
 // (the plugin), web/seal.js (the page) and mod/agent/seal.mjs (the machine agent).
 // The plugin's runtime has no crypto library, so everything is implemented here in plain
-// JavaScript: SHA-256, SHA-512, HMAC, HKDF, BLAKE2b, Argon2id, AES-256-GCM, Ed25519,
-// X25519, and the check of an SSH signature (a release's).
-// The tests check each one against Node's own. (Where there is WebAssembly, which is in a
-// browser and in the machine's agent, the inner step of Argon2id is run in that: the same
-// step, several times as fast. And the page keeps what comes of a passphrase where a
-// script cannot read it back: keys.js.)
+// JavaScript: SHA-256, SHA-512, HMAC, HKDF, AES-256-GCM, Ed25519, X25519, and the check of
+// an SSH signature (a release's). The tests check each one against Node's own. (The page
+// keeps the key where a script cannot read it back, and the root wrapped under a passkey:
+// keys.js.)
 //
-// What a device derives:
+// What the root makes:
 //
-//   salt    = the first 16 bytes of SHA-256("manyclaws salt v4|" + the account's id)
-//   master  = Argon2id(passphrase as NFKC UTF-8, salt, 64 MiB, 3 passes, 1 lane)  never stored, never sent
-//   key     = HKDF-SHA256(master, salt "", info "manyclaws content v4")       the AES-256 key: stored on every device
-//   signer  = HKDF-SHA256(master, salt "", info "manyclaws sign v4")          an Ed25519 private key (its seed): stored
-//                                                                             nowhere. A phone or a browser has it for
-//                                                                             the moment it takes to enrol itself
-//   checker = the Ed25519 public key of signer                                stored by every device: it verifies what
-//                                                                             the signer signed, and cannot sign
+//   root    = 32 random bytes                                                  kept by the account's phones and browsers,
+//                                                                              each under a passkey of its own; and by the
+//                                                                              person, written out (rootText)
+//   key     = HKDF-SHA256(root, salt "", info "manyclaws content v5")         the AES-256 key: stored on every device
+//   signer  = HKDF-SHA256(root, salt "", info "manyclaws sign v5")            an Ed25519 private key (its seed): stored
+//                                                                              nowhere. A phone or a browser makes it from
+//                                                                              the root for the moment it signs
+//   checker = the Ed25519 public key of signer                                 stored by every device: it verifies what
+//                                                                              the signer signed, and cannot sign
 //
 // What is sealed (S is the single character U+E000, which marks a string as sealed):
 //
@@ -48,7 +42,7 @@
 //   the devices    = a sealed value of { list, sig }: the account's phones and browsers, each by a key of its own
 //                    list: the JSON of { v, devices: [{ key, name, at, until }] }, as a string: exactly what was signed.
 //                          v is when the list was made, and never less than the one it replaces; key is the device's
-//                          own Ed25519 public key, made on it and kept there where no script can read its other half;
+//                          own Ed25519 public key, kept on it where no script can read its other half;
 //                          until, where a device is not its owner's own, is when it stops being one of them
 //                    sig:  Ed25519 by signer over SHA-256("manyclaws devices v1|" | list)
 //   an order       = S + "o2." + base64url(iv | ciphertext | tag)
@@ -63,27 +57,28 @@
 //                    names = HKDF-SHA256(key, salt "", info "manyclaws name v1"). The server tells one sealed row
 //                    from another by its name where it has to (a row sent twice is kept once). A name says nothing
 //                    of what it names, and only a device with the key can compute one
+//   handed over    = "k1." + base64url(public | iv | ciphertext | tag)          (sealTo: the key to a new device)
+//                    X25519 between a key made for the once and the new device's, HKDF, AES-256-GCM
 //
-// A different passphrase derives a different key, signer and checker. Nothing in a sealed
-// value says which key sealed it: a device with a different key fails to open it, and
-// that failure is how it knows.
+// Another root makes another key, signer and checker. Nothing in a sealed value says which
+// key sealed it: a device with a different key fails to open it, and that failure is how
+// it knows.
 //
 // An order is what a person asks of a computer from a phone or a browser: a prompt, an
 // answer to what a session asked, a session to start. Each phone and browser signs with a
-// key of its own, which it made itself and which never leaves it. It is one of the
-// account's devices because the passphrase's signer said so, once, when the passphrase
-// was typed there: the list of them is signed by it, sealed, and kept on the server for
-// the account's computers to read. A computer acts only on an order that opens with its
-// key, that a device in the newest list it has seen signed, that is for it, that asks for
-// something allowed where it arrived, that was made within the last hour, and that it has
-// not run before. So nothing the server stores or makes up can make a computer act: it
-// has no device's key, and cannot write a list. A computer has neither: it can read what
-// the account's sessions say, and cannot give an order to another computer. And a device
-// that is lost is taken off the list by any other, with the passphrase: its orders are
-// refused from then on, by every computer that has seen the list without it, whatever
-// list is handed over later (devicesMemory). It still has the key it was given, which
-// opens what is sealed and gives no order: shutting it out of what is said from then on
-// too takes another passphrase, which makes another key.
+// key of its own, which never leaves it. It is one of the account's devices because the
+// root's signer said so, when another device approved it: the list of them is signed by
+// it, sealed, and kept on the server for the account's computers to read. A computer acts
+// only on an order that opens with its key, that a device in the newest list it has seen
+// signed, that is for it, that asks for something allowed where it arrived, that was made
+// within the last hour, and that it has not run before. So nothing the server stores or
+// makes up can make a computer act: it has no device's key, and cannot write a list. A
+// computer has neither: it can read what the account's sessions say, and cannot give an
+// order to another computer. And a device that is lost is taken off the list by any other
+// that has the root: its orders are refused from then on, by every computer that has seen
+// the list without it, whatever list is handed over later (devicesMemory). It still has
+// the key it was given, which opens what is sealed and gives no order: shutting it out of
+// what is said from then on too takes another root, which makes another key.
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -706,336 +701,59 @@ export function keysFromText(text) {
 }
 export const keysText = ({ key, checker }) => 'mcf_' + toB64(key) + '.' + toB64(checker)
 
-// ---- A passphrase: the key is drawn from it and the account's id, wherever it is typed
+// ---- The account's root: 32 random bytes, made by its first phone or browser, from which its keys are drawn
 
-// BLAKE2b (RFC 7693), with no key: what Argon2id hashes with. Each of its 64-bit words is
-// kept as two 32-bit halves, the low one first.
-// (where it starts from is where SHA-512 starts from)
-const B2_START = new Uint32Array(H512.flatMap((h) => [Number(h & 0xffffffffn), Number(h >> 32n)]))
-// (which words of the message each round takes, in order: the standard's table, with each number doubled, since a word is two halves here)
-const B2_ORDER = [
-  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-  [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
-  [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
-  [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
-  [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
-  [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
-  [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
-  [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
-  [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
-  [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
-].map((row) => row.map((n) => n * 2))
-const TWO32 = 4294967296
-
-// One mixing of four words of `v` (a, b, c, d: where each one's low half is) with two of the message's
-function b2Mix(v, m, a, b, c, d, x, y) {
-  let s = v[a] + v[b] + m[x]
-  v[a] = s
-  v[a + 1] = v[a + 1] + v[b + 1] + m[x + 1] + ((s / TWO32) | 0)
-  let lo = v[d] ^ v[a]
-  let hi = v[d + 1] ^ v[a + 1]
-  v[d] = hi
-  v[d + 1] = lo
-  s = v[c] + v[d]
-  v[c] = s
-  v[c + 1] = v[c + 1] + v[d + 1] + ((s / TWO32) | 0)
-  lo = v[b] ^ v[c]
-  hi = v[b + 1] ^ v[c + 1]
-  v[b] = (lo >>> 24) | (hi << 8)
-  v[b + 1] = (hi >>> 24) | (lo << 8)
-  s = v[a] + v[b] + m[y]
-  v[a] = s
-  v[a + 1] = v[a + 1] + v[b + 1] + m[y + 1] + ((s / TWO32) | 0)
-  lo = v[d] ^ v[a]
-  hi = v[d + 1] ^ v[a + 1]
-  v[d] = (lo >>> 16) | (hi << 16)
-  v[d + 1] = (hi >>> 16) | (lo << 16)
-  s = v[c] + v[d]
-  v[c] = s
-  v[c + 1] = v[c + 1] + v[d + 1] + ((s / TWO32) | 0)
-  lo = v[b] ^ v[c]
-  hi = v[b + 1] ^ v[c + 1]
-  v[b] = (lo << 1) | (hi >>> 31)
-  v[b + 1] = (hi << 1) | (lo >>> 31)
+const CONTENT = 'manyclaws content v5'
+const SIGNER = 'manyclaws sign v5'
+// A new root, for a new account, or for one started afresh
+export const newRoot = () => random(32)
+// Everything a root makes: the key that seals, the half that signs the list of the account's devices and the half that
+// checks it. Null for anything that is not a root.
+export function keysFromRoot(root) {
+  if (!(root instanceof Uint8Array) || root.length !== 32) return null
+  const signer = hkdf(root, SIGNER)
+  return { key: hkdf(root, CONTENT), signer, checker: verifyKey(signer) }
 }
 
-// BLAKE2b of `data`, `length` bytes of it (1 to 64)
-export function blake2b(data, length = 64) {
-  const h = B2_START.slice()
-  h[0] ^= 0x01010000 ^ length
-  const v = new Uint32Array(32)
-  const m = new Uint32Array(32)
-  const block = new Uint8Array(128)
-  const view = new DataView(block.buffer)
-  // One block of 128 bytes: `count` is how many bytes have been taken with it, `last` that there are no more
-  const step = (count, last) => {
-    for (let i = 0; i < 32; i++) m[i] = view.getUint32(i * 4, true)
-    v.set(h)
-    v.set(B2_START, 16)
-    v[24] ^= count
-    v[25] ^= count / TWO32
-    if (last) {
-      v[28] = ~v[28]
-      v[29] = ~v[29]
-    }
-    for (let round = 0; round < 12; round++) {
-      const s = B2_ORDER[round % 10]
-      b2Mix(v, m, 0, 8, 16, 24, s[0], s[1])
-      b2Mix(v, m, 2, 10, 18, 26, s[2], s[3])
-      b2Mix(v, m, 4, 12, 20, 28, s[4], s[5])
-      b2Mix(v, m, 6, 14, 22, 30, s[6], s[7])
-      b2Mix(v, m, 0, 10, 20, 30, s[8], s[9])
-      b2Mix(v, m, 2, 12, 22, 24, s[10], s[11])
-      b2Mix(v, m, 4, 14, 16, 26, s[12], s[13])
-      b2Mix(v, m, 6, 8, 18, 28, s[14], s[15])
-    }
-    for (let i = 0; i < 16; i++) h[i] ^= v[i] ^ v[i + 16]
-  }
-  let at = 0
-  for (; data.length - at > 128; at += 128) {
-    block.set(data.subarray(at, at + 128))
-    step(at + 128, false)
-  }
-  block.fill(0)
-  block.set(data.subarray(at))
-  step(data.length, true)
-  const out = new Uint8Array(64)
-  const ov = new DataView(out.buffer)
-  for (let i = 0; i < 16; i++) ov.setUint32(i * 4, h[i], true)
-  return out.slice(0, length)
-}
-
-// Argon2id (RFC 9106, version 0x13). Its memory is blocks of 1024 bytes, each 128 64-bit
-// words: here a Uint32Array, a word's low half first, so a block is 256 of its numbers.
-const le32 = (n) => new Uint8Array([n & 255, (n >>> 8) & 255, (n >>> 16) & 255, n >>> 24])
-// The high half of the product of two 32-bit numbers
-function mulhi(a, b) {
-  const a0 = a & 0xffff
-  const a1 = a >>> 16
-  const b0 = b & 0xffff
-  const b1 = b >>> 16
-  return a1 * b1 + Math.floor((a1 * b0 + a0 * b1 + ((a0 * b0) >>> 16)) / 65536)
-}
-
-// A hash of any length (the standard's H'): BLAKE2b, run on as often as it takes
-function longHash(length, input) {
-  const first = concat(le32(length), input)
-  if (length <= 64) return blake2b(first, length)
-  const out = new Uint8Array(length)
-  let v = blake2b(first)
-  let at = 32
-  out.set(v.subarray(0, 32))
-  for (; length - at > 64; at += 32) {
-    v = blake2b(v)
-    out.set(v.subarray(0, 32), at)
-  }
-  out.set(blake2b(v, length - at), at)
-  return out
-}
-
-// x = x + y + 2 * (the low half of x) * (the low half of y), in 64 bits: Argon2's own
-// step, where BLAKE2b has a plain sum
-function blamka(v, x, y) {
-  const xl = v[x]
-  const yl = v[y]
-  const x0 = xl & 0xffff
-  const x1 = xl >>> 16
-  const y0 = yl & 0xffff
-  const y1 = yl >>> 16
-  const low = x0 * y0
-  const mid = x1 * y0 + x0 * y1 + (low >>> 16)
-  // (the product's two halves, each doubled)
-  const pl = ((mid & 0xffff) << 16) | (low & 0xffff)
-  const ph = x1 * y1 + ((mid / 65536) | 0)
-  const s = xl + yl + ((pl << 1) >>> 0)
-  v[x] = s
-  v[x + 1] = v[x + 1] + v[y + 1] + (((ph << 1) | (pl >>> 31)) >>> 0) + ((s / TWO32) | 0)
-}
-function a2Mix(v, a, b, c, d) {
-  blamka(v, a, b)
-  let lo = v[d] ^ v[a]
-  let hi = v[d + 1] ^ v[a + 1]
-  v[d] = hi
-  v[d + 1] = lo
-  blamka(v, c, d)
-  lo = v[b] ^ v[c]
-  hi = v[b + 1] ^ v[c + 1]
-  v[b] = (lo >>> 24) | (hi << 8)
-  v[b + 1] = (hi >>> 24) | (lo << 8)
-  blamka(v, a, b)
-  lo = v[d] ^ v[a]
-  hi = v[d + 1] ^ v[a + 1]
-  v[d] = (lo >>> 16) | (hi << 16)
-  v[d + 1] = (hi >>> 16) | (lo << 16)
-  blamka(v, c, d)
-  lo = v[b] ^ v[c]
-  hi = v[b + 1] ^ v[c + 1]
-  v[b] = (lo << 1) | (hi >>> 31)
-  v[b + 1] = (hi << 1) | (lo >>> 31)
-}
-// BLAKE2b's round over sixteen words of `v`: word k is at `at`, `pair` on for every two
-// before it, and 2 on where it is the second of its two. (A row of a block is sixteen
-// words side by side, a column sixteen that lie two by two down it.)
-function a2Round(v, at, pair) {
-  const w0 = at
-  const w2 = at + pair
-  const w4 = w2 + pair
-  const w6 = w4 + pair
-  const w8 = w6 + pair
-  const w10 = w8 + pair
-  const w12 = w10 + pair
-  const w14 = w12 + pair
-  a2Mix(v, w0, w4, w8, w12)
-  a2Mix(v, w0 + 2, w4 + 2, w8 + 2, w12 + 2)
-  a2Mix(v, w2, w6, w10, w14)
-  a2Mix(v, w2 + 2, w6 + 2, w10 + 2, w14 + 2)
-  a2Mix(v, w0, w4 + 2, w10, w14 + 2)
-  a2Mix(v, w0 + 2, w6, w10 + 2, w12)
-  a2Mix(v, w2, w6 + 2, w8, w12 + 2)
-  a2Mix(v, w2 + 2, w4, w8 + 2, w14)
-}
-
-// The memory Argon2id fills, and the step that fills a block of it: `blocks` of them, as
-// one Uint32Array (`mem`), and `fill(prev, ref, out, xor)`, which makes block `out` from
-// blocks `prev` and `ref` (over what `out` held, with `xor`). In plain JavaScript here,
-// which is what the plugin runs; the same step in WebAssembly is below.
-export function plainEngine(blocks) {
-  const mem = new Uint32Array(blocks * 256)
-  const r = new Uint32Array(256)
-  const fill = (prev, ref, out, xor) => {
-    const p = prev * 256
-    const q = ref * 256
-    const o = out * 256
-    for (let i = 0; i < 256; i++) r[i] = mem[p + i] ^ mem[q + i]
-    if (xor) for (let i = 0; i < 256; i++) mem[o + i] ^= r[i]
-    else for (let i = 0; i < 256; i++) mem[o + i] = r[i]
-    for (let i = 0; i < 256; i += 32) a2Round(r, i, 4)
-    for (let i = 0; i < 32; i += 4) a2Round(r, i, 32)
-    for (let i = 0; i < 256; i++) mem[o + i] ^= r[i]
-  }
-  return { mem, fill, done: () => mem.fill(0) }
-}
-
-// The same step in WebAssembly, for wherever that runs (a browser, a machine's agent; not
-// the plugin, whose runtime has none), where it is several times as fast. It is
-// deploy/argon2.wat, built and written in here by deploy/make-argon2.mjs, and a test holds
-// it to the step above. Rejects where there is no WebAssembly, or none may be compiled.
-const A2_STEP = 'AGFzbQEAAAABFQNgBH9_f38AYAJ_fwBgBX9_f39_AAIPAQNlbnYGbWVtb3J5AgABAwQDAAECBwgBBGZpbGwAAgrUBAPcAQEEfiAAKQMAIQQgASkDACEFIAIpAwAhBiADKQMAIQcgBCAFfCAEQv____8PgyAFQv____8Pg35CAYZ8IQQgByAEhUIgiiEHIAYgB3wgBkL_____D4MgB0L_____D4N-QgGGfCEGIAUgBoVCGIohBSAEIAV8IARC_____w-DIAVC_____w-DfkIBhnwhBCAHIASFQhCKIQcgBiAHfCAGQv____8PgyAHQv____8Pg35CAYZ8IQYgBSAGhUI_iiEFIAAgBDcDACABIAU3AwAgAiAGNwMAIAMgBzcDAAu1AQEHfyAAIAFqIQIgAiABaiEDIAMgAWohBCAEIAFqIQUgBSABaiEGIAYgAWohByAHIAFqIQggACADIAUgBxAAIABBCGogA0EIaiAFQQhqIAdBCGoQACACIAQgBiAIEAAgAkEIaiAEQQhqIAZBCGogCEEIahAAIAAgA0EIaiAGIAhBCGoQACAAQQhqIAQgBkEIaiAHEAAgAiAEQQhqIAUgB0EIahAAIAJBCGogAyAFQQhqIAgQAAu8AQIBfwF-QQAhBQNAIAAgBWopAwAgASAFaikDAIUhBiAEIAVqIAY3AwAgAwRAIAYgAiAFaikDAIUhBgsgAiAFaiAGNwMAIAVBCGoiBUGACEkNAAtBACEFA0AgBCAFakEQEAEgBUGAAWoiBUGACEkNAAtBACEFA0AgBCAFakGAARABIAVBEGoiBUGAAUkNAAtBACEFA0AgAiAFaiACIAVqKQMAIAQgBWopAwCFNwMAIAVBCGoiBUGACEkNAAsL'
-let a2Step = null
-export async function wasmEngine() {
-  a2Step ??= WebAssembly.compile(fromB64(A2_STEP))
-  const step = await a2Step
-  return async (blocks) => {
-    // (one block past the last, for the step to work in)
-    const memory = new WebAssembly.Memory({ initial: Math.ceil(((blocks + 1) * 1024) / 65536) })
-    const { exports } = await WebAssembly.instantiate(step, { env: { memory } })
-    return {
-      mem: new Uint32Array(memory.buffer, 0, blocks * 256),
-      fill: (prev, ref, out, xor) => exports.fill(prev * 1024, ref * 1024, out * 1024, xor ? 1 : 0, blocks * 1024),
-      done: () => new Uint8Array(memory.buffer).fill(0),
+// The root written out, for a person to keep: the recovery key. Crockford's base32 (no I, L, O or U), 52 characters in
+// 13 groups of 4. Read back with O taken for 0 and I and L for 1, in either case, with any spaces and dashes; anything
+// else, or a last character with bits beyond the root's, is no recovery key (null).
+const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+export function rootText(root) {
+  let value = 0
+  let bits = 0
+  let out = ''
+  for (const b of root) {
+    value = ((value << 8) | b) & 0xffff
+    bits += 8
+    while (bits >= 5) {
+      out += B32[(value >>> (bits - 5)) & 31]
+      bits -= 5
     }
   }
+  if (bits) out += B32[(value << (5 - bits)) & 31]
+  return out.match(/.{1,4}/g).join('-')
 }
-
-const A2_PAUSE = 1024 // blocks between one `pause` and the next
-
-// Argon2id: `length` bytes from a password and a salt, at a cost of `m` KiB of memory
-// filled `t` times over in `p` lanes. `pause`, when given, is awaited every 1024 blocks,
-// so whatever else the caller's thread has to do is done in between. `engine` is what
-// holds the memory and fills it (plainEngine); `secret` and `ad` are the standard's, and
-// only its own test uses them.
-export async function argon2id(password, salt, { m, t, p = 1, length = 32, secret = new Uint8Array(0), ad = new Uint8Array(0), pause, engine = plainEngine } = {}) {
-  const blocks = 4 * p * Math.floor(m / (4 * p))
-  const lane = blocks / p // how many blocks a lane is
-  const segment = lane / 4 // and a quarter of one
-  const start = blake2b(concat(le32(p), le32(length), le32(m), le32(t), le32(0x13), le32(2), le32(password.length), password, le32(salt.length), salt, le32(secret.length), secret, le32(ad.length), ad))
-  // Three blocks past the end of the memory: one of noughts, the one addresses are made from, and the addresses
-  const { mem, fill, done } = await engine(blocks + 3)
-  const [NOUGHT, FROM, ADDRESSES] = [blocks, blocks + 1, blocks + 2]
-  const put = (block, bytes) => {
-    for (let i = 0; i < 256; i++) mem[block * 256 + i] = bytes[i * 4] | (bytes[i * 4 + 1] << 8) | (bytes[i * 4 + 2] << 16) | (bytes[i * 4 + 3] << 24)
-  }
-  for (let l = 0; l < p; l++) {
-    put(l * lane, longHash(1024, concat(start, le32(0), le32(l))))
-    put(l * lane + 1, longHash(1024, concat(start, le32(1), le32(l))))
-  }
-  let filled = 0
-  for (let pass = 0; pass < t; pass++) {
-    for (let slice = 0; slice < 4; slice++) {
-      // The first half of the first pass takes its blocks from where a count says (so that
-      // what is read does not depend on the password); the rest, from where the block before says
-      const counted = pass === 0 && slice < 2
-      for (let l = 0; l < p; l++) {
-        if (counted) {
-          mem.fill(0, NOUGHT * 256, (ADDRESSES + 1) * 256)
-          mem.set([pass, 0, l, 0, slice, 0, blocks, 0, t, 0, 2, 0], FROM * 256)
-        }
-        const addresses = () => {
-          mem[FROM * 256 + 12]++
-          fill(NOUGHT, FROM, ADDRESSES, false)
-          fill(NOUGHT, ADDRESSES, ADDRESSES, false)
-        }
-        let index = pass === 0 && slice === 0 ? 2 : 0
-        if (counted && index) addresses()
-        for (; index < segment; index++) {
-          const at = l * lane + slice * segment + index
-          const prev = at % lane === 0 ? at + lane - 1 : at - 1
-          if (counted && index % 128 === 0) addresses()
-          const from = counted ? ADDRESSES * 256 + (index % 128) * 2 : prev * 256
-          const j1 = mem[from]
-          const other = pass === 0 && slice === 0 ? l : mem[from + 1] % p
-          // How many blocks it may take one from: those of its own lane made so far but the last, or those of another lane made before this slice
-          const behind = pass === 0 ? slice * segment : lane - segment
-          const area = other === l ? behind + index - 1 : behind - (index === 0 ? 1 : 0)
-          const back = area - 1 - mulhi(area, mulhi(j1, j1))
-          const first = pass !== 0 && slice !== 3 ? (slice + 1) * segment : 0
-          fill(prev, other * lane + ((first + back) % lane), at, pass !== 0)
-          if (pause && ++filled % A2_PAUSE === 0) await pause()
-        }
-      }
+export function rootFromText(text) {
+  const s = String(text ?? '').toUpperCase().replace(/[\s-]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1')
+  if (!/^[0-9A-HJKMNP-TV-Z]{52}$/.test(s)) return null
+  const root = new Uint8Array(32)
+  let value = 0
+  let bits = 0
+  let n = 0
+  for (const c of s) {
+    value = ((value << 5) | B32.indexOf(c)) & 0xffff
+    bits += 5
+    if (bits >= 8) {
+      root[n++] = (value >>> (bits - 8)) & 255
+      bits -= 8
     }
   }
-  // The last block of every lane, together
-  const last = new Uint8Array(1024)
-  for (let i = 0; i < 256; i++) {
-    let word = 0
-    for (let l = 0; l < p; l++) word ^= mem[(l * lane + lane - 1) * 256 + i]
-    last[i * 4] = word
-    last[i * 4 + 1] = word >>> 8
-    last[i * 4 + 2] = word >>> 16
-    last[i * 4 + 3] = word >>> 24
-  }
-  done?.()
-  return longHash(length, last)
+  return n === 32 && bits === 4 && (value & 15) === 0 ? root : null
 }
 
-const CONTENT = 'manyclaws content v4'
-const SIGNER = 'manyclaws sign v4'
-// What a guess at a passphrase costs: 64 MiB of memory, filled three times over, in one lane
-export const COST = { m: 65536, t: 3, p: 1 }
-// The salt a passphrase is stretched with: drawn from the account's id, so every device
-// of the account's makes the same one and none is kept anywhere
-export const saltOf = (account) => sha256(enc.encode('manyclaws salt v4|' + String(account))).slice(0, 16)
-
-// Everything a passphrase makes for an account (by its id): the key that seals, the half
-// that signs the list of the account's devices and the half that checks it. Whatever is
-// typed makes some key: nothing here, and nothing the server has, says whether it is the
-// one the account's other devices made. `pause` and `engine` are Argon2id's (the step in
-// WebAssembly where there is any, in plain JavaScript where there is none); `cost` is for
-// a test of something else, which has no minute to give to this.
-export async function keysFromPassphrase(passphrase, account, { pause, engine, cost = COST } = {}) {
-  if (typeof account !== 'string' || !account) return null
-  engine ??= await wasmEngine().catch(() => plainEngine)
-  const master = await argon2id(enc.encode(String(passphrase).normalize('NFKC')), saltOf(account), { ...cost, pause, engine })
-  const key = hkdf(master, CONTENT)
-  const signer = hkdf(master, SIGNER)
-  master.fill(0)
-  return { key, signer, checker: verifyKey(signer) }
-}
-
-// (A computer keeps its key written out, keysText above, where its system keeps secrets.
-// It is not kept wrapped under anything a passphrase is part of: what opens with a guess
-// at a passphrase and one cheap sum is a way to try guesses without Argon2id's cost.)
+// (A computer keeps its key written out, keysText above, where its system keeps secrets. It is given the key and the
+// checker, never the root: it seals and opens, and cannot sign a list of devices.)
 
 // The key ready for use: what seal() and open() take. With it, what names are made with
 // (nameOf): drawn from the key, so that a name tells nothing of the key and is the same
@@ -1121,9 +839,9 @@ export function openBytes(bytes, key) {
 
 
 // ---- The account's devices: its phones and browsers, each known by a key of its own
-// that it made itself. The list of them is signed by the passphrase's signer, which a
-// device has only for the moment the passphrase is typed there, and sealed like anything
-// else: to the server it is one more sealed thing. A computer keeps the newest it has seen.
+// that never leaves it. The list of them is signed by the root's signer, which a device
+// makes from the root only for the moment it signs, and sealed like anything else: to
+// the server it is one more sealed thing. A computer keeps the newest it has seen.
 
 const DEVICES_TAG = enc.encode('manyclaws devices v1|')
 export const DEVICE_STAY_MS = 24 * 3600_000 // how long a device that is not its owner's own stays one of the account's
@@ -1132,10 +850,10 @@ const isDeviceKey = (v) => typeof v === 'string' && /^[A-Za-z0-9_-]{43}$/.test(v
 
 // What a list is signed by
 export const devicesDigest = (list) => sha256(concat(DEVICES_TAG, enc.encode(list)))
-// A list ({ v, devices, allowed }) written out and signed: `signer` is the passphrase's own. Sealed, it is what the
+// A list ({ v, devices, allowed }) written out and signed: `signer` is the root's. Sealed, it is what the
 // server keeps. Beside the devices, and signed with them, the plugins the account's owner allowed on a computer where
-// they are no release (`allowed`: { machine, hash, at }, the hash as pluginDigest makes it): what only the passphrase
-// says, as only it says which devices are the account's. And on a device, `start: false` where it may not start
+// they are no release (`allowed`: { machine, hash, at }, the hash as pluginDigest makes it): what only the root says,
+// as only it says which devices are the account's. And on a device, `start: false` where it may not start
 // sessions on the account's computers (one that is not its owner's own, with `until`, never may).
 const MAX_ALLOWED = 200
 export function signDevices({ v, devices, allowed = [] }, signer) {
@@ -1143,7 +861,7 @@ export function signDevices({ v, devices, allowed = [] }, signer) {
   return { list, sig: toB64(sign(devicesDigest(list), signer)) }
 }
 const isAllowed = (a) => a && typeof a.machine === 'string' && a.machine.length <= 100 && /^[0-9a-f]{64}$/.test(a.hash) && Number.isFinite(a.at)
-// A list as it was signed ({ v, devices, allowed }), where the passphrase's checker says its signer signed it: null otherwise
+// A list as it was signed ({ v, devices, allowed }), where the root's checker says its signer signed it: null otherwise
 export function signedDevices(got, checker) {
   try {
     if (!got || typeof got.list !== 'string' || typeof got.sig !== 'string' || !checker) return null
@@ -1171,20 +889,20 @@ export const deviceIn = (list, key, now = Date.now()) => {
 }
 
 // What a computer knows of the account's devices: the newest list it has seen that the
-// passphrase's signer signed, and every device it has seen taken off one. `kept` is the
+// root's signer signed, and every device it has seen taken off one. `kept` is the
 // list as it was last kept here, sealed, and `save` keeps one. One older than the one held
 // is not taken, so a device taken off the list stays off it, whatever the server hands
 // over later.
 //
-// Nor does one come back on a newer list. A browser being given the passphrase has no
-// list of its own to go by: it builds the next one on the list the server hands it, and
+// Nor does one come back on a newer list. A browser that signs a list has no list of its
+// own to go by: it builds the next one on the list the server hands it, and
 // signs that. Handed an old one, it would sign a device back on that had been taken off
 // since, under a newer number than any list here. So a device that was on the list held
 // here and is not on the one that replaced it is remembered as gone (`gone`: the keys
 // remembered so before; `saveGone` keeps them), and is none of the account's here again,
-// whichever list has it. Nothing is lost by that: a browser makes itself a new key each
-// time it is given the passphrase, so no device is ever put back under the key it was
-// taken off by.
+// whichever list has it. Nothing is lost by that: a device is given a new key of its own
+// each time it is approved, so no device is ever put back under the key it was taken off
+// by.
 const MAX_GONE = 500
 export function devicesMemory(kept, key, checker, save = () => {}, { gone = [], saveGone = () => {} } = {}) {
   let held = readDevices(kept, key, checker)
@@ -1277,9 +995,9 @@ export const readOrder = (text, key, devices, now = Date.now()) => orderIn(text,
 export class OrderRefused extends Error {}
 const REFUSED = {
   unsigned: 'it did not come signed by one of your devices',
-  key: 'it was not sealed with the key this computer was given: if your passphrase has been set again, give this computer the new one',
-  device: "the device it was asked from is not one of your account's devices as this computer knows them: type your passphrase into that device again (Account), which makes it one",
-  over: "the device it was asked from was made one of your account's devices for a day, as one that is not your own, and the day is over: type your passphrase into it again",
+  key: 'it was not sealed with the key this computer was given: if your account was started afresh with a new key, connect this computer again, from the link its plugin shows',
+  device: "the device it was asked from is not one of your account's devices as this computer knows them: approve that device again from one that has your key",
+  over: "the device it was asked from was made one of your account's devices for a day, as one that is not your own, and the day is over: approve it again from one of your own",
   signature: 'it was not signed by the device it says it is from',
 }
 

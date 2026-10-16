@@ -148,12 +148,12 @@
       <div class="words">
         <p class="tag">What we can&rsquo;t read</p>
         <h2>Sealed before it leaves your desk.</h2>
-        <p>Your sessions are sealed with a key made from a passphrase you choose. Each of your devices makes the key itself, from the passphrase you type there, and nothing of either is ever sent to us: no key, no hash, not even whether you have a passphrase. Each computer seals what its sessions say before sending it: prompts, replies, tool calls and their output, photos, titles, even the text of your alerts. Your phone opens it with the same key. There is no setting for this, and no way round it: we refuse anything that arrives unsealed.</p>
+        <p>Your sessions are sealed with a key of your own: made of random bytes on your phone or browser the first time you sign in, kept there behind Face ID or Touch ID, and handed to each of your other devices sealed, as you approve it. Nothing of it is ever sent to us in a form we could open: no key, no hash, nothing to guess at. Each computer seals what its sessions say before sending it: prompts, replies, tool calls and their output, photos, titles, even the text of your alerts. Your phone opens it with the same key. There is no setting for this, and no way round it: we refuse anything that arrives unsealed.</p>
         <dl class="ledger">
           <div><dt>We can see</dt><dd>that a session is running, on which of your computers, and when.</dd></div>
           <div><dt>We can&rsquo;t see</dt><dd>what you asked, what Claude said, or what it ran.</dd></div>
-          <div><dt>We never have</dt><dd>your password or your passphrase. Your own devices turn them into what is needed; neither leaves them.</dd></div>
-          <div><dt>The catch</dt><dd>a forgotten password is set again by a code to your email. A forgotten passphrase is not: we never had it, and what was sealed stays sealed.</dd></div>
+          <div><dt>We never have</dt><dd>your password or your key. Your own devices turn your password into what signs you in, and keep your key; neither leaves them.</dd></div>
+          <div><dt>The catch</dt><dd>a forgotten password is set again by a code to your email. A lost key is not: lose every device that has it, and the recovery key you were given to keep, and what was sealed stays sealed. We never had it.</dd></div>
         </dl>
       </div>
     </section>
@@ -161,13 +161,13 @@
     <section class="setup">
       <p class="tag">Getting it going</p>
       <h2>Ask Claude to set it up.</h2>
-      <p class="setup-say">On each computer, say one sentence to Claude Code. It reads the guide and installs the plugin. Then the plugin asks you, in its own dialog, for two things from your account page: an API token, and your encryption passphrase. Neither goes into a chat or a command.</p>
+      <p class="setup-say">On each computer, say one sentence to Claude Code. It reads the guide and installs the plugin. Then a new session shows a link, and a code for your phone: open it, approve the computer with Face ID, and it is yours. Nothing goes into a chat or a command.</p>
       <pre class="term" aria-label="What you say to Claude Code, and what comes back"><code><span class="p">&gt;</span> Read https://manyclaws.dev/setup.md and set this computer up.
 
 <span class="ok">✓ Added the marketplace</span>
 <span class="ok">✓ Installed the plugin</span>
-Your turn. Type <span class="h">/plugin configure manyclaws@manyclaws</span>
-and give it your <span class="s">API token</span> and your <span class="s">passphrase</span>.</code></pre>
+Your turn. Start a new session, open the <span class="h">link</span> it shows
+on your phone, and approve it with <span class="s">Face ID</span>.</code></pre>
       <p class="setup-foot">Claude Code keeps running on your computers, under your own Claude account, exactly as it does now. <a href="/setup">The guide</a> is public and the same for everyone, if you would rather read it first or do it by hand.</p>
     </section>
 
@@ -231,7 +231,7 @@ and give it your <span class="s">API token</span> and your <span class="s">passp
           </details>
           <details>
             <summary>Do you store any data?</summary>
-            <p>Yes: your sessions&rsquo; chats, for fourteen days, and only encrypted. We keep them for two reasons. Most connections upload slowly, so your phone gets a chat from us much faster than from your computer. And a computer that is asleep or restarting can&rsquo;t answer at all, while its chats can still be read here. All of it is sealed on your computer before it is sent, and only your own devices can open it, with the passphrase you enter on each of them. We can&rsquo;t read any of it. A chat is removed fourteen days after we last hear from its session, and you can clear all of them from your account page whenever you like: your computers send them again as they connect. The transcripts on your own computers are yours and stay where they are.</p>
+            <p>Yes: your sessions&rsquo; chats, for fourteen days, and only encrypted. We keep them for two reasons. Most connections upload slowly, so your phone gets a chat from us much faster than from your computer. And a computer that is asleep or restarting can&rsquo;t answer at all, while its chats can still be read here. All of it is sealed on your computer before it is sent, and only your own devices can open it, with the key each of them was given. We can&rsquo;t read any of it. A chat is removed fourteen days after we last hear from its session, and you can clear all of them from your account page whenever you like: your computers send them again as they connect. The transcripts on your own computers are yours and stay where they are.</p>
           </details>
           <details>
             <summary>Can I stop paying?</summary>

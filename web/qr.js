@@ -1,6 +1,12 @@
-// A QR code for an address: what a phone's camera is pointed at to open this page there
-// (the tour an account is given once it has paid: app.js, showTour). It says the address
-// and nothing else: nothing of the account's is ever put in one.
+// A QR code for an address: what a phone's camera is pointed at to open it there (the
+// tour an account is given once it has paid: app.js, showTour; and the links a device is
+// approved by, or approves another by, and a computer's plugin connects it by). It says
+// the address and nothing else: nothing secret of the account's is ever put in one. (A
+// link to approve a device by has a key in it that was made for the once, whose other
+// half never leaves the device that made it.)
+//
+// Kept as two identical copies (a test compares them): web/qr.js (the page) and
+// mod/hooks/qr.js (the plugin, which draws it in the terminal).
 //
 // The code is the ordinary kind (ISO 18004): the address as bytes, error correction M (a
 // fifth of it may be lost), and the smallest of versions 1 to 6 that holds it, which is an

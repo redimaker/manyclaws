@@ -20,14 +20,14 @@
        and holding it against the public repository's is holding all of it. The modules the script goes on to
        import are named too, each fetched and checked before the script asks for it (seal.js before keys.js, which
        imports it). -->
-  <link rel="stylesheet" href="app.css" integrity="sha384-P5/oLTHOaFp3vSMbpOKu8STrI59MY5zTEJ4QDPI2X3PVuQsUKURxkEas1s/rFHgX">
+  <link rel="stylesheet" href="app.css" integrity="sha384-l2brGcyv756GR7Pys7Ds6fTQ1NWa0ahDH25j+biPdgOYFCp8/Suzn8wg8ln0m36j">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
-  <link rel="stylesheet" href="/site/join.css" integrity="sha384-It05x/2EV39+9/HmQFKcu0xLy0Rs5ZCmqyt4XwhlEcW2mU87v/zjlyvqiIz2en0u">
-  <link rel="stylesheet" href="/site/account.css" integrity="sha384-iXNtiv6ROo1bs7A2jUQm6Ywq/IiiKm95WzhXkd7YrD6eOSprO2PAF4iMWvLTGBeZ">
-  <link rel="modulepreload" href="/seal.js" integrity="sha384-jcDlODIznMAow2oYmPCz6+HbtIdNIQudXOuvumF4xWpbVsP+YQ0dE0jjJczfqw8b">
-  <link rel="modulepreload" href="/keys.js" integrity="sha384-D1CKIVZRBXJNXOlnmVdRWH0PFpegqa4GYNjlhU2Ks2jZ5wSTEzB+1U/mRDOPjRni">
-  <link rel="modulepreload" href="/qr.js" integrity="sha384-w+/fVzQtEtgcqsDZth00TL3NiGQ8L7PE5ffHkCqrGaekGoOy5O6yNiwwkdLXXgzP">
-  <script src="app.js" defer integrity="sha384-s2TS3aAsUyo7fDBbMGRPbFmBwgBDuKepLHfUyfkP/EHyF8xyBUD+BFDh9yhULVC7"></script>
+  <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
+  <link rel="stylesheet" href="/site/account.css" integrity="sha384-ZBAepwzX59yX/T4v2jPhynXRXQmV/WgAsqIknvZ9LHWeO3OB7xBW1UPhZ3X31Yzv">
+  <link rel="modulepreload" href="/seal.js" integrity="sha384-wQtSoQAWNwwDAYJwxuIIPqr6TL1K8ebV0gRVOQI5yE0Dl16fXzUuAPtg3iKL3rwO">
+  <link rel="modulepreload" href="/keys.js" integrity="sha384-DV0dBZDbhftq6tBZIEVgoXBPfK/CpCoEGNUSCOcZBxha2RvHT4FibjI03YBUUi08">
+  <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
+  <script src="app.js" defer integrity="sha384-ENA4Ik3aYPjIJYFUjV0SAl10yfevEF8wp/I4Z44hf2vJrOK2Xbn4fLG6hzGf3eWP"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -73,8 +73,8 @@
       <p class="login-other"><button type="button" class="link" data-card="login-form">I have an account</button></p>
     </form>
     <!-- A forgotten password: a code is sent to the account's email, and typed here with a new password. The
-         password is never sent, as ever: what it is stretched into is. Nothing of this touches the encryption
-         passphrase, of which the server has nothing. A server that sends no mail has no way past one, and says so. -->
+         password is never sent, as ever: what it is stretched into is. Nothing of this touches the account's
+         encryption key, of which the server has nothing. A server that sends no mail has no way past one, and says so. -->
     <form id="recover-form" class="login-card" hidden>
       <h1>Forgot your password?</h1>
       <p id="recover-note" class="muted">Enter your email and we will send it a code to set a new password with.</p>
@@ -102,14 +102,15 @@
       <p id="pay-error" class="error" hidden></p>
       <p class="login-other"><button type="button" id="pay-code" class="link" hidden>I have a code</button><button type="button" id="pay-manage" class="link" hidden>Billing and invoices</button><button type="button" id="pay-logout" class="link">Sign out</button></p>
     </div>
-    <!-- Signed in, on a browser that has not been given the account's passphrase: it is asked for here, before the
-         sessions, which this browser could show only as encrypted. The box is the one the account's page has (app.js,
-         passphraseParts): what is typed is made into the key here, and nothing of it goes to the server. It can be
-         left for later, and the sessions are then shown closed, with the line across the top that leads to the box. -->
-    <div id="passphrase-card" class="login-card" hidden>
-      <h1 data-site-says="Your passphrase.">Encryption passphrase</h1>
-      <div id="passphrase-ask" class="passphrase-ask acct-body"></div>
-      <p class="login-other"><button type="button" id="passphrase-later" class="link">Not now</button><button type="button" id="passphrase-logout" class="link">Sign out</button></p>
+    <!-- Signed in, on a browser that has not been given the account's key: how it gets it is shown here, before the
+         sessions, which this browser could show only as encrypted (app.js, drawKeyless): approved from another of the
+         account's devices, by its link or its code; the recovery key; or, for an account with none yet, the key made
+         here. It can be left for later, and the sessions are then shown closed, with the line across the top that
+         leads to Account. -->
+    <div id="key-card" class="login-card" hidden>
+      <h1 data-site-says="Your key.">Encryption key</h1>
+      <div id="key-ask" class="key-ask acct-body"></div>
+      <p class="login-other"><button type="button" id="key-later" class="link">Not now</button><button type="button" id="key-logout" class="link">Sign out</button></p>
     </div>
   </div>
 
@@ -119,7 +120,7 @@
       <p id="offline" class="notice offline" role="status" hidden>Not connected: what's here may be out of date. Trying again…</p>
       <p id="update" class="notice update" role="status" hidden><span>A new version of ManyClaws is ready.</span> <button type="button" id="update-reload">Reload</button></p>
       <p id="upgrade-note" class="notice locked" role="status" hidden><span id="upgrade-says"></span> <a id="upgrade-link" href="#/account/upgrade">What to do</a></p>
-      <p id="locked" class="notice locked" role="status" hidden><span id="locked-says">Your sessions are encrypted, and this browser has not been given your passphrase.</span> <a id="locked-link" href="#/account">Type it in</a></p>
+      <p id="locked" class="notice locked" role="status" hidden><span id="locked-says">Your sessions are encrypted, and this browser has not been given your key.</span> <a id="locked-link" href="#/account">Get it</a></p>
     </div>
     <aside id="list-pane">
       <header class="bar">
@@ -267,8 +268,8 @@
           </div>
         </form>
       </section>
-      <!-- How to connect a computer: an API token to make, the passphrase where this browser has none yet, and the
-           way to the guide. Laid out as the account's page is, and dressed as it is on a server with a front door. -->
+      <!-- How to connect a computer: the line for Claude Code there, the link it shows to approve here (and the key,
+           first, where this browser has none yet), and the way to the guide. Laid out as the account's page is, and dressed as it is on a server with a front door. -->
       <section id="setup" class="new-session" hidden>
         <header class="bar chat-head">
           <a href="#" class="back" aria-label="Back to sessions"><span aria-hidden="true">‹</span><span class="back-word">Sessions</span></a>
@@ -283,8 +284,9 @@
         </header>
         <div id="setup-body" class="guide"></div>
       </section>
-      <!-- A computer connected from the link its plugin showed (#/connect/<its key>/<its name>): the passphrase, and
-           Connect. Laid out as the account's page is. -->
+      <!-- A computer connected from the link its plugin showed (#/c/<its key>/<its name>), or a browser or a phone
+           approved from the link it showed (#/b/<its key>/<its name>): approved with this browser's passkey. Laid out as
+           the account's page is. -->
       <section id="connect" class="new-session" hidden>
         <header class="bar chat-head">
           <a href="#" class="back" aria-label="Back to sessions"><span aria-hidden="true">‹</span><span class="back-word">Sessions</span></a>
@@ -406,7 +408,7 @@
           <section class="acct-part" id="set-account">
             <h2>Account</h2>
             <div class="acct-body">
-              <p class="muted">Your email and password, your API tokens, your passphrase and the devices that have it, and signing out.</p>
+              <p class="muted">Your email and password, your API tokens, your encryption key and the devices that have it, and signing out.</p>
               <div><a id="set-account-go" class="ghost button-link" href="#/account">Open the account page</a></div>
             </div>
           </section>

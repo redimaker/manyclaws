@@ -4,30 +4,26 @@ import { PLUGIN_VERSION } from '../hooks/lib.js'
 import { keysText, toB64, fromB64, sha256, sha512, sign, verifyKey, contentKey, seal, open, isSealed, nameOf, makeOrder, makeDevices, readOrder, askedOf, sealedLength, gcmDecrypt, ORDER_MS, hexSha256, pluginDigest, sealTo } from '../hooks/seal.js'
 
 // Every session here is its account's, sealed with its key: there is no other kind (a
-// mod with no passphrase sends nothing and asks for nothing, which is the second test).
-// The passphrase the account has here, as a rule. The mod has the key that was made from
-// it, written out, as it has once it has made it (in its options, in the passphrase's
-// place; here, by the environment, which takes a key written out and nothing else):
-// `MANYCLAWS_KEY: WORDS` below says whose key that is, and `setup` writes it out.
-const WORDS = 'four unrelated words here'
+// mod with no key sends nothing and asks for nothing, which is the second test). The mod
+// has the account's key written out, as a computer has it once it is connected (in its
+// options; here, by the environment): `MANYCLAWS_KEY: WORDS` below names whose key that
+// is, and `setup` writes the key out in its place.
+const WORDS = 'the account of the tests'
 const ENV = { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_TOKEN: 'agent-token', MANYCLAWS_KEY: WORDS }
-// (a mod that was given the passphrase itself, typed into its options: the tests of the making of its key)
-const TYPED = { options: { key: WORDS } }
 
 type Sent = { url: string; body: any }
 
-// What an account's passphrase makes, as its phones and browsers have it: the key, the
-// passphrase's own signer and the half that checks it (which is what a computer keeps
-// with the key); and one of the account's browsers, with a signing key of its own, on the
-// list of its devices that the signer signed (`list` as a computer reads it, `devices` as
-// the server keeps it, sealed). The mod is handed its key kept, as a rule, so none of
-// this has to be made from the words: each name has what chance gave it, and keeps it.
-// (The making itself has two tests of its own, under "The passphrase".)
+// What an account's root makes, as its phones and browsers have it: the key, the root's
+// own signer and the half that checks it (which is what a computer keeps with the key);
+// and one of the account's browsers, with a signing key of its own, on the list of its
+// devices that the signer signed (`list` as a computer reads it, `devices` as the server
+// keeps it, sealed). Each name has what chance gave it, and keeps it: `account` and `name`
+// only tell one account's from another's here.
 const makes = new Map<string, any>()
 const random = () => crypto.getRandomValues(new Uint8Array(32))
 const newDevice = (seed = random()) => ({ key: toB64(verifyKey(seed)), signer: seed })
-async function made(passphrase = WORDS, account = 'u_test') {
-  const name = account + '|' + passphrase
+async function made(named = WORDS, account = 'u_test') {
+  const name = account + '|' + named
   if (!makes.has(name)) {
     const [key, signer, device] = [random(), random(), newDevice()]
     const checker = verifyKey(signer)
@@ -40,17 +36,14 @@ type Made = Awaited<ReturnType<typeof made>>
 const polled = (sent: Sent[]) => sent.filter((s) => s.url.includes('/api/agent/poll'))
 
 // The stubs a configured session.start needs, plus a scripted server.
+// `refused`: the server refuses the mod's token (taken back), whatever it asks with it.
 // `tools: false`: nothing answers tool.register, or the test answers it itself.
 // `run`: what answers any other command the mod runs (its argv and how it was run), where it answers anything
-function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, surfaces = ['terminal'], whose = 'u_test', whoseStatus = 200, whoseAway = false, derive = false, swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>), connected = null as null | ((url: string) => string | null) } = {}) {
+function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, refused = false, surfaces = ['terminal'], swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>), connected = null as null | ((url: string) => string | null) } = {}) {
   const clock = mock.clock(on)
-  // A mod given a passphrase has, as a rule here, made its key in a session before, and has it written out where the
-  // passphrase was (the making is a quarter of a minute of arithmetic): `derive` is for the tests of the making
-  // itself, where the mod has the passphrase in its options (TYPED) and nothing in its environment.
-  // (The test says what the key is first, `await made()`.)
-  const known = env.MANYCLAWS_KEY ? makes.get(whose + '|' + env.MANYCLAWS_KEY) : null
-  const { MANYCLAWS_KEY: _, ...rest } = env
-  mock.env(on, derive ? rest : known ? { ...env, MANYCLAWS_KEY: keysText(known.keys) } : env)
+  // (The test says what the key is first, `await made()`: where it has not, what the environment holds is as it is.)
+  const known = env.MANYCLAWS_KEY ? makes.get('u_test|' + env.MANYCLAWS_KEY) : null
+  mock.env(on, known ? { ...env, MANYCLAWS_KEY: keysText(known.keys) } : env)
   // The mod's own store, where a test can look at what it kept
   const kept = new Map<string, any>(Object.entries(store))
   on('store.get', ($: any, e: any) => ({ value: kept.get(e.key) }))
@@ -64,7 +57,6 @@ function setup(on: any, { run = null as null | ((argv: string[], init: any) => a
   })
   const sent: Sent[] = []
   const said: string[] = [] // what the mod wrote to the log
-  const asked: any[] = [] // the headers of each time it asked whose computer it is, which is all the server says towards its key
   const lists: string[] = [] // each time it asked for the list of the account's devices: what it was handed
   const polls = [...poll]
   on('session.start', () => ({ cwd: '/work' }))
@@ -97,11 +89,10 @@ function setup(on: any, { run = null as null | ((argv: string[], init: any) => a
   // (its own two tools are put before Claude once the server has answered it)
   if (tools) on('tool.register', () => ({ value: undefined }))
   on('http.fetch', async ($: any, e: any) => {
-    // Whose computer this is, for the making of its key: the account's id, and nothing of a passphrase or a key
-    if (e.url.endsWith('/api/agent/account')) {
-      asked.push(e.init?.headers)
-      if (whoseAway) return { deny: 'connection refused' }
-      return { value: { status: whoseStatus, ok: whoseStatus === 200, headers: {}, text: JSON.stringify(whoseStatus === 200 ? { id: whose } : { error: 'no' }) } }
+    // (a token the server has taken back, the one the mod started with: whatever is asked with it)
+    if (refused && e.url.includes('/api/agent/') && String(e.init?.headers?.authorization ?? '') === 'Bearer agent-token') {
+      sent.push({ url: e.url, body: null })
+      return { value: { status: 401, ok: false, headers: {}, text: '{"error":"that token is not one of this server\'s"}' } }
     }
     // The list of the account's devices, as the server keeps it, sealed: asked for before an order is gone by
     // (`devices`: what the server hands over, where it is not the list the account's browsers made)
@@ -133,7 +124,7 @@ function setup(on: any, { run = null as null | ((argv: string[], init: any) => a
     const batches = sent.filter((s) => s.url.endsWith('/api/agent/events'))
     return Object.assign(batches.flatMap((s) => s.body.events), { meta: batches[0]?.body.meta, batches: batches.map((s) => s.body) })
   }
-  return { clock, sent, events, said, asked, kept, lists, configured }
+  return { clock, sent, events, said, kept, lists, configured }
 }
 
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
@@ -153,20 +144,20 @@ async function until(clock: any, there: () => boolean) {
 
 // ---- A session is told of sealed, or not at all
 
-test('without a token the mod sends nothing of the session: it offers the link that connects this computer, with a key of its own after the #, and asks the server for what the page sealed to it by a name drawn from that key, for two minutes', async ($, on) => {
+test('without a token the mod sends nothing of the session: it offers the link that connects this computer, with a key of its own after the #, and asks the server for what the page sealed to it by a name drawn from that key, for ten minutes', async ($, on) => {
   const { clock, sent, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: WORDS } })
   await start($)
   await clock.advance(30_000)
-  const offered = said.map((l) => JSON.parse(l).text ?? JSON.parse(l)).find((l) => String(l).includes('/app#/connect/'))
-  const [, key] = /https:\/\/mc\.test\/app#\/connect\/([A-Za-z0-9_-]{43})\/this%20computer/.exec(String(offered)) ?? []
+  const offered = said.map((l) => JSON.parse(l).text ?? JSON.parse(l)).find((l) => String(l).includes('/app#/c/'))
+  const [, key] = /https:\/\/mc\.test\/app#\/c\/([A-Za-z0-9_-]{43})\/this%20computer/.exec(String(offered)) ?? []
   expect(key).toBeTruthy()
   const name = toB64(sha256(fromB64(key))).slice(0, 22)
   // (what it asks for: that name, and nothing of the session; the key itself is said to nobody)
   expect(sent.length).toBeGreaterThan(5)
   expect(sent.every((s) => s.url === 'https://mc.test/api/connect/' + name && s.body === null)).toBe(true)
   expect(sent.some((s) => s.url.includes(key))).toBe(false)
-  // (and once the two minutes are over, it says so and asks no more)
-  await clock.advance(120_000)
+  // (and once the ten minutes are over, it says so and asks no more)
+  await clock.advance(600_000)
   const asked = sent.length
   await clock.advance(30_000)
   expect(sent.length).toBe(asked)
@@ -183,11 +174,11 @@ async function connectedBy($: any, on: any, { installed }: { installed: boolean 
   let link = ''
   const s = setup(on, {
     env: { MANYCLAWS_URL: 'https://mc.test', HOME: '/home/me' },
-    connected: () => (link ? sealTo(fromB64(/#\/connect\/([A-Za-z0-9_-]{43})\//.exec(link)![1]), { token: 'mct_made-for-this-computer', key: keysText(m.keys), account: 'me@example.test' }) : null),
+    connected: () => (link ? sealTo(fromB64(/#\/c\/([A-Za-z0-9_-]{43})\//.exec(link)![1]), { token: 'mct_made-for-this-computer', key: keysText(m.keys), account: 'me@example.test' }) : null),
   })
   await start($)
   await s.clock.advance(1000)
-  link = String(s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l)).find((l) => String(l).includes('/app#/connect/')))
+  link = String(s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l)).find((l) => String(l).includes('/app#/c/')))
   await until(s.clock, () => s.said.some((l) => l.includes('connected to the account of me@example.test')))
   return s
 }
@@ -208,7 +199,7 @@ test("one loaded from a folder of its own (a checkout's, a test's) changes nothi
   expect(configured).toEqual([])
 })
 
-test('with a token and no passphrase the mod sends nothing and asks for nothing, whatever happens in the session: it says once that it needs the passphrase, and where to give it', async ($, on) => {
+test('with a token and no key the mod sends nothing of the session, whatever happens in it: it offers the link that connects this computer, which gives it the key, and the code for a phone', async ($, on) => {
   engine(on)
   on('tool.call', () => ({ result: { stdout: 'seven herons', stderr: '' } }))
   on('tool.check', () => ({ decision: 'ask' }))
@@ -226,13 +217,18 @@ test('with a token and no passphrase the mod sends nothing and asks for nothing,
   await s.clock.advance(120_000)
   await ($ as any).session.end({ sessionId: 'sess-1', reason: 'other' })
   await s.clock.advance(120_000)
-  // Not a batch, not a poll, not a first word to see whether it would be taken; nor is the server asked whose computer this is
-  expect(s.sent).toEqual([])
-  expect(s.asked).toEqual([])
+  // Not a batch, not a poll, not a first word to see whether it would be taken: only the asking for the link's answer
+  expect(s.sent.length).toBeGreaterThan(0)
+  expect(s.sent.every((x) => /^https:\/\/mc\.test\/api\/connect\/[A-Za-z0-9_-]{22}$/.test(x.url) && x.body === null)).toBe(true)
   expect([agent.looked, agent.written]).toEqual([[], []])
-  expect(s.said.length).toBe(1)
-  expect(s.said[0]).toMatch(/this computer has not been given your encryption passphrase, and nothing a session says leaves it unsealed/)
-  expect(s.said[0]).toMatch(/Give the plugin the passphrase in \/plugin \(manyclaws, its options\)/)
+  const told = s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l))
+  expect(String(told[0])).toMatch(/^ManyClaws: this computer is not connected yet\. Open this link to connect it, in a browser where you are signed in to ManyClaws, or read the code with your phone’s camera, and approve it there: https:\/\/mc\.test\/app#\/c\/[A-Za-z0-9_-]{43}\/this%20computer\nIt works once, for ten minutes; \/manyclaws connect makes another\.$/)
+  // (the code, drawn in blocks, two rows of it to a line: 41 modules and the band about them)
+  const code = String(told[1]).split('\n')
+  const width = code[0].length
+  expect(width).toBeGreaterThanOrEqual(25)
+  expect(code.length).toBe(Math.ceil(width / 2))
+  expect(code.every((line) => line.length === width && /^[█▀▄ ]+$/.test(line))).toBe(true)
 })
 
 test('given no address, the mod reports to manyclaws.dev: it has no option for one, and MANYCLAWS_URL is what names another server', async ($, on) => {
@@ -430,149 +426,64 @@ test('local in VS Code: its own dialog only', async ($, on) => {
   expect(asked?.decision).toBeUndefined()
 })
 
-// ---- The passphrase: the account's key is made from it here, with the account's id and nothing else of the server's
+// ---- The key: given to this computer written out (mcf_…) as it is connected, and taken as it is. There is no passphrase.
 
-// What Node's own Argon2id and HKDF make of the passphrase for the two accounts here: the key, and the half that checks
-// (worked out once, at what a guess costs: 64 MiB filled three times. e2e/tests/20-sealed holds seal.js to Node's at that cost.)
-const MADE = {
-  u_test: { key: fromB64('okT5oOb6Nn7PHPitgH8SxN-Nvr-hl-f0lJTm1JrEyGQ'), checker: fromB64('Jd3GfJXe3SsLZNWGxOsczzqPIWpVjXu_G_TzSN2fCQM') },
-  u_other: { key: fromB64('rzxQ6Rdi7NJLT-Hi-d5OT1SGBXmYFv9fEM9rpYvRE64'), checker: fromB64('FWIstjGyNadbft2XElAfV40VVGSEdnXqPpO-_ICbvA8') },
-}
-
-test('the mod makes the key from the passphrase typed into its options and whose computer the server says this is, beside the session and not in its way, and puts the key written out in the passphrase\'s place: the passphrase is kept nowhere after, and the copy of the key it used to keep locked under it is gone; the session is sealed, and says nothing of which key', { timeoutMs: 120_000, ...TYPED }, async ($, on) => {
-  const keys = MADE.u_test
-  const { clock, events, asked, kept, sent, said, configured } = setup(on, { derive: true, store: { 'kept-key': 'v5.what-a-session-before-kept-locked-under-the-token-and-the-passphrase' } })
-  // The session starts at once: the key is made beside it (it is more arithmetic than a hook has the time for), and it is said that it is being
+test('the key written out among its options is used as it is: the session starts at once, sealed, saying nothing of which key, and the server is asked nothing of whose computer this is', { options: { key: '' } }, async ($, on) => {
+  const m = await made()
+  const { clock, events, sent, said, configured } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_TOKEN: 'agent-token', MANYCLAWS_KEY: keysText(m.keys) } })
   const before = Date.now()
   await start($)
   expect(Date.now() - before).toBeLessThan(2000)
-  expect(events().length).toBe(0)
-  expect(said.join(' ')).toMatch(/making your encryption key from your passphrase/)
-  await until(clock, () => configured.length > 0)
   await clock.advance(1000)
-  expect(asked.length).toBe(1)
-  expect(asked[0].authorization).toBe('Bearer agent-token')
+  expect(configured.length).toBe(0)
   // What it says of itself with what it sends: that it seals, in the way that keeps the chat's structure closed, and that
   // it does what it is asked on a signed order alone (a server hears no session that does not). Nothing else: where
   // it runs, its model and the rest are in its card, sealed
   for (const batch of events().batches) expect(batch).toEqual({ protocol: 2, meta: { protocol: 2, sealed: 3, orders: true }, events: batch.events })
-  const card = open(events().findLast((e) => e.type === 'card').card, contentKey(keys.key)) as any
+  const card = open(events().findLast((e) => e.type === 'card').card, contentKey(m.keys.key)) as any
   expect([card.cwd, card.model, card.version, card.plugin, card.state, card.interactive, card.attended]).toEqual(['/work', 'claude-test', '2.1.289', PLUGIN_VERSION, 'idle', true, true])
-  // Of each thing it sends, in the open: which session, when, what kind of thing, and that it is sealed. No number: one
-  // would count what it keeps to itself between two things it sends
+  // Of each thing it sends, in the open: which session, when, what kind of thing, and that it is sealed
   for (const e of events()) expect(Object.keys(e).filter((k) => !['sid', 'ts', 'sealed', 'type'].includes(k))).toEqual(e.type === 'card' ? ['card'] : [])
-  // The key written out is handed to Claude Code for the mod's own options, on that command's standard input and not
-  // among its arguments: the key, and nothing else of what it was given
-  expect(configured.length).toBe(1)
-  expect(configured[0].argv.slice(1)).toEqual(['plugin', 'configure', 'manyclaws@manyclaws', '--values-stdin'])
-  expect(JSON.parse(configured[0].stdin)).toEqual({ key: keysText(keys) })
-  expect(configured[0].argv.join(' ').includes(toB64(keys.key))).toBe(false)
-  // Nothing of the key is in the mod's own store, which is a file anyone who can read this user's files can read
-  expect(kept.has('kept-key')).toBe(false)
-  expect(JSON.stringify([...kept]).includes(toB64(keys.key))).toBe(false)
-  // What it said: that the key was being made; and, once it was in the passphrase's place, that the passphrase is no
-  // longer kept on this computer, so that whoever typed it knows to keep it somewhere of their own
-  expect(said.length).toBe(2)
-  expect(said[1]).toMatch(/is now kept on this computer in place of your passphrase, which is no longer kept here\. Keep the passphrase somewhere of your own/)
-  expect(said.join(' ').includes(WORDS)).toBe(false)
-  // Asking for its calls, it says that it seals and not with what
-  expect(polled(sent).length).toBeGreaterThan(0)
+  // Asking for its calls, it says that it seals and not with what; nothing it sends has the key, or asks whose computer this is
   expect(polled(sent).every((s) => s.url.includes('&sealed=3') && !s.url.includes('key='))).toBe(true)
-  // Nothing it sends anywhere has the passphrase, the key, or anything by the name of one
+  expect(sent.some((s) => s.url.endsWith('/api/agent/account'))).toBe(false)
   const all = JSON.stringify(sent)
-  for (const not of [WORDS, toB64(keys.key), '"key"', 'check', 'salt']) expect(all.includes(not)).toBe(false)
+  for (const not of [toB64(m.keys.key), '"key"', 'check', 'salt']) expect(all.includes(not)).toBe(false)
+  expect(said).toEqual([])
 })
 
-test('another account\'s computer makes another key from the same passphrase: whatever it is given makes a key, and nothing here says it is not the account\'s', { timeoutMs: 120_000, ...TYPED }, async ($, on) => {
-  const { clock, asked, events, said, configured } = setup(on, { derive: true, whose: 'u_other' })
-  await starting($, clock, () => configured.length > 0)
-  await clock.advance(1000)
-  expect(asked.length).toBe(1)
-  expect(JSON.parse(configured[0].stdin)).toEqual({ key: keysText(MADE.u_other) })
-  expect(MADE.u_other).not.toEqual(MADE.u_test)
-  expect(events().meta).toEqual({ protocol: 2, sealed: 3, orders: true })
-  // (all it said is that the key was being made, and then that it is kept in the passphrase's place)
-  expect(said.length).toBe(2)
-})
-
-test('where the key cannot be put in the passphrase\'s place the session is sealed all the same, and it is said: that the passphrase is still kept, that the key is made again each time, and what puts it right', { timeoutMs: 120_000, ...TYPED }, async ($, on) => {
-  const { clock, events, said, configured, kept } = setup(on, { derive: true, swaps: false })
-  await starting($, clock, () => configured.length > 0)
-  await clock.advance(1000)
-  expect(events().meta).toEqual({ protocol: 2, sealed: 3, orders: true })
-  expect(said.length).toBe(2)
-  expect(said[1]).toMatch(/could not be put in your passphrase's place among the plugin's options \(Plugin .*manyclaws@manyclaws.* is not installed\)/)
-  expect(said[1]).toMatch(/the key is made again as each session starts/)
-  expect(said[1]).toMatch(/claude plugin configure manyclaws@manyclaws/)
-  // (and it is kept nowhere else instead)
-  expect([...kept.keys()].filter((k) => !/^(orders|devices|gone|cursor):/.test(k))).toEqual([])
-})
-
-test('the key written out in the passphrase\'s place is used as it is: the next session starts at once, and asks the server nothing', { options: { key: keysText(MADE.u_test) } }, async ($, on) => {
-  const { clock, events, asked, configured } = setup(on, { derive: true })
-  await start($)
-  await clock.advance(1000)
-  expect(asked.length).toBe(0)
-  expect(configured.length).toBe(0)
-  expect(events().meta).toEqual({ protocol: 2, sealed: 3, orders: true })
-  expect((open(events().findLast((e) => e.type === 'card').card, contentKey(MADE.u_test.key)) as any).cwd).toBe('/work')
-})
-
-test('with the server away when the session starts, the key it has is used', async ($, on) => {
-  await made(WORDS)
-  const { clock, events } = setup(on, { whoseAway: true })
-  await start($)
-  await clock.advance(1000)
-  expect(events().meta).toEqual({ protocol: 2, sealed: 3, orders: true })
-})
-
-test('with the server away and no key made yet, nothing is sent', TYPED, async ($, on) => {
-  const { clock, sent, said } = setup(on, { derive: true, whoseAway: true })
+const notAKey = async ($: any, on: any, given: (m: Made) => string) => {
+  const m = await made()
+  const { clock, sent, said } = setup(on, { env: { ...ENV, MANYCLAWS_KEY: given(m) } })
   await start($)
   await clock.advance(30_000)
-  expect(sent.length).toBe(0)
-  expect(said.join(' ')).toMatch(/could not be reached to say whose computer this is/)
-  expect(said.join(' ')).toMatch(/nothing a session says leaves this computer unsealed/)
-})
+  expect(sent.every((x) => x.url.includes('/api/connect/'))).toBe(true)
+  const told = said.map((l) => String(JSON.parse(l).text ?? JSON.parse(l)))
+  expect(told[0]).toMatch(/^ManyClaws: what this computer was given as its encryption key is not one\. ManyClaws has no passphrase: a computer is given the key as it is connected from the link this plugin shows\./)
+  expect(told.some((t) => /Open this link to connect it/.test(t))).toBe(true)
+  expect(told.join(' ').includes(given(m))).toBe(false)
+}
+test('words given as its key are no key: nothing is made of them, nothing of the session is sent, it says why, and it offers the link that connects this computer', ($, on) => notAKey($, on, () => 'four unrelated words here'))
+test('nor is a key written out that is not whole', ($, on) => notAKey($, on, (m) => keysText(m.keys).slice(0, 47)))
 
-test('a key written out in the environment is taken as it is, and the server is asked nothing', async ($, on) => {
-  await made(WORDS)
-  const { clock, events, asked, kept, configured } = setup(on)
+test('a token the server refuses (taken back, or run out), where someone is at the session: it offers the link that connects this computer again, once; and the session is taken up with what that gives', async ($, on) => {
+  const m = await made()
+  let link = ''
+  const s = setup(on, {
+    refused: true,
+    poll: [{ commands: [] }],
+    connected: () => (link ? sealTo(fromB64(/#\/c\/([A-Za-z0-9_-]{43})\//.exec(link)![1]), { token: 'mct_made-for-it-again', key: keysText(m.keys), account: 'me@example.test' }) : null),
+  })
   await start($)
-  await clock.advance(1000)
-  expect(asked.length).toBe(0)
-  expect(configured.length).toBe(0)
-  expect(events().meta).toEqual({ protocol: 2, sealed: 3, orders: true })
-  expect(kept.has('kept-key')).toBe(false)
-})
-
-test('a passphrase is not taken from the environment, where every command the session runs could read it: nothing is sent, no key is made of it, and it says where a passphrase is typed', async ($, on) => {
-  // (no key was made for this account's words here, so what the environment holds is the words themselves)
-  const { clock, sent, said, asked } = setup(on, { env: { ...ENV, MANYCLAWS_KEY: 'words nobody made a key of' } })
-  await start($)
-  await clock.advance(30_000)
-  expect(sent.length).toBe(0)
-  expect(asked.length).toBe(0)
-  expect(said.length).toBe(1)
-  expect(said[0]).toMatch(/MANYCLAWS_KEY takes your key written out \(mcf_…\)/)
-  expect(said[0]).toMatch(/A passphrase is not taken from the environment/)
-  expect(said[0]).toMatch(/type it into the plugin's own options/)
-})
-
-test('a key written out that is not whole is not taken for a passphrase: nothing is sent', async ($, on) => {
-  const { clock, sent, said } = setup(on, { env: { ...ENV, MANYCLAWS_KEY: keysText(MADE.u_test).slice(0, 47) } })
-  await start($)
-  await clock.advance(30_000)
-  expect(sent.length).toBe(0)
-  expect(said.join(' ')).toMatch(/a key written out, and not a whole one: give it the passphrase itself/)
-})
-
-test('nor does a token that is refused', TYPED, async ($, on) => {
-  const { clock, sent, said } = setup(on, { derive: true, whoseStatus: 401 })
-  await start($)
-  await clock.advance(30_000)
-  expect(sent.length).toBe(0)
-  expect(said.join(' ')).toMatch(/API token was refused/)
+  // (its first asking, a moment in: refused)
+  await s.clock.advance(5000)
+  await until(s.clock, () => s.said.some((l) => l.includes('refused this computer')))
+  const told = s.said.map((l) => String(JSON.parse(l).text ?? JSON.parse(l)))
+  link = told.find((t) => t.includes('/app#/c/'))!
+  expect(link).toMatch(/^ManyClaws: the server refused this computer’s API token \(it was taken back, or ran out\), so this session is not shown on your page\. Open this link to connect it again/)
+  await until(s.clock, () => s.said.some((l) => l.includes('connected to the account of me@example.test')))
+  // (once: asked again with the same token in the meantime, it says nothing more)
+  expect(s.said.filter((l) => l.includes('refused this computer')).length).toBe(1)
 })
 
 const SWITCH = { hook_event_name: 'PreModelSwitch', from_model: 'claude-test', to_model: 'claude-other', requested_model: 'other', source: 'command', context_tokens: 9000, prompt_cache_warm: true }
@@ -675,7 +586,7 @@ test('its rows go made here and sealed, each whole, and the name it answers by i
 })
 
 // ---- Orders: a session does what it is asked only when a phone or a browser that has the
-// passphrase signed it. What the server sends beside an order, or without one, is the
+// root signed it. What the server sends beside an order, or without one, is the
 // server's to have written, and is not what is run.
 
 const HERE = 'sess-1'
@@ -715,7 +626,7 @@ test('with no order it runs nothing, sealed with the account\'s key or not, and 
   await clock.advance(2000)
   expect(ran).toEqual([])
   expect(results().map((r) => [r.id, r.ok])).toEqual([['c1', false], ['c2', false]])
-  for (const r of results()) expect(r.error).toMatch(/only when a device that has your passphrase signed it: it did not come signed/)
+  for (const r of results()) expect(r.error).toMatch(/only when one of your devices signed it: it did not come signed/)
 })
 
 test('an order is run once: sent again, it is refused', async ($, on) => {
@@ -781,9 +692,9 @@ test('an order is for one session, for one kind of thing, and for an hour: elsew
   expect(why.c5).toBe('ran')
 })
 
-test("a computer, which has the key and the half that checks the list, can make no order: nor can the passphrase's own signer, nor a passphrase from before", async ($, on) => {
+test("a computer, which has the key and the half that checks the list, can make no order: nor can the root's own signer, nor a key from before", async ($, on) => {
   const m = await made(WORDS)
-  const before = await made('the passphrase it had before')
+  const before = await made('the key it had before')
   const { clock, ran, results } = session(on, m, {
     poll: [
       {
@@ -792,9 +703,9 @@ test("a computer, which has the key and the half that checks the list, can make 
           prompt(1, { order: order(m, 'prompt', { text: 'from one of its computers' }, { device: { key: m.device.key, signer: m.checker } }) }),
           // (sealed with the account's key, and signed by a device the list does not have)
           prompt(2, { order: order(m, 'prompt', { text: 'from someone with the key alone' }, { device: newDevice() }) }),
-          // (made whole under the passphrase from before, as the server kept it)
-          prompt(3, { order: order(before, 'prompt', { text: 'kept from before the passphrase was changed' }) }),
-          // (signed by the passphrase's own signer, which signs the list of devices and is no device)
+          // (made whole under the key from before, as the server kept it)
+          prompt(3, { order: order(before, 'prompt', { text: 'kept from before the account was started afresh' }) }),
+          // (signed by the root's own signer, which signs the list of devices and is no device)
           prompt(4, { order: order(m, 'prompt', { text: 'from the signer of the list' }, { device: newDevice(m.signer) }) }),
         ],
       },
@@ -837,20 +748,20 @@ test('whose orders it does is the list of the account\'s devices, read from the 
   expect(ran).toEqual(['from the phone', 'from the browser', 'from the tablet'])
   const why = Object.fromEntries(results().map((r) => [r.id, r.error ?? 'ran']))
   expect([why.c1, why.c3, why.c5]).toEqual(['ran', 'ran', 'ran'])
-  expect(why.c2).toMatch(/is not one of your account's devices as this computer knows them: type your passphrase into that device again/)
+  expect(why.c2).toMatch(/is not one of your account's devices as this computer knows them: approve that device again from one that has your key/)
   expect(why.c4).toMatch(/is not one of your account's devices as this computer knows them/)
   // (asked for each time an order came, and what is kept is the newest that was the account's)
   expect(lists).toEqual(has)
   expect(kept.get('devices:' + nameOf('https://mc.test', contentKey(m.key)))).toBe(has[3])
 })
 
-test('a device taken off the list does not come back on a newer one: a browser being given the passphrase signs the next list on top of whichever the server hands it, an old one with the lost device on it too, and that device is refused here all the same, in this session and in the next', { timeoutMs: 30_000 }, async ($, on) => {
+test('a device taken off the list does not come back on a newer one: a browser that signs a list signs the next one on top of whichever the server hands it, an old one with the lost device on it too, and that device is refused here all the same, in this session and in the next', { timeoutMs: 30_000 }, async ($, on) => {
   const m = await made(WORDS)
   const [phone, tablet] = [newDevice(), newDevice()]
   const list = (v: number, ...devices: any[]) => makeDevices({ v, devices: devices.map((d, i) => ({ key: d.key, name: 'device ' + i, at: 1 })) }, contentKey(m.key), m.signer)
   // What the server has: the browser and the phone; then the phone is lost, and taken off; then a tablet is given the
-  // passphrase, and builds its list on the one from before the phone was taken off, which the server handed it. That
-  // list is the account's own, signed by the passphrase, and newer than any this computer has.
+  // key, and builds its list on the one from before the phone was taken off, which the server handed it. That
+  // list is the account's own, signed by the root, and newer than any this computer has.
   const has = [list(2, m.device, phone), list(3, m.device), list(5, m.device, phone, tablet)]
   let at = 0
   const later = (commands: any[]) => async (clock: any) => {
@@ -898,7 +809,7 @@ test('the list is read as a session is taken up, with no order to go by, so that
   const m = await made(WORDS)
   const tablet = newDevice()
   const list = (v: number, ...devices: any[]) => makeDevices({ v, devices: devices.map((d, i) => ({ key: d.key, name: 'device ' + i, at: 1 })) }, contentKey(m.key), m.signer)
-  // What the server has: the browser; and half a second after the session read that, a tablet given the passphrase too
+  // What the server has: the browser; and half a second after the session read that, a tablet approved too
   const has = [list(2, m.device), list(3, m.device, tablet)]
   let at = 0
   const { clock, ran, lists } = session(on, m, {
@@ -908,14 +819,14 @@ test('the list is read as a session is taken up, with no order to go by, so that
       async (clock: any) => {
         await clock.sleep(500)
         at = 1
-        return { commands: [prompt(1, { order: order(m, 'prompt', { text: 'from the tablet, just given the passphrase' }, { device: tablet }) })] }
+        return { commands: [prompt(1, { order: order(m, 'prompt', { text: 'from the tablet, just approved' }, { device: tablet }) })] }
       },
     ],
   })
   await start($)
   await clock.advance(3000)
   expect(lists).toEqual(has)
-  expect(ran).toEqual(['from the tablet, just given the passphrase'])
+  expect(ran).toEqual(['from the tablet, just approved'])
 })
 
 test('the list is kept by whose it is: one that another account\'s session, or a session that reports to another server, kept on this computer is not this session\'s, however new it is', async ($, on) => {
@@ -964,7 +875,7 @@ test('an order is not counted as taken until the list of the account\'s devices 
   expect(results().map((r) => [r.id, r.ok])).toEqual([['c7', true]])
 })
 
-test('a list of devices the passphrase did not sign is no list: one the server made up, or one sealed with the key by a computer, puts nobody on it', { timeoutMs: 30_000 }, async ($, on) => {
+test('a list of devices the root did not sign is no list: one the server made up, or one sealed with the key by a computer, puts nobody on it', { timeoutMs: 30_000 }, async ($, on) => {
   const m = await made(WORDS)
   const stranger = newDevice()
   const forged = (signer: Uint8Array) => makeDevices({ v: 99, devices: [{ key: stranger.key, name: 'A stranger', at: 1 }] }, contentKey(m.key), signer)
@@ -1106,8 +1017,8 @@ test('a session puts its own two tools before Claude and no other, whatever a se
 })
 
 // ---- The machine's agent beside the plugin: given what the plugin was given, once the
-// server has taken the plugin's token. A person types the token and the passphrase into
-// the plugin's own dialog and nowhere else; the agent, installed with neither, takes them
+// server has taken the plugin's token. A computer is given the token and the key as it is
+// connected from the link the plugin shows; the agent, installed with neither, takes them
 // from the note the plugin leaves in the agent's own folder.
 
 // The agent's folder as the plugin finds it: agent.json where there is an agent, and what the plugin wrote there
@@ -1137,7 +1048,7 @@ test('an agent installed with no token is left a note of the token and the key w
   await clock.advance(1000)
   expect(events().some((e) => e.type === 'hello')).toBe(true)
   expect(written.map((w) => w.path)).toEqual(['/home/me/.manyclaws/from-plugin.json'])
-  // The token, and the key as a computer keeps it: never the passphrase
+  // The token, and the key as a computer keeps it
   expect(notes()[0]).toEqual({ server: 'https://mc.test', token: 'agent-token', key: keysText(m.keys) })
   expect(written[0].text.includes(WORDS)).toBe(false)
   // (and not again while nothing has changed: it is looked at every half minute, and the note is the agent's to take)
@@ -1176,7 +1087,7 @@ test('an agent whose keychain has another token or another key is left the plugi
   expect(notes()).toEqual([{ server: 'https://mc.test', token: 'agent-token', key: keysText(m.keys) }])
 })
 
-test('an agent whose key has gone by is left the new one: a passphrase typed anew into the plugin reaches the agent', async ($, on) => {
+test('an agent whose key has gone by is left the new one: a key given anew to the plugin reaches the agent', async ($, on) => {
   const m = await made()
   const stale = 'mcf_' + 'k'.repeat(43) + '.' + 'c'.repeat(43)
   const { notes } = agentFolder(on, { server: 'https://mc.test', token: 'an-older-token', key: stale })

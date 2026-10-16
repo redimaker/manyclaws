@@ -6,55 +6,58 @@ This repository holds every part of it that runs on your own devices:
 
 - **The plugin** (`mod/`): a Claude Code plugin. It reports each session to the ManyClaws server and does what your own devices ask of that session. It carries the agent, and the signed list of every file it was released with (`mod/release.json`).
 - **The agent** (`mod/agent/`): a small background service, one per computer, which the plugin installs from its own folder when you ask from the page. It indexes that computer's Claude Code transcripts so past sessions can be read and searched, starts or resumes sessions when you ask from the page, and checks the plugin there against the release it carries.
-- **The page** (`web/`): what your browser and your phone run, as the server hands it out. It is where your passphrase is typed and your key is made, so it is published here with the rest, and what a server hands you can be held against it (see "Checking what you run").
+- **The page** (`web/`): what your browser and your phone run, as the server hands it out. It is where your account's key is made and kept, and where every device is approved, so it is published here with the rest, and what a server hands you can be held against it (see "Checking what you run").
 
 The server is not in this repository. It stores and forwards what your devices sealed, and cannot read it.
 
 ## What leaves your computer
 
-Everything a session says is encrypted on the computer it runs on, before it is sent, with a key made from a passphrase only you know. The server stores and forwards what it is given and cannot read it.
+Everything a session says is encrypted on the computer it runs on, before it is sent, with your account's own key: made of random bytes on your first phone or browser, and handed from one of your devices to another, sealed, as you approve each. There is no passphrase. The server stores and forwards what it is given and cannot read it.
 
 - **Sent, encrypted with your key:** what you ask Claude and what it answers, the tools it runs and their output, permission prompts and your answers, and everything about the session itself: its folder, model, mode, state and title.
 - **Sent in the open**, because the server cannot pass a session on without it: that a session exists, which of your computers it is on, what that computer is called, when it sends, and which kind of thing each message is and roughly how large.
-- **Acted on only when one of your own phones or browsers signed it:** replies, answers to permission prompts and questions, and requests to start, resume or copy a session. A computer reads the list of your devices, which is signed with a key made from your passphrase, and does nothing asked by anyone else, the server included.
-- **Never sent:** your passphrase, your key, your Claude account's credentials, or any file Claude has not read or written in a session.
+- **Acted on only when one of your own phones or browsers signed it:** replies, answers to permission prompts and questions, and requests to start, resume or copy a session. A computer reads the list of your devices, which is signed with a key drawn from your account's root, and does nothing asked by anyone else, the server included.
+- **Never sent in the open:** your key, your recovery key, your Claude account's credentials, or any file Claude has not read or written in a session. (The key goes from one of your devices to another sealed to a key the new device made for that, which the server hands over and cannot open.)
 
-A plugin that has not been given your passphrase sends nothing at all.
+A plugin that has not been given your key sends nothing at all.
 
 ## What this protects against, and what it does not
 
 - **Whoever holds the server's data, or watches what passes through it, reads nothing of your sessions** and can ask nothing of your computers: what they have is sealed, and a computer acts only on what one of your own devices signed.
 - **Whoever can change the code your devices run can do anything those devices can.** That is true of any software, and it is why this code is public and released signed: the agent installs nothing that is not a release signed with a key kept neither here nor on any server; it and the page hold the plugin each computer runs to that release, and say so in red where it is not, with nothing sent to that computer until you decide; each update is approved by you on your page, for each computer; and the page's HTML names each of its scripts by its hash, which your browser enforces. A plugin that is changed where it is has the account's key from the moment it runs: what is checked is said, not stopped. What is left is the page's HTML itself, which a server hands your browser each time you open it: a server that had been taken over could hand out another. Nothing a web page does can rule that out. "Checking what you run" says how to look from outside the page.
-- **Your passphrase is the whole of it.** Whoever has it and can sign in to your account can make a device of their own one of yours, read your sessions, and ask things of your computers. So a passphrase that is being chosen is held to four or more unrelated words, it is never the password you sign in with (which the server keeps a stretched form of, and a passphrase never), and what a device may ask of a computer is limited on the computer (see "What a computer allows").
-- **Whoever can run programs as you on one of your computers** can read what that computer keeps: your key, though not your passphrase, which is kept nowhere once the key is made. They could read your sessions there anyway.
+- **There is nothing to guess.** Your key is drawn from 32 random bytes, not from anything a person chose, so a copy of everything the server holds is no help to anyone trying to read it. What makes a device one of yours is another device of yours approving it, with its passkey (Face ID, Touch ID, a PIN or a security key), from the link or the code the new device shows: so approve only a device you have just opened yourself. And what a device may ask of a computer is limited on the computer (see "What a computer allows").
+- **Your recovery key is your key, written out.** Whoever has it can give a browser of their own your key. Keep it where you keep what matters; it is shown once as the key is made, and again only on a device of yours after its passkey.
+- **Whoever can run programs as you on one of your computers** can read what that computer keeps: your key, though not your root, which no computer is given. They could read your sessions there anyway.
 
 
 ## How the encryption works
 
-`mod/hooks/seal.js` is the whole of it, and its opening comment is the specification: how a key is made from a passphrase, what a sealed value is, and how a request from a phone or browser is signed and checked. In short:
+`mod/hooks/seal.js` is the whole of it, and its opening comment is the specification: what your key is drawn from, what a sealed value is, how a key is handed to a new device, and how a request from a phone or browser is signed and checked. In short:
 
-- Your key is made on each device from your passphrase and your account's id with Argon2id (64 MiB, 3 passes), then HKDF-SHA256.
+- Your account's root is 32 random bytes, made by its first phone or browser. Your key, and the Ed25519 key that signs the list of your devices, are drawn from it with HKDF-SHA256. The root written out (Crockford's base32, 52 characters) is your recovery key.
+- A phone or browser keeps the root wrapped with AES-256-GCM under a key drawn from a passkey's PRF secret, which its authenticator gives only after Face ID, Touch ID, a PIN or a security key's touch. Nothing of the passkey goes to the server: the page asks the authenticator for the secret, and checks no signature.
+- A new device shows a link (and a code) with an X25519 key it made for that one asking, after the `#`, which a browser sends nowhere. The device that approves it seals what it is given to that key; the server holds that for two minutes, hands it over once, and cannot open it. A computer is given the key and the half that checks the list; a phone or browser of yours, the root; one that is borrowed, the key alone, for a day.
 - What is sealed is encrypted with AES-256-GCM, padded so its length says little about its contents.
-- Each phone and browser signs what it asks with an Ed25519 key of its own that never leaves it. Your computers accept a request only from a device on a list signed with a key derived from your passphrase.
-- The server is given nothing made from the passphrase: no hash, no verifier, not even a record that one was set. The only way to tell a passphrase is right is that it opens what was sealed with it.
+- Each phone and browser signs what it asks with an Ed25519 key of its own that never leaves it. Your computers accept a request only from a device on the list signed with the root's key.
+- The server is given nothing of the root or the key: no hash, no verifier. The only way to tell a key is right is that it opens what was sealed with it.
 
-Claude Code's plugin runtime has no crypto library, so every primitive (SHA-256, SHA-512, HMAC, HKDF, BLAKE2b, Argon2id, AES-256-GCM, Ed25519, X25519, and the check of an SSH signature) is implemented in that one file in plain JavaScript. `mod/agent/seal.mjs` and `web/seal.js` are identical copies. (The page seals and signs with the browser's own WebCrypto, and keeps its keys where no script can read them back: `web/keys.js`.) The plain JavaScript is not written to run in constant time: that matters only to someone who can time code on your own computer.
+Claude Code's plugin runtime has no crypto library, so every primitive (SHA-256, SHA-512, HMAC, HKDF, AES-256-GCM, Ed25519, X25519, and the check of an SSH signature) is implemented in that one file in plain JavaScript. `mod/agent/seal.mjs` and `web/seal.js` are identical copies. (The page seals and signs with the browser's own WebCrypto, and keeps its keys where no script can read them back: `web/keys.js`.) The plain JavaScript is not written to run in constant time: that matters only to someone who can time code on your own computer.
 
-What is known, and not hidden: a sealed value is not tied to the session or the place it was sealed for, so a server could show one sealed thing where another belongs, or leave things out, though it can read and write none; removing a device stops its orders and signs it out, and it takes a new passphrase to make a key it does not have; and one key seals everything an account says.
+What is known, and not hidden: a sealed value is not tied to the session or the place it was sealed for, so a server could show one sealed thing where another belongs, or leave things out, though it can read and write none; removing a device stops its orders and signs it out, and it takes starting afresh with a new key to shut it out of what is said from then on; and one key seals everything an account says.
 
 ### Where your key is kept
 
-- **In the plugin**: you type your passphrase on your page, where the plugin's link to connect the computer leads, and the page seals the key it makes to a key the plugin made for that one asking, which it put in the link after the `#` (a browser sends nothing after it anywhere). Or you type the passphrase into the plugin's options. The first session after that makes your key, and puts the key (written out, `mcf_…`) in the passphrase's place among those options, where Claude Code keeps what is secret (the system keychain on a Mac). From then on the passphrase is kept nowhere on that computer. `MANYCLAWS_KEY` in the environment takes the key written out, never a passphrase.
+- **In the plugin**: you open the link it shows on a device that has your key, and approve it there with the passkey; the page seals the key and an API token made for the computer to a key the plugin made for that one asking, which it put in the link after the `#`. The plugin keeps the two among its options, where Claude Code keeps what is secret (the system keychain on a Mac): the key written out, `mcf_…`. `MANYCLAWS_KEY` in the environment takes the key written out, for a set-up with nobody there, and nothing else is a key.
 - **In the agent**: on a Mac, its API token and your key are in your login keychain, and `~/.manyclaws/agent.json` has only a fingerprint of the two. Elsewhere they are in that file, which only you can read (`--no-keychain` keeps them there on a Mac too).
-- **In a browser**: as keys the browser will use and not hand back, and only on a device you said is your own.
+- **In a browser**: as keys the browser will use and not hand back, and the root wrapped under a passkey of that device's own; on a borrowed device, the key alone, while the page is open.
 
-The key reads what your sessions say. It cannot sign the list of your devices, so nothing that has only the key can ask anything of your computers; and it cannot be turned back into your passphrase except by guessing, at what Argon2id costs a guess.
+The key reads what your sessions say. It cannot sign the list of your devices, so nothing that has only the key can ask anything of your computers; and the root, which can, is never on a computer, and on a phone or browser only behind its passkey.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| `mod/.claude-plugin/plugin.json` | The plugin's manifest: its version and the options it asks for (API token, passphrase, label, capabilities) |
+| `mod/.claude-plugin/plugin.json` | The plugin's manifest: its version and its options (API token and key, filled in as the computer is connected; label; capabilities) |
 | `mod/hooks/register.js` | The plugin: reports the session, polls for what is asked of it, answers permission prompts routed to the page |
 | `mod/hooks/lib.js` | Helpers with no side effects, including the plugin's version and which capability each request needs |
 | `mod/hooks/rows.js` | Turns what Claude Code reports into the rows of a chat, before they are sealed |
@@ -84,7 +87,7 @@ claude plugin marketplace add redimaker/manyclaws
 claude plugin install manyclaws@manyclaws
 ```
 
-Then, in a new Claude Code session, the plugin shows a link that connects the computer: open it where you are signed in to ManyClaws, type your encryption passphrase there, and press Connect. Nothing is typed into Claude Code. The agent is set up from the computer's page, by the plugin, from the copy it carries; or by hand, `bash <the plugin's folder>/agent/install.sh --from <the plugin's folder> --auto-folders`.
+Then, in a new Claude Code session, the plugin shows a link that connects the computer: open it where you are signed in to ManyClaws (or read its code with your phone), press Connect, and give your passkey. Nothing is typed into Claude Code. The agent is set up from the computer's page, by the plugin, from the copy it carries; or by hand, `bash <the plugin's folder>/agent/install.sh --from <the plugin's folder> --auto-folders`.
 
 Updates are offered on your page, for each computer, and you approve each one there: the agent has Claude Code fetch the plugin, holds what arrived to the release you approved, and replaces itself from the copy the new plugin carries, putting the old one back where the new one does not start. By hand: `claude plugin marketplace update manyclaws`, `claude plugin update manyclaws@manyclaws`, then `bash <the plugin's folder>/agent/install.sh --update --from <the plugin's folder>`.
 
@@ -97,7 +100,7 @@ The plugin needs Claude Code 2.1.287 or later. The agent needs Node.js 22.13 or 
 `mod/release.json` lists every file in `mod/` (the agent among them), `web/` and `.claude-plugin/` with its SHA-256, and `mod/release.json.sig` is that list signed (an SSH signature, under the namespace `manyclaws-release`) with a key that is kept neither in this repository nor on any server. The key it must be signed by is written in `mod/agent/install.sh` (`SIGNERS`) and in `web/app.js` (`RELEASE_SIGNERS`); its fingerprint is `SHA256:io1QPFB46L+VwdcC+tboq0RQktgBYAn92v0we2RdK+A`. Each release is the commit tagged `release-N`, for its number.
 
 - **The agent's installer** installs nothing unless the list is signed by a key it knows, every file of the agent is as the list says with none missing and none besides, and the release is no older than the one installed. An installed agent is brought up to date by its own copy of the installer, with the keys it already has: so whoever came to control this repository could not put code on a computer that has the agent. The first install has only the installer it was handed to go by, which is why the installer is short enough to read.
-- **The plugin** is fetched by Claude Code's own marketplace, which checks no signature. The agent holds every copy of it there to the list it carries, by the keys the agent was installed with, before it starts a session with it, and says what it found, sealed, to your devices; the page checks the list's signature itself, and says in red where a computer runs a plugin that is no release, signing nothing for it until you allow that plugin there with your passphrase. Where there is no agent, the plugin says what it is of itself, which is its own word. `node ~/.manyclaws/agent/agent.mjs verify` holds the plugin as Claude Code installed it against the list it carries.
+- **The plugin** is fetched by Claude Code's own marketplace, which checks no signature. The agent holds every copy of it there to the list it carries, by the keys the agent was installed with, before it starts a session with it, and says what it found, sealed, to your devices; the page checks the list's signature itself, and says in red where a computer runs a plugin that is no release, signing nothing for it until you allow that plugin there with your passkey. Where there is no agent, the plugin says what it is of itself, which is its own word. `node ~/.manyclaws/agent/agent.mjs verify` holds the plugin as Claude Code installed it against the list it carries.
 - **A new signing key** comes in a release signed by the old one, whose installer names it.
 
 ## Checking what you run

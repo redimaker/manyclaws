@@ -94,7 +94,7 @@ function openFile(packed, key) {
 
 // Whether anything in what arrived is still sealed: this machine has no key for it, or not the right one
 const unopened = (value, depth = 0) => (typeof value === 'string' ? isSealed(value) || value === UNOPENED : !!value && typeof value === 'object' && depth < 8 && Object.values(value).some((v) => unopened(v, depth + 1)))
-const NO_KEY = 'what arrived is sealed, and this machine does not have the key that opens it: run the agent\'s installer again and give it your passphrase'
+const NO_KEY = 'what arrived is sealed, and this machine does not have the key that opens it: start a new Claude Code session on it, and connect it from the link its plugin shows'
 
 // What the agent sends of this machine's sessions is sealed with the account's key
 // (seal.mjs), and sealed whole: nothing of a session's messages, or of how they are made
@@ -223,7 +223,7 @@ export async function run(config, flags = {}) {
   // Claude Code installed here, and each folder a session's plugin said it was loaded from (it leaves a note here,
   // plugin-<…>.json), is the release its list says, or not; either way its digest says what it is. That is said to the
   // account's own devices, sealed, and a session the agent starts loads a plugin that is a release, or one the
-  // account's owner allowed on this computer by its digest with the passphrase (the list of devices). An agent that
+  // account's owner allowed on this computer by its digest, signed with the account's root (the list of devices). An agent that
   // was not installed from a release (run from a checkout) has no keys to go by, and says so.
   const signersFile = path.join(ownHome, 'agent', 'release-signers')
   const checks = () => fs.existsSync(signersFile)
@@ -739,8 +739,8 @@ export async function run(config, flags = {}) {
   }
 
   // ---- Orders. What acts here is done only on an order: what a person asked from a
-  // phone or a browser that has the passphrase, signed there with that device's own key
-  // (seal.mjs). Which devices those are is on the list the passphrase signed, which this
+  // phone or a browser that is one of the account's devices, signed there with that device's own key
+  // (seal.mjs). Which devices those are is on the list the account's root signed, which this
   // machine reads from the server before it goes by an order (freshDevices, below), and
   // keeps: it takes a list only where it is the account's and no older than the one it
   // has, so a device taken off the list is refused from then on, whatever the server
@@ -777,7 +777,7 @@ export async function run(config, flags = {}) {
     devicesKept = fs.readFileSync(devicesFile, 'utf8')
   } catch {}
   // (and the devices it has seen taken off that list, which are none of the account's here again whatever list has them
-  // later: kept by whose list it is, so that another passphrase's starts with none)
+  // later: kept by whose list it is, so that another key's starts with none)
   const goneFile = devicesFile + '-gone.json'
   const whose = keys ? Buffer.from(keys.checker).toString('base64url') : ''
   let goneKept = []
@@ -814,13 +814,13 @@ export async function run(config, flags = {}) {
       return o
     } catch (err) {
       if (!(err instanceof OrderRefused)) throw err
-      throw new HostError(`this machine does what it is asked only when a device that has your passphrase signed it: ${err.message}`)
+      throw new HostError(`this machine does what it is asked only when one of your devices signed it: ${err.message}`)
     }
   }
   const asks = (order) => readOrder(order, sealKey, devices.list)?.do
   // A session is started here only for one of the account's own devices that may start them (mayStart): not one that
   // was added as not its owner's own, which is one of the account's for a day, and not one its owner turned that off
-  // for, with the passphrase (Account, Devices). A reply to a session that is running is not starting one.
+  // for, signed with the account's root (Account, Devices). A reply to a session that is running is not starting one.
   const NOT_TO_START = "this computer starts a session only when that is asked from one of your own devices that may start them, and this was asked from one that may not: it was added as not your own (one of your account's devices for a day), or starting sessions is turned off for it (Account, Devices)"
   const startedBy = (o) => {
     if (!mayStart(devices.list?.devices?.find((d) => d.key === o.by))) throw new HostError(NOT_TO_START)
@@ -830,7 +830,7 @@ export async function run(config, flags = {}) {
   // clone or handoff), so that one asked for empty is not made from words instead
   const branch = (a, ...hows) => {
     const o = readOrder(a.order, sealKey, devices.list)
-    if (o && o.do === 'branch' && !hows.includes(o.with.how)) throw new HostError('this machine does what it is asked only when a device that has your passphrase signed it: it was signed for something else')
+    if (o && o.do === 'branch' && !hows.includes(o.with.how)) throw new HostError('this machine does what it is asked only when one of your devices signed it: it was signed for something else')
     return startedBy(take(a.order, machine.id, ['branch'])).with
   }
   // And nothing is started here with a plugin that is not a release (its files as the list it carries has them, signed
@@ -1079,7 +1079,7 @@ export async function run(config, flags = {}) {
       await devicesRead.done
     }
     // And read as the agent starts, and every so often after, with no order to go by (DEVICES_EVERY_MS). Those readings
-    // are apart from the one an order waits for: an order from a browser that was given the passphrase a moment ago is
+    // are apart from the one an order waits for: an order from a browser that was approved a moment ago is
     // gone by the list as it stands then, not by one read just before the browser was on it.
     readList()
     setInterval(readList, DEVICES_EVERY_MS).unref()

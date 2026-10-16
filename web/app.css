@@ -265,17 +265,18 @@ pre, code { font-family: var(--mono); }
 /* The check that whoever makes an account is a person: a frame from another address, as wide as the card's fields
    (its height is the widget's, which the frame says) */
 .signup-check iframe { display: block; width: 100%; height: 65px; border: 0; color-scheme: normal; }
-/* API tokens and the passphrase (Account, and Set up a computer) */
-.token-new, .passphrase-box { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
-.token-new input, .passphrase-box input { flex: 1; min-width: 180px; }
-.token-new input, .token-new select, .passphrase-box input { border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text); border-radius: 4px; padding: 6px 8px; font: inherit; }
-/* The eye in the passphrase's box, as any password's box has one: pressed, what is typed is shown in the box itself */
-.passphrase-eyed { position: relative; }
-.passphrase-eyed input { padding-right: 40px; }
-.passphrase-eye { position: absolute; top: 0; right: 0; bottom: 0; width: 40px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); }
-.passphrase-eye:hover, .passphrase-eye[aria-pressed="true"] { color: var(--text); }
-.passphrase-eye .menu-icon { width: 18px; height: 18px; color: inherit; }
-/* Whose device this is, asked with the passphrase: two answers, one to be chosen */
+/* API tokens, and the recovery key typed in (Account, and as a browser comes in) */
+.token-new, .recovery-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.token-new input, .recovery-form input { flex: 1; min-width: 180px; }
+.token-new input, .token-new select, .recovery-form input { border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text); border-radius: 4px; padding: 6px 8px; font: inherit; }
+.recovery-form input { font-family: var(--mono, ui-monospace, monospace); letter-spacing: .04em; }
+/* A code for a camera, to be approved by or to approve with: dark on light, whatever the page's colours */
+.key-code { width: 176px; height: 176px; margin: 8px 0; border-radius: 12px; overflow: hidden; background: #faf9f5; }
+.key-code:empty { display: none; }
+.key-code svg { display: block; width: 100%; height: 100%; }
+/* The recovery key, shown: in groups, kept on lines of its own */
+.recovery-text .code { white-space: pre-wrap; word-break: break-word; font-size: 1.05em; letter-spacing: .04em; }
+/* Whose device this is, asked as it is approved: two answers, one to be chosen */
 .device-whose { margin: 6px 0; padding: 0; border: 0; min-width: 0; }
 .device-whose legend { padding: 0; margin-bottom: 2px; font-weight: 600; }
 .device-whose .guide-check { align-items: flex-start; margin: 6px 0; }
@@ -1845,25 +1846,21 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 .login-new .link { color: var(--accent); }
 .login-card .small { font-size: .9em; }
 .login-card .error { font-size: .9em; }
-/* The passphrase, asked for as a browser comes in: the box the account's page has, on a card of its own, a little
-   wider than the others for what is said beside its two answers. What a passphrase is, and where to keep one, is
-   under a line that opens (it is open already for an account with nothing here yet). */
-#passphrase-card { width: min(440px, 100%); }
-.login-card .passphrase-ask > * { margin: 0; }
-.login-card .passphrase-ask > * + * { margin-top: 12px; }
-.login-card .passphrase-ask .guide-form { max-width: none; }
-.login-card .passphrase-box { margin: 0 0 6px; }
-.login-card .passphrase-box input { padding: 8px 10px; font-size: 16px; }
-.login-card .passphrase-eyed input { padding-right: 44px; }
-.login-card .passphrase-eye { width: 44px; }
+/* The key, as a browser comes in with none: what the account's page has, on a card of its own, a little wider than
+   the others for the code and the link */
+#key-card { width: min(460px, 100%); }
+.login-card .key-ask [data-part=key-needed] > * { margin: 0; }
+.login-card .key-ask [data-part=key-needed] > * + * { margin-top: 12px; }
+.login-card .key-ask .guide-form { max-width: none; }
+.login-card .recovery-form input { padding: 8px 10px; font-size: 16px; }
 /* (the two answers are a radio's own size, not a box to type in) */
 .login-card input[type="radio"] { min-height: 0; padding: 0; border: 0; background: none; }
 /* (what is said of what was typed has a line of its own under the button) */
 .login-card .form-note { display: block; margin-top: 6px; }
 .login-card .form-note:empty { display: none; }
-.passphrase-about summary { color: var(--muted); cursor: pointer; }
-.passphrase-about summary:hover { color: var(--text); }
-.passphrase-about p { margin: 8px 0 0; font-size: .9em; }
+.key-ask details summary { color: var(--muted); cursor: pointer; }
+.key-ask details summary:hover { color: var(--text); }
+.key-ask details > :not(summary) { margin: 8px 0 0; font-size: .95em; }
 
 /* ---- An account's own pages: setting a computer up, and the account ---- */
 .guide { padding: 20px; max-width: 820px; width: 100%; overflow-y: auto; line-height: 1.5; }

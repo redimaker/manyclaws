@@ -1,33 +1,30 @@
-// What is drawn from a password and from a passphrase, on the person's own device, and
-// what a device keeps of the passphrase's key. Neither is ever sent. Of the password the
-// server gets what signs in, and the salt it was stretched with. Of the passphrase the
-// server gets nothing: no salt, nothing that tells its key, not that there is one.
+// What is drawn from a password on the person's own device, and what a device keeps of
+// the account's key. The password signs in, and nothing else: the server gets what signs
+// in, and the salt it was stretched with.
 //
-// The password signs in, and nothing else:
 //   password ──PBKDF2-SHA256 (salt, 600,000 rounds)──▶ ──HKDF "manyclaws auth v2"──▶ auth   (sent as the "password")
 //
-// The passphrase makes the key everything is sealed with (seal.js, which says how):
-//   salt   = the first 16 bytes of SHA-256("manyclaws salt v4|" + the account's id)   made here, kept nowhere
-//   passphrase ──Argon2id (salt, 64 MiB, 3 passes)──▶ master                            (not kept, not sent)
-//   key     = HKDF(master, "manyclaws content v4")   seals and opens
-//   signer  = HKDF(master, "manyclaws sign v4")      signs the list of the account's devices, and is kept nowhere:
-//                                                    it is here for the moment it takes to put this device on the list
-//   checker = the public half of signer              checks that list
-//
-// So every device of an account's makes the same key from the same passphrase with
-// nothing handed to it but the account's id, and whatever is typed makes some key:
-// whether it is the right one is told only by whether what was sealed opens with it.
-// Another passphrase is another key, and what was sealed with the one before can no
-// longer be opened.
+// The account's key is drawn from its root (seal.js says how), which is 32 random bytes:
+// nothing typed makes it, and nothing of it is sent to the server. A phone or a browser is
+// given it by another of the account's devices, sealed to it (seal.js, sealTo), or by the
+// person, from the recovery key they kept.
 //
 // What this device keeps (`held`) is kept where no script can read it back: the key and
 // what names are made with as WebCrypto keys that cannot be exported, and with them a
-// signing key of this device's own, made here by the browser and never out of it. A script
-// on this page can seal, open and sign with them while the page is open; it cannot copy
-// them, and neither can anything that reads what the browser stores for this site.
-// What this device asks of the account's computers it signs with its own key (an order),
-// and they go by it because the list of the account's devices, which the passphrase's
-// signer signed, has it.
+// signing key of this device's own, which no script can read either. A script on this page
+// can seal, open and sign with them while the page is open; it cannot copy them, and
+// neither can anything that reads what the browser stores for this site. What this device
+// asks of the account's computers it signs with its own key (an order), and they go by it
+// because the list of the account's devices, which the root's signer signed, has it.
+//
+// And the root, on the person's own device: wrapped (AES-256-GCM) under a key drawn from a
+// passkey's PRF secret, which the device's authenticator gives only after Face ID, Touch ID,
+// a PIN or a security key's touch. So the root is opened for the moment something is signed
+// with it or handed over (approving a device, taking one off, showing the recovery key),
+// and the person is there each time. Nothing of the passkey goes to the server: the page
+// asks the authenticator for the PRF secret and checks no signature. A device whose
+// authenticator has no PRF keeps the key and its own signing key, and not the root: it
+// reads, and gives orders, and approves nothing.
 //
 // A module for the page and for Node alike (crypto.subtle in both; the tests use what is drawn).
 
@@ -65,66 +62,98 @@ export async function newPassword(password, { iterations = KDF.iterations } = {}
   return { auth: await signInKey(password, kdf), kdf }
 }
 
-// ---- The password is not to be the passphrase. The password is stretched far more
-// cheaply than the passphrase (it only signs in, and what comes of it is the server's to
-// keep), so an account whose two are one would have its passphrase guessed at the
-// password's price by whoever had the server's data. The server cannot be asked whether
-// they are one: that would send it something made from the passphrase. So it is told here.
-// A browser that is signed in with a password keeps a mark of it (a hash of what was sent
-// to sign in, which is the password stretched: no more than the server keeps), and what is
-// typed as a passphrase is stretched the same way and held against the mark. A browser signed in before it kept marks has none, and tells nothing.
-export const passwordMark = async (auth) => toB64(new Uint8Array(await subtle.digest('SHA-256', enc.encode('manyclaws password mark v1|' + auth))))
-// Whether what was typed is the password this browser was signed in with (`params`: how the account's password is stretched)
-export async function isPassword(typed, params, mark) {
-  if (!mark || !params?.salt) return false
-  return (await passwordMark(await signInKey(typed, params))) === mark
-}
-
-// ---- The passphrase
-
-// What a passphrase makes for an account, as it is for the moment it takes to put it away
-// (hold): { key, signer, checker }, 32 bytes each. Whatever is typed makes one: nothing
-// here says whether it is the passphrase the account's other devices were given.
-// (seal.js runs the sum's inner step in WebAssembly; a browser that will not run that does the same sum in JavaScript,
-// which takes it several seconds)
-export async function keysOf(passphrase, account, { cost } = {}) {
-  // The sum is a second or so of arithmetic with nothing else done: so it is left off for a moment every so often
-  // (each eighth time seal.js asks), for the page to draw what it says meanwhile and for whatever else waits to be heard.
-  // (Not by a timer: a browser slows those right down in a tab that is not in front, and the key would take a minute.)
-  let asked = 0
-  const moment = () =>
-    new Promise((on) => {
-      const { port1, port2 } = new MessageChannel()
-      port1.onmessage = () => (port1.close(), on())
-      port2.postMessage(0)
-    })
-  const pause = () => (++asked % 8 ? undefined : moment())
-  return S.keysFromPassphrase(passphrase, account, { cost, pause })
-}
 // What was drawn is done with: nothing of it is left in the page's memory to read
 export function forget(made) {
-  for (const part of [made?.key, made?.signer]) part?.fill?.(0)
+  for (const part of [made?.key, made?.signer, made?.root, made?.seed]) part?.fill?.(0)
 }
 
 // ---- What a device keeps, and what it does with it
 
-// What was drawn, put where no script reads it back, with a signing key of this device's
-// own: { key, names, checker, device: { key, signer }, own }. `own`: this is the person's
-// own device, and what is held stays on it (keepKey). (The page adds `since`: which list
-// of the account's devices this one is on from.)
-export async function hold({ key, checker }, { own = false } = {}) {
+// What a device is given, put where no script reads it back, with a signing key of this
+// device's own: { key, names, checker, device: { key, signer }, own, root }. `seed`: the
+// device's signing key as the device that approved it made it (it is on the list of the
+// account's devices already); without one, a new one is made here. `own`: this is the
+// person's own device, and what is held stays on it (keepKey). `root`: the root, wrapped
+// under this device's passkey (lockRoot), where it has one. (The page adds `since`: which
+// list of the account's devices this one is on from.)
+export async function hold({ key, checker }, { own = false, seed = null, root = null } = {}) {
   const names = S.hkdf(key, 'manyclaws name v1')
-  const pair = await subtle.generateKey('Ed25519', false, ['sign', 'verify'])
+  let device
+  if (seed) {
+    const pub = S.verifyKey(seed)
+    const jwk = { kty: 'OKP', crv: 'Ed25519', d: toB64(seed), x: toB64(pub) }
+    device = { key: toB64(pub), signer: await subtle.importKey('jwk', jwk, 'Ed25519', false, ['sign']) }
+  } else {
+    const pair = await subtle.generateKey('Ed25519', false, ['sign', 'verify'])
+    // (the half of the pair that checks is no secret: it is what the list of the account's devices knows this one by)
+    device = { key: toB64(new Uint8Array(await subtle.exportKey('raw', pair.publicKey))), signer: pair.privateKey }
+  }
   const held = {
     key: await subtle.importKey('raw', key, 'AES-GCM', false, ['encrypt', 'decrypt']),
     names: await subtle.importKey('raw', names, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']),
     checker: new Uint8Array(checker),
-    // (the half of the pair that checks is no secret: it is what the list of the account's devices knows this one by)
-    device: { key: toB64(new Uint8Array(await subtle.exportKey('raw', pair.publicKey))), signer: pair.privateKey },
+    device,
     own: !!own,
+    root: root ?? null,
   }
   names.fill(0)
   return held
+}
+
+// ---- The root under a passkey
+
+// What the passkey's PRF secret is asked for with: the same on every device, as it is no secret
+const PRF_SALT = S.sha256(enc.encode('manyclaws root v1'))
+const ROOT_AAD = enc.encode('manyclaws root wrap v1')
+const rp = () => ({ name: 'ManyClaws', id: globalThis.location?.hostname })
+const prfOfAnswer = (cred) => {
+  const got = cred?.getClientExtensionResults?.()?.prf?.results?.first
+  return got ? new Uint8Array(got) : null
+}
+// A passkey of this device's own, made for the root, and its PRF secret: { cred, prf }, `prf` null where the
+// authenticator has none. Each device's passkey has a user handle of its own, so that one made on another device of
+// the person's never takes its place in a keychain that is shared between them. `who`: what the person's keychain lists
+// it as (their email), `where`: this device.
+export async function makePasskey(who, where) {
+  const made = await navigator.credentials.create({
+    publicKey: {
+      rp: rp(),
+      user: { id: random(16), name: String(who || 'ManyClaws'), displayName: 'ManyClaws on ' + String(where || 'this device') },
+      challenge: random(32),
+      pubKeyCredParams: [-8, -7, -257].map((alg) => ({ type: 'public-key', alg })),
+      authenticatorSelection: { residentKey: 'discouraged', userVerification: 'required' },
+      extensions: { prf: { eval: { first: PRF_SALT } } },
+    },
+  })
+  const cred = toB64(new Uint8Array(made.rawId))
+  const prf = made.getClientExtensionResults?.()?.prf
+  if (!prf?.enabled && !prf?.results?.first) return { cred, prf: null }
+  // (some authenticators say the secret as the passkey is made; the rest are asked for it once more)
+  return { cred, prf: prfOfAnswer(made) ?? (await prfOf(cred)) }
+}
+// The PRF secret of this device's passkey, asked of its authenticator: Face ID, Touch ID or whatever it asks for
+export async function prfOf(cred) {
+  const got = await navigator.credentials.get({
+    publicKey: { rpId: rp().id, challenge: random(32), allowCredentials: [{ type: 'public-key', id: fromB64(cred) }], userVerification: 'required', extensions: { prf: { eval: { first: PRF_SALT } } } },
+  })
+  const prf = prfOfAnswer(got)
+  if (!prf) throw new Error('this passkey gives no secret to keep your key under')
+  return prf
+}
+const wrapKey = async (prf) => subtle.importKey('raw', S.hkdf(prf, 'manyclaws root wrap v1'), 'AES-GCM', false, ['encrypt', 'decrypt'])
+// The root wrapped under a passkey's secret, as it is kept: { cred, wrapped }
+export async function lockRoot(root, { cred, prf }) {
+  const iv = random(12)
+  return { cred, wrapped: joined(iv, new Uint8Array(await subtle.encrypt(gcm(iv, ROOT_AAD), await wrapKey(prf), root))) }
+}
+// The root, opened with the passkey it is wrapped under (the person is asked for it): null where this device has none
+export async function rootOf(held) {
+  if (!held?.root?.cred) return null
+  const prf = await prfOf(held.root.cred)
+  const w = held.root.wrapped
+  const root = new Uint8Array(await subtle.decrypt(gcm(w.subarray(0, 12), ROOT_AAD), await wrapKey(prf), w.subarray(12)))
+  prf.fill(0)
+  return root
 }
 
 const random = (n) => crypto.getRandomValues(new Uint8Array(n))
@@ -186,11 +215,11 @@ export async function makeOrder(asked, held) {
 }
 
 // The list of the account's devices as the server has it, opened and checked: { v, devices },
-// or null where it does not open here or the passphrase's signer did not sign it
+// or null where it does not open here or the root's signer did not sign it
 export const readDevices = async (text, held) => S.signedDevices(await open(text, held, null), held?.checker)
 
 // That list made again, changed by `change` (which is given the devices and gives back
-// what they are to be), signed with the passphrase's signer and sealed: what the server
+// what they are to be), signed with the root's signer and sealed: what the server
 // is to keep in its place. A device whose stay is over is left out of it; so is everything
 // of a list this device cannot go by, which is then begun again.
 // `since`: the list this browser knows itself to be on. One older than that is not built
@@ -209,8 +238,8 @@ export async function devicesAgain(text, held, signer, change, now = Date.now(),
   return seal(S.signDevices({ v: Math.max(now, (was?.v ?? 0) + 1), devices, allowed: allowed(was?.allowed ?? []) }, signer), held)
 }
 
-// ---- What is held, kept on this device, so a page that's opened again has it without the
-// passphrase: in the browser's own database for this site, which its service worker reads
+// ---- What is held, kept on this device, so a page that's opened again has it without being
+// approved again: in the browser's own database for this site, which its service worker reads
 // too. Only on a device its owner says is their own: on any other it is held for as long
 // as the page is open, and is gone with it.
 
@@ -231,8 +260,9 @@ function store(mode, work) {
   })
 }
 
-const named = (user) => 'v4|' + user
-const isHeld = (v) => !!v && v.key instanceof CryptoKey && v.names instanceof CryptoKey && v.device?.signer instanceof CryptoKey && typeof v.device.key === 'string' && v.checker instanceof Uint8Array
+const named = (user) => 'v5|' + user
+const isRoot = (r) => r === null || (!!r && typeof r.cred === 'string' && r.wrapped instanceof Uint8Array)
+const isHeld = (v) => !!v && v.key instanceof CryptoKey && v.names instanceof CryptoKey && v.device?.signer instanceof CryptoKey && typeof v.device.key === 'string' && v.checker instanceof Uint8Array && isRoot(v.root ?? null)
 export async function keepKey(user, held) {
   memory.set(user, held)
   await store('readwrite', (s) => (held.own ? s.put(held, named(user)) : s.delete(named(user)))).catch(() => {})
@@ -250,35 +280,6 @@ export async function dropKey(user) {
   await store('readwrite', (s) => s.delete(named(user))).catch(() => {})
 }
 
-// The mark of the password this browser was signed in with (passwordMark): kept in what this browser stores for the
-// site, apart from the keys (which are kept where no script reads them back, and this is a line of text), and gone at
-// sign-out
-const marked = (user) => 'mc.password.' + user
-const kept = (work) => {
-  try {
-    return work(globalThis.localStorage) ?? null
-  } catch {
-    return null
-  }
-}
-export const keepMark = async (user, mark) => void kept((at) => at.setItem(marked(user), mark))
-export const markOf = async (user) => kept((at) => at.getItem(marked(user)))
-export const dropMark = async (user) => void kept((at) => at.removeItem(marked(user)))
-
-// ---- Once, at the deploy of 2026-10-08, and then out of the code. A browser that was
-// given the passphrase before it has the key of before: made with PBKDF2, and kept as
-// bytes. What the account put on its sessions (their names, labels and reminders, and its
-// favorites) is sealed with that key and is on no computer to be sent again, so the page
-// seals it again with the new key as the passphrase is typed (app.js, passphrasePart).
-// This is the key of before, good for opening only, where what was typed makes that same
-// key (so that what is typed is the account's passphrase, and not a slip): null otherwise.
-const before = (user) => 'v3|' + user
-export async function keyBefore(user, passphrase) {
-  const kept = await store('readonly', (s) => s.get(before(user))).catch(() => null)
-  if (!(kept instanceof Uint8Array) || kept.length !== 64) return null
-  const salt = toB64(new Uint8Array(await subtle.digest('SHA-256', enc.encode('manyclaws salt v3|' + String(user)))).subarray(0, 16))
-  const was = await drawn(await stretched(passphrase, { salt, iterations: 600_000 }), 'manyclaws content v3')
-  if (!was.every((b, i) => b === kept[i])) return null
-  return { key: await subtle.importKey('raw', was, 'AES-GCM', false, ['decrypt']) }
-}
-export const dropBefore = (user) => store('readwrite', (s) => (s.delete(before(user)), s.delete(user))).catch(() => {})
+// What a browser kept for an account before there was a root (the key made from a passphrase, as it was kept from
+// 2026-10-08, and before that): not taken, and gone (an account of before starts afresh: app.js)
+export const dropBefore = (user) => store('readwrite', (s) => (s.delete('v4|' + user), s.delete('v3|' + user), s.delete(user))).catch(() => {})

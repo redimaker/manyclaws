@@ -14,21 +14,16 @@
 //   token        / MANYCLAWS_TOKEN         an API token of the account's, made on its Account page
 //   label        / MANYCLAWS_LABEL         optional name for this machine or account
 //   capabilities / MANYCLAWS_CAPABILITIES  "default", "all", or a list such as "+files,+exec"
-//   key                                    the account's encryption passphrase. Everything the
-//                                            session says is sealed with the key made from it. The
-//                                            key is made here, from the passphrase and the account's
-//                                            id, which is all the server hands over for the token: it
-//                                            has nothing of the passphrase, and cannot say whether
-//                                            this is the one the account's other devices were given.
-//                                            The key, written out (mcf_…), is then put in the
-//                                            passphrase's place among the plugin's options, so the
-//                                            passphrase is kept nowhere on this computer.
-//                  MANYCLAWS_KEY           the key written out (mcf_…), as a computer keeps it,
-//                                            where there are no options to put it in. Never the
-//                                            passphrase: what is in a session's environment is in
-//                                            that of everything the session starts.
-// Without a token, the mod does nothing. With a token and no passphrase it sends nothing
-// and asks for nothing, and says once that it needs the passphrase.
+//   key          / MANYCLAWS_KEY           the account's key written out (mcf_…), as a computer
+//                                            keeps it: the key everything the session says is
+//                                            sealed with, and the half that checks the list of the
+//                                            account's devices. Put among the plugin's options by
+//                                            the plugin itself, as this computer is connected from
+//                                            the link it shows (below): nobody types it. There is no
+//                                            passphrase: anything that is not a key is no key.
+// Without a token, or with no key, the mod sends nothing and asks for nothing: in a session
+// someone is at, it shows the link that connects this computer from the page. So it does
+// where the server refuses its token (taken back, or run out).
 //
 // Nothing of what is said in the session, or of how what is said is made up, is the
 // server's to read (see "What leaves this computer" below): the chat's rows are made here
@@ -55,8 +50,9 @@ import {
   isAttended,
   randomId,
 } from './lib.js'
-import { seal, open, isSealed, openBytes, keysFromText, keysText, contentKey, nameOf, toB64, fromB64, sha256, keysFromPassphrase, isOrder, readOrder, takeOrder, orderMemory, devicesMemory, askedOf, OrderRefused, sshSigned, pluginDigest, pluginOfList, notPlugin, hexSha256, mayStart, x25519Keys, openFrom } from './seal.js'
+import { seal, open, isSealed, openBytes, keysFromText, keysText, contentKey, nameOf, toB64, fromB64, sha256, isOrder, readOrder, takeOrder, orderMemory, devicesMemory, askedOf, OrderRefused, sshSigned, pluginDigest, pluginOfList, notPlugin, hexSha256, mayStart, x25519Keys, openFrom } from './seal.js'
 import { messageRows, resultRow, historyRows, summarizeInput } from './rows.js'
+import { qrOf } from './qr.js'
 
 const FLUSH_MS = 250 // how often what is in the queue is sent
 const PING_MS = 20_000 // a session with nothing to report still checks in this often
@@ -79,6 +75,8 @@ const TOOL_PREFIX = 'mcp__manyclaws__'
 const instance = randomId() // this load of the module, said in what `ping` answers (sealed, as every answer is) and nowhere else: a reload is a new one
 
 let config = null // { url, token, label, capabilities, key, checker }, or null when unconfigured
+let loops = 0 // which taking up of the session its flushing and asking belong to (begin): those of one before stop
+let refusedSaid = false // that the server refused this computer's token has been met with the link that connects it again
 let sealKey = null // the account's key, ready for use: what everything this session says is sealed with
 let orders = orderMemory() // the orders this session has run, so that none is run twice (kept in the plugin's store)
 let devices = devicesMemory() // the account's phones and browsers, as this computer knows them: an order is done only where one of them signed it
@@ -93,7 +91,7 @@ let lastSent = 0
 let sessionId = null // the current conversation's id; null right after one ends
 let attended = false // a person can be at this session (see isAttended)
 let runningTurn = null // turnId of the main loop's running turn, for turn.abort
-let turnBefore = null // the turn that started before the session was taken up (while its key was being made), if it is still running
+let turnBefore = null // the turn that started before the session was taken up (while it was being connected), if it is still running
 let state = 'idle'
 let stateDetail = '' // what was said with it
 let stateSince = Date.now() // when it came to be in that state
@@ -137,27 +135,10 @@ export function register(on, options) {
     void $.command.register({ name: 'manyclaws', description: 'Connect this computer to ManyClaws, or disconnect it', argumentHint: 'connect | disconnect' }).catch(() => {})
     startedWith = e
     const given = await readGiven($, options)
-    // (with no token, where someone is at the session: the link that connects this computer from the page)
-    if (!given) {
-      if (!(await tokenOf($, options))) void offerConnect($, e)
-      return next(e)
-    }
-    const here = await keysHere($, given)
+    const here = given && keysHere($, given)
     if (here) await begin($, e, given, here)
-    // The key is still to be made from the passphrase: in the first session on this
-    // computer, or the first since it was given another. That is more arithmetic than a
-    // hook is given the time for, so it is done beside the session, in pieces, and the
-    // session is taken up when the key is there: it is told of from its start then, as
-    // one found already running is.
-    else if (here === null) {
-      $.ui.log('ManyClaws: making your encryption key from your passphrase. This computer does that once, and it takes it a while: this session is shown on the page when the key is made.')
-      $.clock.after(1, async () => {
-        const made = await keysMade($, given)
-        if (!made) return
-        await begin($, e, given, made)
-        void keyInPlace($, made)
-      })
-    }
+    // (with no token, or no key, where someone is at the session: the link that connects this computer from the page)
+    else void offerConnect($, e)
     return next(e)
   })
 
@@ -489,13 +470,15 @@ async function begin($, e, given, keys) {
   // (see sendHistory), unasked if not. If no poll comes back, unasked all the same.
   historyOwed = true
   $.clock.after(HISTORY_WAIT_MS, () => owedHistory($))
-  $.clock.every(FLUSH_MS, () => flush($))
-  $.clock.after(1, () => poll($))
+  // (taken up again, with another token or key, the loops of before stop: these are the ones that go on)
+  const loop = ++loops
+  $.clock.every(FLUSH_MS, () => loop === loops && flush($))
+  $.clock.after(1, () => poll($, loop))
 }
 
-// What the plugin was given: where it reports, what it signs in with, and the passphrase
-// its key is made from. null where it has no token or no passphrase: a session is told of
-// sealed or not at all, so with null nothing is sent and nothing is asked for.
+// What the plugin was given: where it reports, what it signs in with, and the key it seals
+// with. null where it has no token: a session is told of sealed or not at all, so with null
+// nothing is sent and nothing is asked for.
 // The token this plugin signs in with, or '' (one it was disconnected from is none: NO_TOKEN)
 async function tokenOf($, options) {
   const token = options?.token || (await $.env.get('MANYCLAWS_TOKEN')) || ''
@@ -504,16 +487,12 @@ async function tokenOf($, options) {
 async function readGiven($, options) {
   const token = await tokenOf($, options)
   if (!token) return null
-  // (`typed`: it came from the plugin's own options, where a person types it and where the key can be put in its place)
-  const typed = String(options?.key || '').trim()
-  const passphrase = typed || String((await $.env.get('MANYCLAWS_KEY')) || '').trim()
-  if (!passphrase) return notShown($, 'ManyClaws: this computer has not been given your encryption passphrase, and nothing a session says leaves it unsealed. This session is not shown on the page. Give the plugin the passphrase in /plugin (manyclaws, its options), then start Claude Code again.')
+  const key = String(options?.key || (await $.env.get('MANYCLAWS_KEY')) || '').trim()
   const url = (await $.env.get('MANYCLAWS_URL')) || (await relayOf($, String(token))) || SERVER
   return {
     url: String(url).replace(/\/+$/, ''),
     token: String(token),
-    passphrase,
-    typed: !!typed,
+    key: key === NO_TOKEN ? '' : key,
     label: options?.label || (await $.env.get('MANYCLAWS_LABEL')) || '',
     capabilities: options?.capabilities || (await $.env.get('MANYCLAWS_CAPABILITIES')) || 'default',
   }
@@ -528,90 +507,20 @@ function notShown($, text) {
     .catch(() => {})
   return null
 }
-const unsent = ($, why) => notShown($, `ManyClaws: ${why}. This session is not shown on the page: nothing a session says leaves this computer unsealed. Put it right in /plugin (manyclaws, its options).`)
 
-// The account's key from the passphrase this computer was given. The server says whose
-// computer this is (the account's id, to whoever holds one of its tokens) and nothing
-// else: of the passphrase it has nothing, so nothing here can tell whether this is the
-// one the account's other devices were given. If it is not, they cannot open what this
-// computer sends, and it is they that say so. The key is made here, once, and then
-// written out (mcf_…) into the plugin's own options in the passphrase's place: so the
-// next session starts at once, a passphrase typed anew makes its key anew, and the
-// passphrase itself is kept nowhere on this computer once its key is made. What is kept
-// is the key, where Claude Code keeps what is secret of a plugin's options: it opens what
-// the account's sessions say, and can neither sign the list of the account's devices nor
-// be turned back into the passphrase.
-//
-// The key is not kept beside that, locked under the passphrase or anything made with it:
-// whoever had such a copy and this computer's token could try a passphrase on it with
-// one cheap sum each, where trying one on anything sealed costs what Argon2id costs.
 const PLUGIN = 'manyclaws@manyclaws' // what Claude Code knows this plugin by, where it was installed from its marketplace
-const kept = (keys) => ({ key: keys.key, checker: keys.checker })
 
-// The key where this computer has it already: written out, in the passphrase's place or
-// in the environment. null where it is still to be made from the passphrase; undefined
-// where what it was given is no use, which is said.
-async function keysHere($, { passphrase, typed }) {
-  // (once, at the release of 2026-10-09, and then out of the code: the copy of the key the plugin used to keep in its
-  // own store, locked under the token and the passphrase, is removed from every computer that has one)
-  await Promise.resolve($.store.delete('kept-key')).catch(() => {})
+// The account's key, as this computer was given it: written out (mcf_…), among the plugin's options or in the
+// environment. null where there is none, or what is there is not one (from before there was a key to be given: there
+// was a passphrase), which is said: the link that connects this computer is offered in its place.
+function keysHere($, { key }) {
   let written = null
   try {
-    written = keysFromText(passphrase)
+    written = keysFromText(key)
   } catch {}
   if (written) return written
-  // (something written as a kept key that isn't a whole one is not taken for a passphrase)
-  if (/^mc[a-z]_[A-Za-z0-9_.-]{20,}$/.test(passphrase)) return void unsent($, 'what this computer was given as its passphrase is a key written out, and not a whole one: give it the passphrase itself')
-  // (a passphrase is typed into the plugin's options and nowhere else: one in the environment would be handed to every
-  // command the session runs, and there is nowhere to put its key in its place)
-  if (!typed) return void unsent($, 'MANYCLAWS_KEY takes your key written out (mcf_…), as a computer keeps it, and what it holds is not one. A passphrase is not taken from the environment, where every command this session runs could read it: type it into the plugin\'s own options')
+  if (key) notShown($, 'ManyClaws: what this computer was given as its encryption key is not one. ManyClaws has no passphrase: a computer is given the key as it is connected from the link this plugin shows. This session is not shown on the page until then.')
   return null
-}
-
-// The key made from the passphrase, and put in its place: null where it could not be
-// made, which is said. Making it is some seconds of arithmetic at the least (Argon2id, in
-// plain JavaScript here: a quarter of a minute on a fast computer), with the clock waited
-// on between pieces so that the rest of the plugin is heard meanwhile.
-async function keysMade($, { url, token, passphrase }) {
-  let r
-  try {
-    r = await $.http.fetch(url + '/api/agent/account', { headers: { authorization: 'Bearer ' + token } })
-  } catch {
-    return unsent($, 'the server could not be reached to say whose computer this is, which your encryption key is made with')
-  }
-  if (r.status === 401) return unsent($, 'the API token was refused (it may have run out, or been taken back)')
-  if (!r.ok) return unsent($, `the server would not say whose computer this is (${r.status})`)
-  let keys = null
-  try {
-    // (the half that signs the list of the account's devices is made on the way, and is not kept: a computer checks that list, and can write none)
-    keys = await keysFromPassphrase(passphrase, JSON.parse(r.text).id, { pause: () => $.clock.sleep(1) })
-  } catch {}
-  if (!keys) return unsent($, 'your encryption key could not be made from the passphrase')
-  return kept(keys)
-}
-
-// The key written out, put among the plugin's options where the passphrase was: by Claude
-// Code itself, asked as its own command line is (a plugin cannot write what is secret of
-// its options any other way), with the key on that command's standard input and never
-// among its arguments. Not waited for by the session, which has its key already. Where it
-// cannot be done the passphrase stays where it was typed, and the key is made again as
-// each session starts: slow, and said, with what to do about it.
-async function keyInPlace($, keys) {
-  let why = ''
-  try {
-    const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
-    const r = await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ key: keysText(keys) }), timeoutMs: 60_000 })
-    if (r.exitCode === 0) {
-      // (said once, as it is done: from here on this computer cannot give the passphrase back to whoever typed it)
-      $.ui.log('ManyClaws: your encryption key is made, and is now kept on this computer in place of your passphrase, which is no longer kept here. Keep the passphrase somewhere of your own, a password manager for one: it is asked for when you add a browser or a phone, and nobody can give a forgotten one back.')
-      return true
-    }
-    why = String(r.stderr || r.stdout || '').trim().split('\n').pop().slice(0, 200)
-  } catch (err) {
-    why = String(err?.message ?? err).slice(0, 200)
-  }
-  $.ui.log(`ManyClaws: your encryption key was made, and this session is sealed with it. It could not be put in your passphrase's place among the plugin's options${why ? ` (${why})` : ''}, so the passphrase is still kept there, and the key is made again as each session starts, which takes a while each time. Run this once in a terminal to put it right: claude plugin configure ${PLUGIN}`)
-  return false
 }
 
 // Which session this is. After /clear or a resume the process goes on under another: it
@@ -1020,14 +929,14 @@ async function flush($) {
 }
 
 // ---- The machine's agent, where there is one: given what this plugin was given.
-// A person types their API token and passphrase once, into this plugin's own dialog
-// (Manage Plugins). The agent beside it signs in with the same token and seals with the
-// same key, and its installer, which Claude Code runs, asks for neither: the agent waits.
+// A computer is given its API token and the account's key once, as it is connected from
+// the link this plugin shows. The agent beside it signs in with the same token and seals
+// with the same key, and its installer asks for neither: the agent waits.
 // So once the server has taken this plugin's token, what the agent keeps (agent.json, in
 // ~/.manyclaws) is looked at, and where it has no token, or another, or another key, it
 // is left a note of the two in its own folder, which only this user can read. The agent
 // takes them from there and starts again. The key goes written out as a computer keeps
-// it (mcf_…), never the passphrase. Only for an agent that reports to the server this
+// it (mcf_…). Only for an agent that reports to the server this
 // plugin does: one set up for another server is left alone, and so is one this plugin
 // reports through (its relay), where what this plugin signs in with is the relay's word.
 // Looked at again every half minute a session is sending: an agent installed while a
@@ -1094,27 +1003,50 @@ async function tellAgent($) {
 
 // ---- Connecting this computer from the page, with nothing typed into Claude Code
 //
-// With no token, a session someone is at offers a link: the plugin makes a pair of keys for the asking, and the link
-// has the public one in it after the #, which a browser does not send anywhere. So it goes from this session to the
-// person's browser, opened there, and never to the server. The page, given the passphrase, makes a token for this
-// computer, seals it and the account's key (written out, mcf_…) to that key, and puts that on the server under a name
-// drawn from the key, which is what the plugin asks for, every two seconds for two minutes. Nothing but the pair's
-// other half, which is only here, opens it. The two are then kept as a person typing them would have them kept
-// (`claude plugin configure`), and the session is taken up at once.
+// With no token or no key, a session someone is at offers a link: the plugin makes a pair of keys for the asking, and
+// the link has the public one in it after the #, which a browser does not send anywhere. So it goes from this session
+// to the person's browser, opened there or read from the code drawn here with a phone's camera, and never to the
+// server. The page, approved there with its passkey, makes a token for this computer, seals it and the account's key
+// (written out, mcf_…) to that key, and puts that on the server under a name drawn from the key, which is what the
+// plugin asks for, every three seconds for ten minutes. Nothing but the pair's other half, which is only here, opens
+// it. The two are then kept among the plugin's options (`claude plugin configure`), and the session is taken up at once.
+// So with a token the server refuses: the link connects this computer again, and the session goes on with what it gave.
 const NO_TOKEN = 'none' // what is kept in the token's place once this computer is disconnected: no token
-const CONNECT_MS = 2 * 60_000
-const CONNECT_EVERY_MS = 2000
+const CONNECT_MS = 10 * 60_000
+const CONNECT_EVERY_MS = 3000
+// The link as a code a phone's camera reads, drawn with blocks for a terminal whose ground is dark: a light module is a
+// block, a dark one is the ground, two rows to a line, with a light band about it
+function codeLines(text) {
+  const code = qrOf(text)
+  if (!code) return ''
+  const band = 2
+  const n = code.size + 2 * band
+  const light = (x, y) => x < band || y < band || x >= n - band || y >= n - band || !code.rows[y - band][x - band]
+  const lines = []
+  for (let y = 0; y < n; y += 2) {
+    let line = ''
+    for (let x = 0; x < n; x++) {
+      const top = light(x, y)
+      const bottom = y + 1 < n ? light(x, y + 1) : false
+      line += top && bottom ? '█' : top ? '▀' : bottom ? '▄' : ' '
+    }
+    lines.push(line)
+  }
+  return lines.join('\n')
+}
 let connecting = null // { secret, id, url, until, e }
 let startedWith = null // how this session started: what it is taken up with once it is connected
-async function offerConnect($, e, { asked = false } = {}) {
+async function offerConnect($, e, { asked = false, again = false } = {}) {
   if (!isAttended(e.isInteractive, (await $.env.get('CLAUDE_CODE_ENTRYPOINT')) || undefined)) return asked ? 'this session is one a program runs: connect this computer from a session started on it, in a terminal, an editor or the desktop app' : undefined
-  const url = String((await $.env.get('MANYCLAWS_URL')) || SERVER).replace(/\/+$/, '')
+  const url = String((await $.env.get('MANYCLAWS_URL')) || config?.url || SERVER).replace(/\/+$/, '')
   const pair = x25519Keys()
-  const name = (await output($, ['hostname'])).trim().replace(/\.local$/, '') || 'this computer'
-  const link = `${url}/app#/connect/${toB64(pair.public)}/${encodeURIComponent(name)}`
+  const name = (await output($, ['hostname'])).trim().replace(/\.local$/, '').slice(0, 20) || 'this computer'
+  const link = `${url}/app#/c/${toB64(pair.public)}/${encodeURIComponent(name)}`
   connecting = { secret: pair.secret, id: toB64(sha256(pair.public)).slice(0, 22), url, until: (await $.clock.now()) + CONNECT_MS, e: startedWith ?? e }
-  const said = `ManyClaws: this computer is not connected yet. Open this link to connect it, in a browser where you are signed in to ManyClaws (or on your phone): ${link}\nIt works once, for two minutes; /manyclaws connect makes another.`
+  const said = `ManyClaws: ${again ? 'the server refused this computer’s API token (it was taken back, or ran out), so this session is not shown on your page. Open this link to connect it again' : 'this computer is not connected yet. Open this link to connect it'}, in a browser where you are signed in to ManyClaws, or read the code with your phone’s camera, and approve it there: ${link}\nIt works once, for ten minutes; /manyclaws connect makes another.`
   $.ui.log(said)
+  const drawn = codeLines(link)
+  if (drawn) $.ui.log(drawn)
   $.ui.status(`ManyClaws: connect this computer → ${link}`)
   $.clock.after(CONNECT_EVERY_MS, () => void askConnect($))
   return said
@@ -1138,8 +1070,8 @@ async function askConnect($) {
   const got = openFrom(c.secret, sealed)
   const keys = keysFromText(got?.key)
   if (!got || typeof got.token !== 'string' || !got.token || !keys) return void $.ui.log('ManyClaws: what came back to connect this computer did not open with the key its link was made with, so nothing of it was taken. /manyclaws connect makes another link.')
-  // (kept where a person typing them would have them kept: the key written out in the passphrase's place. Only where
-  // this plugin is the one Claude Code installed: one loaded from a folder of its own, a checkout's, keeps them for this
+  // (kept among the plugin's options, where Claude Code keeps what is secret of them. Only where this plugin is the one
+  // Claude Code installed: one loaded from a folder of its own, a checkout's, keeps them for this
   // session alone, and leaves the installed plugin's as they are)
   const installed = await installedHere($)
   let kept = false
@@ -1150,7 +1082,12 @@ async function askConnect($) {
   const account = typeof got.account === 'string' && got.account ? `the account of ${got.account}` : 'your ManyClaws account'
   const unkept = !installed ? ' (This plugin was loaded from a folder of its own, not installed by Claude Code, so the two are kept for this session only.)' : kept ? '' : ' (Claude Code would not keep the two among the plugin\'s options here, so the next session asks again.)'
   $.ui.log(`ManyClaws: connected to ${account}. This session is on your page.${unkept} Not your account? Type /manyclaws disconnect.`)
-  if (!config) await begin($, c.e, { url: c.url, token: got.token, passphrase: got.key, label: '', capabilities: 'default' }, keys)
+  // (taken up with what it was given: a session that had a token the server refused is taken up again, its loops of
+  // before let go of)
+  const was = config
+  config = null
+  await begin($, c.e, { url: c.url, token: got.token, key: got.key, label: was?.label ?? '', capabilities: was?.capabilities ?? 'default' }, keys)
+  refusedSaid = false
 }
 // Whether this plugin is a copy Claude Code installed from the marketplace (manyclaws@manyclaws), by its folder: the only
 // one whose options `claude plugin configure` changes. One loaded from elsewhere (--plugin-dir) is not, and changes none.
@@ -1284,8 +1221,8 @@ function warn($, text) {
 // ---- Calls in
 
 // Long-polls the server for calls and policy
-async function poll($) {
-  if (!config) return
+async function poll($, loop = loops) {
+  if (!config || loop !== loops) return
   let delay = 1
   try {
     const sid = await currentSessionId($)
@@ -1293,7 +1230,7 @@ async function poll($) {
     // a process on its way out from going (a -p run's, whose last poll it waits for). After /clear or a resume
     // there is another session soon, which is looked for again.
     if (endedIds.has(sid)) {
-      $.clock.after(ENDED_MS, () => poll($))
+      $.clock.after(ENDED_MS, () => poll($, loop))
       return
     }
     // How long the server may hold this asking: two seconds, whoever is at the session or nobody. A session a program
@@ -1330,7 +1267,7 @@ async function poll($) {
       // that it took the order and never run it, and the load after it would tell the server so: the order would be gone.
       if ((body.commands ?? []).some((command) => command.seq > cursor && isOrder(command.order))) await freshDevices($)
       // (and read every so often with no order to go by, the first time as the session is taken up: DEVICES_EVERY_MS.
-      // Those readings are apart from the one an order waits for: an order from a browser that was given the passphrase
+      // Those readings are apart from the one an order waits for: an order from a browser that was approved
       // a moment ago is gone by the list as it stands then, not by one read just before the browser was on it.)
       else if (devicesLookedAt === null || (await $.clock.now()) - devicesLookedAt >= DEVICES_EVERY_MS) {
         devicesLookedAt = await $.clock.now()
@@ -1345,11 +1282,18 @@ async function poll($) {
         void execute($, command)
       }
       if (ran) await $.store.set('cursor:' + sid, cursor)
-    } else delay = r.status === 401 ? 60_000 : RETRY_MS
+    } else if (r.status === 401) {
+      delay = 60_000
+      // (its token taken back, or run out: where someone is at the session, the link that connects this computer again)
+      if (!refusedSaid) {
+        refusedSaid = true
+        void offerConnect($, startedWith ?? { isInteractive: attended }, { again: true })
+      }
+    } else delay = RETRY_MS
   } catch {
     delay = RETRY_MS
   }
-  $.clock.after(delay, () => poll($))
+  $.clock.after(delay, () => poll($, loop))
 }
 
 // Its own two tools (OWN_TOOLS), put before Claude: these and no others, since a tool's
@@ -1375,7 +1319,7 @@ const isOwnTool = (tool) => tool.startsWith(TOOL_PREFIX) && added.has(tool.slice
 // The account's devices, as the server has them now: read before an order is gone by (as
 // a poll brings one, and as an answer to something the session asked comes), so that one
 // from a device taken off the list is refused from then on. The list is the
-// account's own (the passphrase signed it, and it is sealed with the key), so the server
+// account's own (the root signed it, and it is sealed with the key), so the server
 // can only hand one over or not: a list is taken where it is the account's and no older
 // than the one held (seal.js, devicesMemory), and where the server hands over anything
 // else, or cannot be reached, the one held stands.
@@ -1396,7 +1340,7 @@ async function freshDevices($) {
 // arguments in the open. Signed (`order`): a prompt, or a call that acts, with all of it in
 // the order. Sealed (`c`): a call that only reads. Or in the open, from the server or from
 // anyone signed in: what only stops. A throw says why not.
-const unsigned_ = (why) => new Error(`this session is end-to-end encrypted, and does what it is asked only when a device that has your passphrase signed it: ${why}`)
+const unsigned_ = (why) => new Error(`this session is end-to-end encrypted, and does what it is asked only when one of your devices signed it: ${why}`)
 function asked(command) {
   if (isOrder(command.order)) {
     // (a session a program runs is given its prompts by that program, which is its machine's agent: the agent takes the order,
@@ -1817,10 +1761,10 @@ function pictureType(b) {
   return 'image/jpeg'
 }
 
-// A session takes a yes, an answer, or any words at all, only from a device of its
-// account's that has the passphrase: in an order, made for this request and for what was
-// asked in it. From anyone else (the server, or someone signed in who has not the
-// passphrase) it takes what only refuses or leaves the asking to the dialog here, and
+// A session takes a yes, an answer, or any words at all, only from one of its account's
+// devices: in an order, made for this request and for what was asked in it. From anyone
+// else (the server, or someone signed in on a browser that is none of the account's
+// devices) it takes what only refuses or leaves the asking to the dialog here, and
 // none of the words that came with it: a reason given for a refusal is read by Claude,
 // which makes it a prompt.
 const BARE = new Set(['deny', 'decline', 'ask', 'abort', 'timeout', 'error'])

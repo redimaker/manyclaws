@@ -24,14 +24,14 @@
 # The first install has nothing but this script to go by, which is why the script is worth
 # reading before it is run.
 #
-# The agent signs in with an API token of your account's and seals with a key made from
-# your encryption passphrase: the same two the ManyClaws plugin in Claude Code is given.
-# It needs both: nothing of this machine's sessions is sent unsealed. They are typed
-# once. Where Claude Code runs this for you, it asks for nothing: the agent is
-# installed and waits, and takes both from the plugin once you have typed them
-# into the plugin's own dialog (Manage Plugins) and started a session. Where you run it
-# yourself, it asks for both on the terminal, without showing what is typed, and gives
-# the plugin the same. Neither goes in the command.
+# The agent signs in with an API token of your account's and seals with your account's
+# key: the same two the ManyClaws plugin in Claude Code is given. It needs both: nothing
+# of this machine's sessions is sent unsealed. Nobody types either: the plugin is given
+# both as the computer is connected from the link it shows in a new session (opened
+# where you are signed in to ManyClaws, and approved there), and the agent takes them from
+# the plugin. So this asks for nothing: the agent is installed, and waits for them. For a
+# set-up with nobody there, both can be given (--token and --key, or MANYCLAWS_TOKEN and
+# MANYCLAWS_KEY), and the plugin is given the same.
 #
 #   --server URL        the ManyClaws server this machine reports to (default: what it was set
 #                       up with, else https://manyclaws.dev)
@@ -63,15 +63,13 @@
 #                       agent.json has them put into these too, and "upload": false nowhere.)
 #   --relay             send this machine's ManyClaws mod through the agent, so the
 #                       machine has one connection to the server
-#   --token TOKEN       the API token, where it can't be asked for (or MANYCLAWS_TOKEN)
-#   --key KEY           the encryption passphrase, where it can't be asked for (or
-#                       MANYCLAWS_KEY). The key is made from it here and kept; the
-#                       passphrase is not. Everything the agent sends of the machine's
-#                       sessions is sealed with that key
+#   --token TOKEN       an API token of the account's, for a set-up with nobody there (or
+#                       MANYCLAWS_TOKEN)
+#   --key KEY           the account's key written out, as a computer keeps it (mcf_…), for a
+#                       set-up with nobody there (or MANYCLAWS_KEY). There is no passphrase.
+#                       Everything the agent sends of the machine's sessions is sealed with it
 #   --no-keychain       on a Mac, keep the token and the key in agent.json (which only you can
 #                       read) and not in your login keychain, where they are kept otherwise
-#   --new-passphrase    ask for the encryption passphrase again, on a machine that has a key
-#                       already: after you have chosen a new one for your account
 #   --update            fetch the newest release and start the agent again: for an agent that
 #                       is older than that, or one that is not running. Everything the machine
 #                       was set up with is kept, and nothing is asked. Where the
@@ -108,7 +106,7 @@ from="${MANYCLAWS_AGENT_FROM:-https://codeload.github.com/$REPO/tar.gz/refs/head
 # release signed by one of these may bring an installer with others: that is how a key is
 # replaced, and it is why an installed agent is updated by its own copy of this script.
 SIGNERS='manyclaws namespaces="manyclaws-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMPeEfWVnYHahu/dRpMq7J+2eRNg67sQS+IJh/bH8PDD'
-server="" token="" label="" relay=0 uninstall=0 rekey=0 typed=0 update=0 end_sessions=0 keychain=1 signers="${MANYCLAWS_SIGNERS:-}" reinstall=0 auto_folders=0 wait_start=0
+server="" token="" label="" relay=0 uninstall=0 typed=0 update=0 end_sessions=0 keychain=1 signers="${MANYCLAWS_SIGNERS:-}" reinstall=0 auto_folders=0 wait_start=0
 roots=() spawn=() modes=() files=() key=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -125,7 +123,6 @@ while [ $# -gt 0 ]; do
     --no-keychain) keychain=0; shift ;;
     --relay) relay=1; shift ;;
     --key) key="$2"; shift 2 ;;
-    --new-passphrase) rekey=1; shift ;;
     --uninstall) uninstall=1; shift ;;
     --update) update=1; shift ;;
     # (an update that first takes away what is here: nothing is asked, and nothing of the options is written)
@@ -201,39 +198,18 @@ key="${key:-${MANYCLAWS_KEY:-}}"
 had_token=0 had_key=0
 if [ -f "$HOME_DIR/agent.json" ]; then
   grep -q '"token"' "$HOME_DIR/agent.json" && had_token=1
-  # (a key as this agent keeps one: anything written another way is not one, and the passphrase is asked for)
+  # (a key as this agent keeps one: anything written another way is not one)
   grep -q '"key": *"mcf_' "$HOME_DIR/agent.json" && had_key=1
   # (both kept in the keychain: their fingerprint is here in their place)
   grep -q '"has": *"' "$HOME_DIR/agent.json" && had_token=1 had_key=1
 fi
-# (a new passphrase makes a new key: the one kept is not gone by)
-[ "$rekey" = 0 ] || had_key=0
-# Asked on the terminal itself (the script is what's on standard input), and not shown
-ask() {
-  { : >/dev/tty; } 2>/dev/null || return 1
-  printf '%s' "$1" >/dev/tty
-  IFS= read -r -s answer </dev/tty || answer=""
-  printf '\n' >/dev/tty
-}
-# Where Claude Code runs this, nothing is asked: there is no terminal to ask on, and what
-# would be typed is not to pass through what is said to Claude. The agent is installed
-# without what it has not been given, and takes it from the plugin (see the end).
+# Where Claude Code runs this it says so (CLAUDECODE): what is said at the end is for it to pass on
 by_claude=0
 [ -z "${CLAUDECODE:-}" ] || by_claude=1
-# (what was typed or given in this run is the newest there is, and the plugin is given it)
+# (what was given in this run is the newest there is, and the plugin is given it)
 [ -z "$token$key" ] || typed=1
-if [ "$update" = 0 ] && [ -z "$token" ] && [ "$had_token" = 0 ] && [ "$by_claude" = 0 ]; then
-  ask "API token (from your account page, under API tokens): " || { echo "The API token has to be typed in, and there is no terminal here to ask on. Run this in a terminal of your own, or give it in MANYCLAWS_TOKEN." >&2; exit 2; }
-  token="$answer"
-  [ -n "$token" ] || { echo "No token was given." >&2; exit 2; }
-  typed=1
-fi
-if [ "$update" = 0 ] && [ -z "$key" ] && [ "$had_key" = 0 ] && [ "$by_claude" = 0 ]; then
-  ask "Encryption passphrase (the one you type on your account page): " || { echo "The encryption passphrase has to be typed in, and there is no terminal here to ask on. Run this in a terminal of your own, or give it in MANYCLAWS_KEY." >&2; exit 2; }
-  key="$answer"
-  [ -n "$key" ] || { echo "No passphrase was given: nothing of this machine's sessions is sent unsealed, so the agent needs it." >&2; exit 2; }
-  typed=1
-fi
+# (a key is the account's written out, and nothing else: there is no passphrase to make one from)
+case "$key" in "" | mcf_*) ;; *) echo "The key is not what a ManyClaws computer keeps (mcf_…). There is no passphrase: a computer is given its key as it is connected from the link the ManyClaws plugin shows in a new session. Give no key, and connect it so." >&2; exit 2 ;; esac
 # With either of the two neither in hand nor kept, the agent waits for the plugin's
 waiting=0
 { [ -n "$token" ] || [ "$had_token" = 1 ]; } && { [ -n "$key" ] || [ "$had_key" = 1 ]; } || waiting=1
@@ -428,7 +404,7 @@ fi
 if [ "$reinstall" = 1 ]; then
   echo "The old ManyClaws agent is removed, with its API token and its key and everything else it kept. Agent $(sed -n "s/^export const VERSION = '\(.*\)'\$/\1/p" "$HOME_DIR/agent/service.mjs") is installed in its place, as $from has it (a signed release, checked), and running, set up as the old one was. Its log: $HOME_DIR/agent.log"
   echo "It has no API token or encryption key, and asked for none: it takes both from the ManyClaws plugin."
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: give the ManyClaws plugin the API token and the encryption passphrase (/plugin in Claude Code, the gear beside manyclaws), then start a new Claude Code session."
+  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a link, to open where you are signed in to ManyClaws and approve."
   exit 0
 fi
 if [ "$update" = 1 ]; then
@@ -453,14 +429,13 @@ else echo "The page opens no files from this machine (--files DIR names folders 
 if [ ${#spawn[@]} -gt 0 ] || [ "$auto_folders" = 1 ]; then echo "The page may put files into the folders sessions are started in, and nowhere else (\"upload\": false in agent.json has none put anywhere)."
 else echo "The page puts no files on this machine."; fi
 
-# The plugin beside it, in Claude Code, and this agent are given the same token and key,
-# typed once. Typed here, on a terminal, they are given to the plugin now (where it
-# reports, the token, and the key that was made). Where Claude Code ran this, nothing
-# was typed here: the plugin's own dialog is where they go, and the agent takes them
-# from the plugin. What is said says which, and what is left for the person to do.
+# The plugin beside it, in Claude Code, and this agent are given the same token and key.
+# Given here (a set-up with nobody there), they are given to the plugin now. Otherwise the
+# computer is connected from the link the plugin shows, and the agent takes them from the
+# plugin. What is said says which, and what is left for the person to do.
 if [ "$typed" = 1 ] && [ "$waiting" = 0 ]; then
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin || echo "The ManyClaws plugin was NOT given its API token and passphrase, and still needs to be configured: /plugin configure manyclaws@manyclaws in Claude Code."
+  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin || echo "The ManyClaws plugin was NOT given its API token and key. Start a new Claude Code session on this computer: the plugin shows a link that connects it."
 elif [ "$by_claude" = 1 ] || [ "$waiting" = 1 ]; then
   if [ "$waiting" = 1 ]; then echo "It has no API token or encryption key yet, and asked for none: it takes both from the ManyClaws plugin."; fi
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: give the ManyClaws plugin the API token and the encryption passphrase (/plugin in Claude Code, the gear beside manyclaws), then start a new Claude Code session."
+  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a link, to open where you are signed in to ManyClaws and approve."
 fi

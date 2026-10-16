@@ -46,8 +46,9 @@ const SEALED = '\uE000v1.'
 const enc = new TextEncoder()
 
 // The keys this device keeps (keys.js keeps them in this site's own database): each is
-// what an account's sessions are sealed with, made here from its passphrase, and kept so
-// that it opens and seals here and can be read back by nothing
+// what an account's sessions are sealed with, given to this device by another of the
+// account's or drawn from the account's root here, and kept so that it opens and seals
+// here and can be read back by nothing
 function storedKeys() {
   return new Promise((resolve) => {
     const req = indexedDB.open('manyclaws', 1)

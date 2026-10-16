@@ -69,12 +69,8 @@
 [data-site] .acct-body .form-note.error { color: var(--s-accent); }
 [data-site] .acct-body .guide-check { margin: 0; color: var(--s-text); }
 [data-site] .acct-body .guide-end { margin-bottom: 0; }
-[data-site] .acct-body .token-new, [data-site] .acct-body .passphrase-box { gap: 8px; margin-bottom: 0; }
-[data-site] .acct-body .passphrase-box { margin: 0; }
-/* The eye in the passphrase's box, and whose device this is, asked with it */
-[data-site] .acct-body .passphrase-eyed input:not([type="checkbox"], [type="radio"]) { padding-right: 44px; }
-[data-site] .passphrase-eye { width: 44px; border-radius: 8px; color: var(--s-muted); }
-[data-site] .passphrase-eye:hover, [data-site] .passphrase-eye[aria-pressed="true"] { color: var(--s-text); }
+[data-site] .acct-body .token-new, [data-site] .acct-body .recovery-form { gap: 8px; margin-bottom: 0; }
+/* Whose device this is, asked as it is approved */
 [data-site] .acct-body .device-whose { margin: 4px 0 0; }
 [data-site] .acct-body .device-whose legend { margin-bottom: 8px; color: var(--s-text); }
 [data-site] .acct-body .device-whose .guide-check + .guide-check { margin-top: 10px; }

@@ -17,14 +17,13 @@
 //                                         mode but bypassPermissions. --files: the folders a
 //                                         file may be opened from; with none, the --spawn
 //                                         ones), the token can come in MANYCLAWS_TOKEN
-//                                         and the key in MANYCLAWS_KEY. The key is the
-//                                         account's encryption passphrase: the key is made
-//                                         from it here, with the account's id (nothing of
-//                                         it is on the server), and what is kept is the key
+//                                         and the key in MANYCLAWS_KEY: the account's key
+//                                         written out, as a computer keeps it (mcf_…: the key
 //                                         and the half that checks the list of the account's
-//                                         devices (mcf_…), never the passphrase. With --wait
-//                                         it may be written without them: the agent then waits for
-//                                         the ManyClaws plugin to give it its token and key.
+//                                         devices). There is no passphrase. With --wait it may
+//                                         be written without them: the agent then waits for the
+//                                         ManyClaws plugin, which is given both as the computer
+//                                         is connected from its link.
 //                                         On a Mac the token and the key are kept in the
 //                                         keychain (secrets.mjs), unless --no-keychain
 //   node agent.mjs verify [--server URL] [--here]
@@ -34,11 +33,10 @@
 //                                         server hands a browser for its page (verify.mjs). With
 //                                         --here, this computer's agent and plugin alone
 //   node agent.mjs plugin [--look]        give the ManyClaws plugin in Claude Code what this machine
-//                                         was set up with (the installer does, where it was typed
-//                                         into it), so that the token and the passphrase are
-//                                         typed once; says what it did. With --look nothing is
-//                                         given: it says whether the plugin has its token and
-//                                         passphrase, and what is left for the person to do
+//                                         was set up with (its token and key); says what it did.
+//                                         With --look nothing is given: it says whether the plugin
+//                                         has its token and key, and what is left for the person
+//                                         to do
 import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -49,7 +47,7 @@ import { Store } from './store.mjs'
 import { Indexer } from './indexer.mjs'
 import { Transcript } from './transcript.mjs'
 import { findClaude, expandHome } from './host.mjs'
-import { keysFromText, keysFromPassphrase, keysText } from './seal.mjs'
+import { keysFromText } from './seal.mjs'
 import { secretsOf, settle, forgetKept, fingerprint } from './secrets.mjs'
 
 const HOME = process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws')
@@ -79,15 +77,15 @@ export function configure(opts, { home = HOME, env = process.env } = {}) {
   // (what it has already, wherever it keeps it: in agent.json, or in the keychain with its fingerprint here)
   const had = secretsOf(config, { env })
   const token = opts.token || env.MANYCLAWS_TOKEN || had.token
-  // The account's key, as it was made from the passphrase: everything the agent sends of this machine's sessions is
-  // sealed with it, and with none it sends nothing
-  if (opts.key && !keysFromText(opts.key)) throw new Error('the key is not what a ManyClaws computer keeps (mcf_, 43 characters, a dot, 43 more)')
+  // The account's key, written out: everything the agent sends of this machine's sessions is sealed with it, and with
+  // none it sends nothing
+  if (opts.key && !keysFromText(opts.key)) throw new Error(NOT_A_KEY)
   const key = opts.key ? opts.key.trim() : had.key
   // (kept in a keychain that cannot be read from here, an installer run over SSH say, both stay as they are or both are given anew)
   const given = !!(opts.token || env.MANYCLAWS_TOKEN) + !!opts.key
-  if (had.locked && given === 1) throw new Error(`this machine keeps its token and its key in the keychain, which would not hand them over here (${had.locked}): give both the token and the passphrase, or run this in a terminal on the machine itself`)
+  if (had.locked && given === 1) throw new Error(`this machine keeps its token and its key in the keychain, which would not hand them over here (${had.locked}): give both the token and the key, or run this in a terminal on the machine itself`)
   const keptLocked = !!had.locked && given === 0
-  // (without them it waits for both: the plugin beside it gives it what the person typed there)
+  // (without them it waits for both: the plugin beside it gives it what it was given as the computer was connected)
   if (!server || ((!token || !key) && !keptLocked && !opts.wait)) throw new Error('a server, a token and your encryption key are required')
   config.server = server
   config.id ??= crypto.randomUUID()
@@ -131,33 +129,10 @@ export function configure(opts, { home = HOME, env = process.env } = {}) {
   return { ...config, ...(token && !config.token ? { token } : {}), ...(key && !config.key ? { key } : {}) }
 }
 
-// What this machine keeps, written out (mcf_…), from the passphrase it was given: the
-// account's key, and the half that checks the list of the account's devices (by which
-// what is asked of this machine is checked). The server says whose
-// machine this is (the account's id, to whoever holds one of its tokens) and nothing
-// else, and both are made here: the passphrase goes no further than this, and neither it
-// nor the half that signs is kept. Of the passphrase the server has nothing, so nothing
-// here can tell whether this is the one the account's other devices were given: if it is
-// not, they cannot open what this machine sends, and it is they that say so. (What
-// another program on this machine kept and hands over written out is taken as it is.)
-export async function keyOfPassphrase(server, token, given) {
-  const written = keysFromText(given)
-  if (written) return keysText(written)
-  // (something written as a kept key that isn't a whole one is not typed in as a passphrase by mistake)
-  if (/^mc[a-z]_[A-Za-z0-9_.-]{20,}$/.test(String(given).trim())) throw new Error('the key is not what a ManyClaws computer keeps (mcf_, 43 characters, a dot, 43 more): give the passphrase itself')
-  const r = await fetch(server + '/api/agent/account', { headers: { authorization: 'Bearer ' + token } }).catch(() => null)
-  if (!r) throw new Error('the server could not be reached to say whose machine this is, which your encryption key is made with')
-  if (r.status === 401) throw new Error('the API token was refused (it may have run out, or been taken back)')
-  if (!r.ok) throw new Error(`the server would not say whose machine this is (${r.status})`)
-  const keys = await keysFromPassphrase(given, (await r.json().catch(() => null))?.id)
-  if (!keys) throw new Error('your encryption key could not be made from the passphrase')
-  return keysText(keys)
-}
-
 // What the ManyClaws plugin was given, taken by this machine's agent: the note the plugin
 // leaves in the agent's own folder (from-plugin.json) once the server has taken its token.
-// A person types their API token and passphrase into the plugin's own dialog, and nowhere
-// else: the agent, which Claude Code installs, waits for them here. The token, and the
+// The plugin is given its API token and the account's key as the computer is connected
+// from its link, and the agent waits for them here. The token, and the
 // key written out as a computer keeps it (mcf_…), go into agent.json, and the note is
 // gone. Only what is whole is taken, and only from a plugin that reports to the server
 // this machine does. Answers what changed ('token', 'key'), for the service to start
@@ -167,8 +142,8 @@ export async function keyOfPassphrase(server, token, given) {
 // token is not put in its place. A token only signs the machine in, and any of the
 // account's does; sessions on one computer can hold different ones (one started before
 // the plugin was given a new token, and one after), and each would hand the agent its
-// own every half minute, the agent starting again each time. A key that differs is
-// another passphrase's and is always taken, and so is a token where the agent has none
+// own every half minute, the agent starting again each time. A key that differs is the
+// account's new one (it was started afresh) and is always taken, and so is a token where the agent has none
 // or the server has refused the one it has.
 export function takeFromPlugin({ home = HOME, env = process.env, tokenStands = false } = {}) {
   const note = path.join(home, 'from-plugin.json')
@@ -215,8 +190,8 @@ export function takeFromPlugin({ home = HOME, env = process.env, tokenStands = f
 }
 
 // What this machine was set up with, handed to the ManyClaws plugin beside it in Claude
-// Code, so that a person types their token and passphrase once, into the installer, and
-// nothing into the plugin: what it signs in with, and the account's key as it is kept
+// Code, so that what an agent was set up with by hand (--token and --key, an unattended
+// set-up's) reaches the plugin too: what it signs in with, and the account's key as it is kept
 // here (mcf_…), which the plugin takes as it is. Where it reports is not among them: the
 // plugin has no option for an address. It reports to its own server, or through this
 // agent's relay where what it is given to sign in with is the relay's word, which it
@@ -248,16 +223,14 @@ export function pluginSays(r) {
   const next = 'Start a new Claude Code session for it to connect: sessions already running connect when they are next started.'
   if (!r.given)
     return [
-      `The ManyClaws plugin was NOT given its API token and passphrase: ${r.why}.`,
-      'It still needs to be configured: no session of this computer shows on the page until it has both.',
-      'Install the plugin and run this installer again (it asks for nothing it has), or type the two into the plugin yourself:',
-      '  in Claude Code in a terminal, /plugin configure manyclaws@manyclaws; in the VS Code extension, /plugin and then the gear beside manyclaws.',
+      `The ManyClaws plugin was NOT given its API token and key: ${r.why}.`,
+      'No session of this computer shows on the page until it has both. Start a new Claude Code session on it: the plugin shows a link that connects it, to open where you are signed in to ManyClaws and approve.',
     ]
   const how = r.relay ? `now goes through the agent (http://127.0.0.1:${r.relay})` : 'has been given the same API token'
   return [`The ManyClaws plugin in Claude Code ${how}, and this computer's encryption key: it is configured, and there is nothing to type into it.`, next]
 }
 
-// Whether the plugin has been given its token and passphrase. Claude Code says which of a
+// Whether the plugin has been given its token and key. Claude Code says which of a
 // plugin's options are set, and never what they are. { installed: true, token, key };
 // installed false where the plugin is not there, null where there is no telling.
 export function pluginHas(config, { run = spawnSync } = {}) {
@@ -278,23 +251,24 @@ export function pluginHas(config, { run = spawnSync } = {}) {
   }
 }
 
-// What is left for the person to do, where the agent was installed with nothing typed
-// into it (Claude Code ran its installer): the plugin's own dialog is where the token and
-// the passphrase go, and the agent takes the same two from the plugin. Said in so many
-// words, for whoever ran the installer to read, and for Claude Code to pass on.
+// What is left for the person to do, where the agent was installed with nothing given to
+// it: the computer is connected from the link the plugin shows in a new session, and the
+// agent takes the token and the key from the plugin. Said in so many words, for whoever
+// ran the installer to read, and for Claude Code to pass on.
 export function leftSays(has, { server = '', waiting = true } = {}) {
   const takes = waiting ? 'gives this agent the same two within a few seconds' : 'this agent takes a newer token or key from it, where the plugin has one'
-  if (has.installed && has.token && has.key) return [`The ManyClaws plugin has its API token and encryption passphrase. Start a new Claude Code session: the plugin connects, and ${takes}.`]
-  const missing = !has.installed ? 'the API token and the encryption passphrase' : !has.token && !has.key ? 'the API token and the encryption passphrase (it has neither yet)' : has.token ? 'the encryption passphrase (it has its API token)' : 'the API token (it has its passphrase)'
+  if (has.installed && has.token && has.key) return [`The ManyClaws plugin has its API token and key. Start a new Claude Code session: the plugin connects, and ${takes}.`]
   return [
-    ...(has.installed === false ? [`The ManyClaws plugin is not installed in Claude Code on this computer. Install it first: claude plugin marketplace add ${server}/plugins/marketplace.json, then claude plugin install manyclaws@manyclaws`] : []),
-    `ONE STEP IS LEFT, AND IT IS THE PERSON'S: give the ManyClaws plugin ${missing}.`,
-    '  In the VS Code extension: type /plugin to open Manage Plugins, press the gear beside manyclaws, and fill in "API token" and "Encryption passphrase".',
-    '  In Claude Code in a terminal: /plugin configure manyclaws@manyclaws',
-    `  The token is made at ${server}/app#/setup, and the passphrase is chosen at ${server}/app#/account.`,
-    `Then start a new Claude Code session: the plugin connects, and ${takes}.`,
+    ...(has.installed === false ? [`The ManyClaws plugin is not installed in Claude Code on this computer. Install it first: claude plugin marketplace add redimaker/manyclaws, then claude plugin install manyclaws@manyclaws`] : []),
+    "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer.",
+    '  Start a new Claude Code session on it, in a terminal, VS Code or the desktop app: the plugin shows a link, and a code for a phone’s camera.',
+    `  Open the link in a browser where you are signed in to ${server || 'ManyClaws'}, or read the code with your phone, and approve the computer there.`,
+    `Then the plugin connects, and ${takes}.`,
   ]
 }
+
+// What a key that is not one is told: there is no passphrase to give in its place
+const NOT_A_KEY = 'the key is not what a ManyClaws computer keeps (mcf_, 43 characters, a dot, 43 more). There is no passphrase: a computer is given its key as it is connected from the link the ManyClaws plugin shows in a new session'
 
 async function main() {
   const [command = 'help', ...rest] = process.argv.slice(2)
@@ -310,18 +284,9 @@ async function main() {
   }
   if (command === 'configure') {
     const text = (v) => (v === true || v === undefined ? '' : String(v))
-    // The key is made from the passphrase before anything is written
-    let key = (text(flags.key) || process.env.MANYCLAWS_KEY || '').trim()
-    if (key) {
-      let had = {}
-      try {
-        had = JSON.parse(fs.readFileSync(path.join(HOME, 'agent.json'), 'utf8'))
-      } catch {}
-      const server = (text(flags.server) || had.server || '').replace(/\/+$/, '')
-      const token = text(flags.token) || process.env.MANYCLAWS_TOKEN || had.token
-      if (!server || !token) throw new Error('a server and a token are required')
-      key = await keyOfPassphrase(server, token, key)
-    }
+    // (the key as a computer keeps it, written out, and nothing else: there is no passphrase to make one from)
+    const key = (text(flags.key) || process.env.MANYCLAWS_KEY || '').trim()
+    if (key && !keysFromText(key)) throw new Error(NOT_A_KEY)
     const config = configure({ ...lists, server: text(flags.server), token: text(flags.token), label: text(flags.label), relay: !!flags.relay, autoFolders: !!flags['auto-folders'], key, wait: !!flags.wait, keychain: flags['no-keychain'] ? false : undefined })
     // What was written, and nothing secret but the relay's own word
     console.log(JSON.stringify({ id: config.id, label: config.label ?? '', roots: config.roots, spawn: config.spawn, files: config.files ?? null, claude: config.claude ?? '', relay: config.relay ?? null, secrets: config.secrets ?? 'file', waiting: !config.has && (!config.token || !config.key) }))

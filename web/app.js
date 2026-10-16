@@ -103,12 +103,11 @@ const app = {
   stopping: null, // a Stop that was taken and hasn't shown in the session's state yet: { sid }
   pressed: 0, // when something in the list was pressed, while it still is
   listStale: false, // the list changed while it couldn't be drawn again
-  key: null, // what this device holds of the account's key (keys.js, `held`): what its sessions are opened and sealed with here, and this device's own key, which signs what it asks of the account's computers. Made here from the passphrase, kept where no script can read it back, and never on the server
-  firstId: null, // the id of the account's own small session, which a passphrase typed here is tried on (firstSession)
-  first: null, // that session as the server has it, opened where this device's key opens it: null where there is none
+  key: null, // what this device holds of the account's key (keys.js, `held`): what its sessions are opened and sealed with here, and this device's own key, which signs what it asks of the account's computers. Given to it by another of the account's devices, or drawn here from the account's root (the recovery key), kept where no script can read it back, and never on the server; and, on the person's own device, the root itself, wrapped under a passkey
   tourFor: undefined, // the account the tour of using ManyClaws on a phone is due to on this browser, as this page knows it (tourKeep): null once it has been seen
   tourAt: 0, // which of the tour's steps is showing
-  keyLater: undefined, // the sign-in "Not now" was said of to the passphrase's card on this page, where it was (keyLater): null once that is taken back
+  recovery: null, // the recovery key being shown as the key is made here, until it is said to be kept (showRecovery): { root }
+  keyLater: undefined, // the sign-in "Not now" was said of to the key's card on this page, where it was (keyLater): null once that is taken back
   unopenedWas: '', // what did not open here when that was last looked at (lookAgain), to tell when it has changed
   auto: new Map(), // the sessions this browser says yes to by itself (auto approve), each with when that ends: session id -> time
 }
@@ -406,16 +405,17 @@ function shaped(data) {
 // leaves this page any other way, and nothing is asked of a session or a machine any
 // other way: where this device has no key, that is said here and nothing is sent.
 const sealFor = async (value) => (app.key ? vault.seal(value, app.key) : null)
-const NO_KEY = 'this session is end-to-end encrypted, and this device does not have your key: type your passphrase under Account first'
-const NO_KEY_MACHINE = 'What is asked of this computer is end-to-end encrypted, and this device does not have your key: type your passphrase under Account first.'
+const NO_KEY = 'this session is end-to-end encrypted, and this device does not have your key: approve it from one of your devices that has it (Account) first'
+const NO_KEY_MACHINE = 'What is asked of this computer is end-to-end encrypted, and this device does not have your key: approve it from one of your devices that has it (Account) first.'
 
 // What is asked of a computer is signed here (seal.js, orders): with this device's own
-// key, which the browser made and keeps, and which the account's computers go by because
-// the passphrase put this device on the list of the account's devices. The computer does
+// key, which the browser keeps where no script reads it, and which the account's computers
+// go by because another of the account's devices put this one on the list of them, with
+// its owner's say. The computer does
 // what the order says, once, and nothing that came without one: so nobody between here
 // and there, the server included, can ask anything of it in this account's name, or ask
 // again what was asked before. `to` is the session or machine asked, `what` the kind of
-// thing asked, `rest` all of it. undefined where this device has not been given the passphrase.
+// thing asked, `rest` all of it. undefined where this device has not been given the key.
 // Nothing is signed for a computer whose plugin is no release, until its owner has said on its page what is to be done:
 // the plugin has the account's key, and what would be sent is what is asked of a session. `to`: a session or a
 // machine. Why not, where it is so; else ''
@@ -773,12 +773,12 @@ async function init() {
 
 // Signed in: to the sessions; or first, on a server that sends mail, to the code its
 // email was sent, on one that charges, to the plans, and on a browser that has not been
-// given the account's passphrase, to where it is typed
+// given the account's key, to how it gets it
 function enter() {
   const b = app.account?.billing
   if (app.account?.user.verified === false) return showVerify()
   if (b?.on && !b.entitled) return showPay()
-  return keyWanted() ? showPassphrase() : showApp()
+  return keyWanted() ? showKeyCard() : showApp()
 }
 
 // A server that charges has a front door (home.html). The cards to sign in, to make an
@@ -801,20 +801,14 @@ async function dress() {
 async function loadAccount() {
   const r = await fetch('/api/account').catch(() => null)
   app.account = r?.ok ? await r.json() : null
-  // Its key, where this browser has it: the one made here from the passphrase that was
-  // typed here. The server has nothing to tell it by: whether it is the key the account's
-  // computers seal with shows in whether what they send opens (opened, showNotices)
-  // (with it, this device's own key, which signs what it asks of the account's computers)
+  // Its key, where this browser has it: given to it by another of the account's devices, or drawn here from the
+  // account's root (with it, this device's own key, which signs what it asks of the account's computers, and, on the
+  // person's own device, the root under a passkey). What a browser kept before there was a root is not taken.
   app.key = app.account && vault && sealing ? await vault.heldKey(app.account.user.id).catch(() => null) : null
-  await keepPasswordMark().catch(() => {})
-  // Its own small session, which is none of its conversations: read here, so that what
-  // is said of the account counts it out, and seen to where this browser has the key
-  app.firstId = app.account ? firstIdOf(app.account.user.id) : null
-  app.first = app.firstId && app.account.sessions ? await fetch('/api/sessions/' + app.firstId).then((r) => (r.ok ? r.json() : null)).catch(() => null) : null
+  if (app.account && vault && !app.key) await vault.dropBefore(app.account.user.id)
   showNotices()
   lookAgain()
   await readDrafts()
-  seeToFirst().catch(() => {})
   seeToDevice().catch(() => {})
   return app.account
 }
@@ -832,7 +826,6 @@ function showLogin() {
   app.sawSealed = false
   app.unopenedWas = ''
   app.account = null
-  app.firstId = app.first = app.firstSeenTo = null
   clearTimeout(app.reconnect)
   app.stream?.close()
   el('app').hidden = true
@@ -843,7 +836,7 @@ function showLogin() {
 
 // ---- A person, not a script. Where the server asks for it (it says where its check is, with how it takes
 // accounts), whoever makes an account passes Cloudflare's check first. Cloudflare's script is not run here, where a
-// password and a passphrase are typed: the check is in a frame from an address of its own, another origin to the
+// password is typed: the check is in a frame from an address of its own, another origin to the
 // browser, which reads nothing of this page. The frame tells this page one thing, a token (good once, for five
 // minutes), and the token goes with the form.
 const human = { at: '', token: '', frame: null }
@@ -926,23 +919,7 @@ async function signIn(email, password) {
   if (!params) return 'The server could not be reached.'
   const auth = await K.signInKey(password, params)
   const r = await sendJson('/api/login', { email, password: auth })
-  if (r.ok) await markPassword(K, auth)
   return r.ok ? '' : r.error
-}
-
-// The password this browser signs in with is marked (keys.js, passwordMark), so that it is
-// not chosen for the account's passphrase too: what a passphrase typed here is held
-// against, on this browser and nowhere else. Made as the password is used; kept once the
-// account it is for is known (loadAccount), which is a moment later.
-let passwordMarked = null
-async function markPassword(K, auth) {
-  passwordMarked = await K.passwordMark(auth).catch(() => null)
-}
-async function keepPasswordMark() {
-  const id = app.account?.user.id
-  if (!passwordMarked || !id || !vault) return
-  await vault.keepMark(id, passwordMarked)
-  passwordMarked = null
 }
 
 // Makes an account. The password isn't sent: what it is stretched into is, with how.
@@ -954,14 +931,13 @@ async function signUp({ email, password, invite }) {
   const made = await K.newPassword(password)
   const r = await sendJson('/api/signup', { email, password: made.auth, invite, kdf: made.kdf, ...(human.at ? { check: human.token } : {}) })
   if (human.at) checkAgain()
-  if (r.ok) await markPassword(K, made.auth)
   return r.ok ? '' : r.error
 }
 
 // A forgotten password: a code is sent to the account's email, then typed here with a new
 // password. The password isn't sent: what it is stretched into is, with how. It has
-// nothing to do with the encryption passphrase, which the server has nothing of: the
-// key this browser holds, if it holds one, is as it was. A server that sends no mail
+// nothing to do with the account's key, which the server has nothing of: the key this
+// browser holds, if it holds one, is as it was. A server that sends no mail
 // can do none of this, and the card says so.
 function showRecover(sent = false) {
   app.recoverSent = sent
@@ -969,7 +945,7 @@ function showRecover(sent = false) {
   el('recover-note').textContent = !can
     ? 'A forgotten password cannot be reset here: this server sends no mail, and it never has your password. Ask whoever runs it to delete the account, and make a new one with the same email.'
     : sent
-      ? 'If that email has an account here, a 6-digit code is on its way to it. Type it here with a new password. Your encryption passphrase stays as it is.'
+      ? 'If that email has an account here, a 6-digit code is on its way to it. Type it here with a new password. Your encryption key stays as it is.'
       : 'Enter your email and we will send it a code to set a new password with.'
   el('recover-email').hidden = !can
   el('recover-email').readOnly = sent
@@ -1035,9 +1011,9 @@ onCard(
 )
 
 // Signed out, this device is told nothing more of the account: its alerts stop, until
-// someone signs in here again. Its key stays where the device is its owner's own, which
-// was asked as the passphrase was typed (passphrasePart), and opens the account's sessions
-// as soon as it is signed in to again, with no passphrase typed; on any other it goes.
+// someone signs in here again. Its key stays where the device is its owner's own (as the
+// device that approved it said), and opens the account's sessions as soon as it is signed
+// in to again, with nothing asked; on any other it goes.
 async function signOut() {
   const id = app.account?.user.id
   // (the server forgets where this device's alerts go. The device keeps what its push
@@ -1047,7 +1023,6 @@ async function signOut() {
   app.pushOn = false
   await fetch('/api/logout', { method: 'POST' })
   if (id && !app.key?.own) await vault?.dropKey(id).catch(() => {})
-  if (id) await vault?.dropMark(id).catch(() => {})
   app.key = null
   app.drafts = {}
   keyLater(false)
@@ -1058,15 +1033,15 @@ el('logout').addEventListener('click', () => signOut())
 el('pay-logout').addEventListener('click', () => signOut())
 el('verify-logout').addEventListener('click', () => signOut())
 
-// ---- A browser that has not been given the account's passphrase is asked for it as it
+// ---- A browser that has not been given the account's key is shown how it gets it as it
 // comes in, before the sessions: signed in to, or opened again by someone still signed in
 // (a device that is not its owner's own holds the key only while the page is open). Without
-// the key it could show them only as encrypted. The box is the one the account's page has
-// (passphraseParts), and what is typed goes the same way: made into the key here, with
-// nothing of it sent. It can be left for later ("Not now"): the sessions then, closed, with
-// the line across the top that leads to the box. That is kept for as long as the tab is, so
-// the page loaded again there does not ask again, and it is said of the one sign-in: signed
-// in to again, by this account or another, the browser is asked afresh.
+// the key it could show them only as encrypted. What it is shown is what the account's page
+// has (drawKeyless): approved from another device, the recovery key, or, for an account
+// with no key yet, the key made here. It can be left for later ("Not now"): the sessions
+// then, closed, with the line across the top that leads to Account. That is kept for as
+// long as the tab is, so the page loaded again there does not ask again, and it is said of
+// the one sign-in: signed in to again, by this account or another, the browser is asked afresh.
 
 // This browser's sign-in, by the name the server gives it (GET /api/account, `login`)
 const signInName = () => app.account?.login ?? app.account?.user.id ?? null
@@ -1087,30 +1062,26 @@ function saidLater() {
   return !!name && (app.keyLater ?? kept) === name
 }
 // Asked as the page comes in, and not of a page that is showing its sessions (one that lets
-// go of its key there says so in the line across the top); nor of a browser that can make no
+// go of its key there says so in the line across the top); nor of a browser that can hold no
 // key (keys.js: not a secure page)
 const keyWanted = () => !app.key && !!vault && !!sealing && app.signedOut !== false && !saidLater()
 
-function showPassphrase() {
+function showKeyCard() {
   app.signedOut = true
   clearTimeout(app.reconnect)
   app.stream?.close()
   el('app').hidden = true
   el('login').hidden = false
-  const p = passphraseParts(showPassphrase)
-  p.here.classList.add('muted')
-  // (what a passphrase is and where to keep one is said under the box: in full to an account with nothing here yet,
-  // which may be choosing its first; to one that has sessions here it is a line to open)
-  const about = h('details', { class: 'passphrase-about', 'data-part': 'passphrase-about', open: !app.account.sessions }, h('summary', null, 'What a passphrase is, and where to keep it'), p.about, p.vaultSays)
-  fill(el('passphrase-ask'), p.here, p.form, about)
-  showCard('passphrase-card')
-  p.form.querySelector('[data-part=passphrase-new]').focus()
+  const box = h('div', { 'data-part': 'key-needed' })
+  fill(el('key-ask'), box)
+  showCard('key-card')
+  drawKeyless(box, showKeyCard)
 }
-el('passphrase-later').addEventListener('click', () => {
+el('key-later').addEventListener('click', () => {
   keyLater(true)
   showApp()
 })
-el('passphrase-logout').addEventListener('click', () => signOut())
+el('key-logout').addEventListener('click', () => signOut())
 
 // ---- A server that sends mail: the account's email is shown to be its own, by the code sent to it
 
@@ -1233,11 +1204,11 @@ function showApp() {
 
 // ---- A little tour, once, for an account that has just paid, on a desk's browser: how
 // ManyClaws is used on a phone. There is no app to get: a phone opens this same page. The
-// first step says so; the second, that the phone is signed in to and given the passphrase as
-// this browser was; the third, how it comes to send alerts. Under each is the page's address
+// first step says so; the second, that the phone is signed in to and approved from this
+// browser; the third, how it comes to send alerts. Under each is the page's address
 // and a code a phone's camera opens it by (qr.js: the address of the page's way in and
 // nothing else, nothing of the account's). It is shown as the sessions first are after paying, which is after
-// the passphrase's card where that came first, and may be a page load later: so that it
+// the key's card where that came first, and may be a page load later: so that it
 // is due is kept on this browser, by the account, until it has been seen out or shut.
 const TOUR = [
   {
@@ -1246,8 +1217,8 @@ const TOUR = [
     shot: ['shot-list', 'The ManyClaws page on a phone: six Claude Code sessions on four computers, two of them marked as needing an answer'],
   },
   {
-    title: 'Sign in there, and type your passphrase.',
-    says: ['Sign in with the email and password you use here. Your phone then asks for your encryption passphrase, the same one on every device of yours: your sessions are sealed, and each device opens them itself.'],
+    title: 'Sign in there, and approve it from here.',
+    says: ['Sign in with the email and password you use here. Then, on this browser, open Account, Devices, Add a phone or browser, and read its code with the phone: approve it here with your passkey. Your sessions are sealed, and each device opens them with your key, which never goes through the server in the open.'],
     shot: ['shot-question', 'A session on a phone asking a question, with two answers to tap and a box to type another'],
   },
   {
@@ -1412,12 +1383,9 @@ function connect() {
     pageBuild(snapshot.build)
     // (the plugin and the agent the server hands out now: a computer's own are held against them)
     app.latest = snapshot.latest ?? {}
-    // (and the release this page is of, as the release key signed it; and what the passphrase signed of the account's devices)
+    // (and the release this page is of, as the release key signed it; and what the root signed of the account's devices)
     void loadRelease().then(() => (renderList(), app.computer && renderComputer()))
     void loadDevicesList().then(() => (renderList(), app.computer && renderComputer()))
-    // (the account's own small session is none of its conversations: kept apart, and out of the list)
-    app.first = snapshot.sessions.find((s) => s.id === app.firstId) ?? null
-    snapshot.sessions = snapshot.sessions.filter((s) => s.id !== app.firstId)
     const had = app.sessions
     app.sessions = new Map(snapshot.sessions.map((s) => [s.id, s]))
     app.tellings++
@@ -1454,8 +1422,6 @@ function connect() {
   })
   on('session', (ev) => {
     const s = JSON.parse(ev.data)
-    // (the account's own small session, made or made again, here or on another device)
-    if (s.id === app.firstId) return void ((app.first = s), lookAgain())
     settle(s)
     const before = app.sessions.get(s.id)
     // Alert when a session starts waiting for an answer
@@ -1479,7 +1445,7 @@ function connect() {
   })
   on('message', (ev) => {
     const { sid, message } = JSON.parse(ev.data)
-    if (sid === app.firstId || !message) return
+    if (!message) return
     if (personRow(message) && notePrompt(sid, message) && app.sortBy === 'prompt') renderListSoon()
     if (sid === app.current) {
       addMessage(message)
@@ -1534,7 +1500,6 @@ function connect() {
   })
   on('remove', (ev) => {
     const { id } = JSON.parse(ev.data)
-    if (id === app.firstId) return void ((app.first = null), lookAgain())
     app.sessions.delete(id)
     lookAgain()
     app.views.delete('s:' + id)
@@ -1572,7 +1537,7 @@ function pageBuild(build) {
   refreshIfUnseen()
 }
 function refreshIfUnseen() {
-  // (not where this device holds its key only while the page is open: it would be gone, and the passphrase asked for again)
+  // (not where this device holds its key only while the page is open: it would be gone, and would have to be approved again)
   if (app.old && document.hidden && !app.attachments.length && !app.uploading && (!app.key || app.key.own)) location.reload()
 }
 el('update-reload').addEventListener('click', () => location.reload())
@@ -1586,10 +1551,9 @@ function showNotices() {
   const locked = app.sawSealed && !app.key ? 'none' : unopened().any ? 'other' : ''
   el('locked').hidden = !locked
   el('locked').dataset.why = locked
-  // (where it is the account's own small session that does not open, it is this browser that has another passphrase than the account)
-  el('locked-says').textContent = locked !== 'other' ? 'Your sessions are encrypted, and this browser has not been given your passphrase.' : firstIsOther() ? 'The passphrase this browser was given is not the one your account has now, so it cannot open your sessions.' : 'Some of your sessions were sealed with a different passphrase from the one this browser was given, and cannot be opened here.'
-  // (with no key, the way to where the passphrase is typed; with one, to what does not open with it, whose that is and what to do there)
-  el('locked-link').textContent = locked === 'other' ? 'What to do' : 'Type it in'
+  el('locked-says').textContent = locked !== 'other' ? 'Your sessions are encrypted, and this browser has not been given your key.' : 'Some of your sessions were sealed with another key than this browser’s, and cannot be opened here.'
+  // (with no key, the way to how it is given one; with one, to what does not open with it, whose that is and what to do there)
+  el('locked-link').textContent = locked === 'other' ? 'What to do' : 'Get it'
   el('locked-link').setAttribute('href', locked === 'other' ? '#/account/unopened' : '#/account')
   // (computers of the account's that are to be upgraded, once: said for as long as there is one, but on the page that says all of it)
   const old = app.account ? toUpgrade() : []
@@ -1835,10 +1799,12 @@ function route() {
   el('setup').hidden = path !== '#/setup'
   el('account').hidden = !ACCOUNT_PAGES.includes(path)
   el('settings-page').hidden = path !== '#/settings'
-  const connect = /^#\/connect\/([A-Za-z0-9_-]{43})(?:\/([^/]*))?$/.exec(path)
-  el('connect').hidden = !connect
+  const connect = /^#\/c\/([A-Za-z0-9_-]{43})(?:\/([^/]*))?$/.exec(path)
+  const approve = /^#\/b\/([A-Za-z0-9_-]{43})(?:\/([^/]*))?$/.exec(path)
+  el('connect').hidden = !connect && !approve
+  // (a device that has the key offering it, opened here: where this browser has none, it is asked for there)
+  if (/^#\/a\/[A-Za-z0-9_-]{43}$/.test(path)) return app.key ? void (history.replaceState(null, '', location.pathname), tell('Nothing to do', 'This browser has your key already.')) : showKeyCard()
   if (path !== '#/account') app.passwordSaid = ''
-  if (path !== '#/account') app.passphraseChanging = false
   // (a computer's Claude accounts had a page of their own, #/cswap/<machine>: they are a part of the computer's now)
   const swap = /^#\/cswap\/([^/]+)$/.exec(path)
   if (swap) return void location.replace('#/computer/' + swap[1])
@@ -1849,6 +1815,7 @@ function route() {
   if (path === '#/setup' || ACCOUNT_PAGES.includes(path)) return openGuide(path.slice(2))
   if (path === '#/settings') return openSettings()
   if (connect) return openConnect(connect[1], decodeURIComponent(connect[2] ?? ''))
+  if (approve) return openApprove(approve[1], decodeURIComponent(approve[2] ?? ''))
   if (live) return openSession(decodeURIComponent(live[1]))
   if (past) {
     const q = new URLSearchParams(query)
@@ -2448,7 +2415,7 @@ async function setMark(s, to) {
   marksChanged()
   return r?.ok ? '' : (data.error ?? 'That could not be saved: the server did not answer.')
 }
-const NO_KEY_MARK = 'What you put on a session is end-to-end encrypted like the session itself, and this device does not have your key: type your passphrase under Account first.'
+const NO_KEY_MARK = 'What you put on a session is end-to-end encrypted like the session itself, and this device does not have your key: approve it from one of your devices that has it (Account) first.'
 
 // A mark is kept with what a favorite is kept with, and that is kept up from here as a
 // favorite's is (favoriteKept): where what is kept is no longer what
@@ -3448,15 +3415,20 @@ function renderRow(s, { favorite = false, due = false } = {}) {
 // foot of the list, and were the first three of these.)
 
 // ---- A computer connected from the link its ManyClaws plugin showed in Claude Code
-// (#/connect/<its key>/<its name>). The plugin, with no token, made a pair of keys for the asking, and the link has the
+// (#/c/<its key>/<its name>). The plugin, with no token, made a pair of keys for the asking, and the link has the
 // public one in it after the #, which a browser sends nowhere: so it came from that session to this browser, and the
-// server has never had it. Given the passphrase, this page makes an API token for the computer and seals it and the
-// account's key, written out as a computer keeps it, to that key; and puts that on the server under a name drawn from
-// the key, which the plugin asks for. Nothing but the plugin that showed the link opens it. The passphrase is asked for
-// because what this browser holds of the key cannot be read back out of it (keys.js): the computer is given the key
-// made again from what is typed, which has to make the checker this browser has.
+// server has never had it. Approved here with this browser's passkey, this page makes an API token for the computer
+// and seals it and the account's key, written out as a computer keeps it (the key and the checker, not the root), to
+// that key; and puts that on the server under a name drawn from the key, which the plugin asks for. Nothing but the
+// plugin that showed the link opens it.
+// (the page the two links open: its head says which)
+function connectHead(name, sub) {
+  el('connect').querySelector('.chat-name').textContent = name
+  el('connect').querySelector('.chat-sub').textContent = sub
+}
 async function openConnect(keyText, named) {
   leaveChat()
+  connectHead('Connect a computer', 'From the link its ManyClaws plugin showed in Claude Code.')
   const body = el('connect-body')
   const u = app.account?.user
   let key = null
@@ -3465,47 +3437,38 @@ async function openConnect(keyText, named) {
   } catch {}
   const name = String(named || 'this computer').trim().slice(0, 60) || 'this computer'
   if (!u || !sealing || !vault || key?.length !== 32) return void fill(body, h('p', { 'data-part': 'connect-not' }, 'This is not a link a computer’s ManyClaws plugin makes. Start Claude Code on the computer again: it shows the link that connects it.'))
-  const id = sealing.toB64(sealing.sha256(key)).slice(0, 22)
-  const box = h('input', { 'data-part': 'connect-passphrase', type: 'password', placeholder: 'Your encryption passphrase', autocomplete: 'current-password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' })
+  if (!app.key?.root)
+    return void fill(body, h('p', { 'data-part': 'connect-cannot' }, app.key ? 'This browser keeps your key without a passkey, so it cannot connect a computer. Open the link on one of your devices that keeps it under one.' : 'This browser does not have your key, so it cannot connect a computer. Open the link on one of your devices that has it, or read its code with your phone.'))
   const note = h('span', { class: 'form-note', 'data-part': 'connect-note' })
   const go = h('button', { type: 'submit', class: 'primary', 'data-part': 'connect-go' }, 'Connect')
-  const failed = (why) => ((note.textContent = why), (note.className = 'form-note error'), (go.disabled = false))
+  const failed = (why) => ((note.textContent = sentence(why)), (note.className = 'form-note error'), (go.disabled = false))
   const form = h(
     'form',
     { class: 'guide-form', 'data-part': 'connect-form' },
     h('p', { 'data-part': 'connect-asks' }, 'Connect ', h('b', null, name), ' to your account?'),
-    h('p', { 'data-part': 'connect-warns' }, 'This gives your API token and your encryption key to the Claude Code session that showed you this link. If you did not just open one there, close this page.'),
-    h('div', { class: 'passphrase-box' }, box),
+    h('p', { 'data-part': 'connect-warns' }, 'This gives an API token of its own and your encryption key to the Claude Code session that showed you this link. If you did not just open one there, close this page.'),
     h('div', null, go, ' ', note),
   )
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault()
-    if (!box.value) return
     go.disabled = true
-    note.textContent = 'Making your key…'
+    note.textContent = 'Asking for your passkey…'
     note.className = 'form-note'
-    let made = null
+    let opened
     try {
-      made = await vault.keysOf(box.value, u.id)
-    } catch {
-      return failed('Your key could not be made in this browser.')
+      opened = await unlocked()
+    } catch (err) {
+      return failed(err.message)
     }
-    // (what was typed makes the checker this browser was given, or it is not the passphrase)
-    if (app.key && !made.checker.every((b, i) => b === app.key.checker[i])) {
-      vault.forget(made)
-      return failed('That is not the passphrase this browser was given.')
-    }
-    const written = sealing.keysText({ key: made.key, checker: made.checker })
-    vault.forget(made)
-    box.value = ''
+    const written = sealing.keysText(opened.made)
+    vault.forget({ ...opened.made, root: opened.root })
     const t = await sendJson('/api/account/tokens', { name, days: 0 })
-    if (!t.ok) return failed('No API token could be made for it: ' + t.error)
-    const sealed = sealing.sealTo(key, { token: t.data.token, key: written, account: String(u.email ?? ''), name })
-    const r = await fetch('/api/connect/' + id, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sealed }) }).catch(() => null)
-    if (!r?.ok) {
+    if (!t.ok) return failed('no API token could be made for it: ' + t.error)
+    const why = await handTo(key, { token: t.data.token, key: written, account: String(u.email ?? ''), name })
+    if (why) {
       // (the token made for it goes again: nothing has it)
       await fetch('/api/account/tokens/' + t.data.id, { method: 'DELETE' }).catch(() => {})
-      return failed(r?.status === 409 ? 'That link has been answered already: start a new one on the computer (/manyclaws connect).' : 'It could not be handed over: ' + ((await r?.json().catch(() => null))?.error ?? 'the server could not be reached'))
+      return failed(why === 'that link has been answered already' ? 'that link has been answered already: start a new one on the computer (/manyclaws connect)' : 'it could not be handed over: ' + why)
     }
     await loadAccount().catch(() => {})
     fill(
@@ -3516,7 +3479,7 @@ async function openConnect(keyText, named) {
     )
   })
   fill(body, form)
-  box.focus()
+  go.focus()
 }
 
 function openSettings() {
@@ -3712,7 +3675,7 @@ async function loadRelease() {
     app.release = null
   }
 }
-// The list of the account's devices, as the passphrase signed it: which may start sessions, and what plugins the owner
+// The list of the account's devices, as the root signed it: which may start sessions, and what plugins the owner
 // allowed on a computer where they are no release
 async function loadDevicesList() {
   if (!app.key || !vault) return
@@ -3901,7 +3864,7 @@ function looseNodes(c) {
 
 // A machine's past sessions, newest first; `more` adds the next page
 // What is said under a computer whose answer this browser's key does not open
-const OTHER_KEY = 'This computer answered with something this browser cannot open: it was given a different passphrase.'
+const OTHER_KEY = 'This computer answered with something this browser cannot open: it has another key than this browser’s. Connect it again, from the link its plugin shows.'
 async function loadCatalog(mid, more = false) {
   // (a machine reads only what was sealed for it: where this device has no key, there is nothing to ask it with)
   if (!app.key) return void (app.catalog.set(mid, { sessions: [], more: false, loaded: false, failed: false, locked: true, at: Date.now() }), renderList())
@@ -3912,14 +3875,14 @@ async function loadCatalog(mid, more = false) {
   const r = await fetch(`/api/machines/${mid}/sessions?` + (await askOf({ limit: PAST_PAGE, before: before || 0 }))).catch(() => null)
   if (!r?.ok) {
     // (why not, as the server said it: that it is offline, that its agent has stopped answering, that it took too long.
-    // What the machine itself answered comes sealed: where this browser's key does not open that, it has another passphrase.)
+    // What the machine itself answered comes sealed: where this browser's key does not open that, it has another key.)
     const said = r ? (await r.json().catch(() => null))?.error : null
     const why = typeof said !== 'string' || !said ? '' : isLocked(said) ? OTHER_KEY : sentence(said)
     app.catalog.set(mid, { ...app.catalog.get(mid), failed: why || true })
     return renderList()
   }
   const { sessions, locked } = await r.json()
-  // (an answer this browser cannot open is no list: the computer sealed it with the key of another passphrase)
+  // (an answer this browser cannot open is no list: the computer sealed it with another key)
   if (locked) {
     app.catalog.set(mid, { ...app.catalog.get(mid), failed: OTHER_KEY })
     return renderList()
@@ -3960,7 +3923,7 @@ function machineNodes(m) {
   const all = catalog?.sessions ?? []
   for (const s of all) nodes.push(pastRow(s))
   if (catalog?.more) nodes.push(h('button', { type: 'button', class: 'more-link', 'data-key': 'more:' + m.id, onclick: () => loadCatalog(m.id, true) }, 'Earlier sessions…'))
-  if (m.online && catalog && !all.length) nodes.push(h('div', { class: 'list-empty', 'data-key': 'none:' + m.id }, catalog.locked ? 'Its sessions are end-to-end encrypted: type your passphrase under Account to read them.' : catalog.failed ? (typeof catalog.failed === 'string' ? catalog.failed : "The machine didn't answer.") : catalog.loaded ? 'No sessions yet.' : 'Reading the sessions…'))
+  if (m.online && catalog && !all.length) nodes.push(h('div', { class: 'list-empty', 'data-key': 'none:' + m.id }, catalog.locked ? 'Its sessions are end-to-end encrypted, and this device does not have your key: approve it from one of your devices that has it (Account) to read them.' : catalog.failed ? (typeof catalog.failed === 'string' ? catalog.failed : "The machine didn't answer.") : catalog.loaded ? 'No sessions yet.' : 'Reading the sessions…'))
   return nodes
 }
 
@@ -4328,7 +4291,7 @@ function searchNodes() {
   // (what was found the way that was chosen before is not shown as what this way found)
   if (!data || data.by !== by) return [h('div', { class: 'list-empty' }, 'Searching…')]
   if (data.short) return [h('div', { class: 'list-empty' }, 'Keep typing: a search takes two letters or more.')]
-  if (data.locked) return [h('div', { class: 'list-empty' }, 'Your sessions are end-to-end encrypted, and so is what you search them for: type your passphrase under Account first.')]
+  if (data.locked) return [h('div', { class: 'list-empty' }, 'Your sessions are end-to-end encrypted, and so is what you search them for: approve this device from one that has your key (Account) first.')]
   return by === 'text' ? textNodes() : foundNodes(data.found, { empty: data.failed ? 'The search could not be run.' : 'Nothing found.', notes: searchNotes(data) })
 }
 
@@ -4673,7 +4636,7 @@ function haikuNodes() {
   const hk = app.haiku
   const note = (text) => h('div', { class: 'list-empty' }, text)
   if (!hk || hk.short) return [note('Type what to look for first: two letters or more.')]
-  if (hk.locked) return [note('Your sessions are end-to-end encrypted, and so is what you search them for: type your passphrase under Account first.')]
+  if (hk.locked) return [note('Your sessions are end-to-end encrypted, and so is what you search them for: approve this device from one that has your key (Account) first.')]
   if (!hk.runs.length) return [note('None of your computers that is connected can start a session, so Haiku cannot be asked to search there.')]
   const nodes = [h('div', { class: 'haiku-note', 'data-key': 'haiku-asked' }, `Haiku was asked to look for: ${hk.q}`)]
   for (const run of hk.runs) {
@@ -5357,9 +5320,6 @@ const ICONS = {
   autoApprove: 'M10 3.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 3.25V10l2.25 1.5',
   // (on a session's row, the way to the box its mark is set in: the pencil the open session's head has, in index.html)
   pencil: 'M4 16l.9-3.6 8.4-8.4a1.5 1.5 0 0 1 2.1 0l.6.6a1.5 1.5 0 0 1 0 2.1l-8.4 8.4zM11.9 5.4l2.7 2.7',
-  // (the eye in the passphrase's box: open where pressing it shows what is typed, struck through where it hides it)
-  eye: 'M2.25 10S5 4.75 10 4.75 17.75 10 17.75 10 15 15.25 10 15.25 2.25 10 2.25 10Zm7.75-2.4a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8Z',
-  eyeOff: 'M2.25 10S5 4.75 10 4.75 17.75 10 17.75 10 15 15.25 10 15.25 2.25 10 2.25 10Zm7.75-2.4a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8ZM4 3.5l12 13',
   // (at the corner of a code block: two sheets, one over the other, and the tick that takes their place once it is copied)
   copy: 'M5.5 6.5H11A1.5 1.5 0 0 1 12.5 8v7a1.5 1.5 0 0 1-1.5 1.5H5.5A1.5 1.5 0 0 1 4 15V8a1.5 1.5 0 0 1 1.5-1.5ZM7.5 6.5V5A1.5 1.5 0 0 1 9 3.5h5.5A1.5 1.5 0 0 1 16 5v7a1.5 1.5 0 0 1-1.5 1.5h-2',
   copied: 'M4.5 10.5 8 14l7.5-8',
@@ -5826,7 +5786,7 @@ async function answer(r, body, { quiet = false } = {}) {
   // An answer is signed: an order for its session, which says which asking it answers
   // (the request, and what was asked in it, as this device read it) and holds the whole
   // answer. Nothing goes beside it: the session goes by the order. (Handing the asking
-  // back to the session's own app says nothing, and needs no passphrase.)
+  // back to the session's own app says nothing, and needs no key.)
   const order = await orderFor(r.sid, 'answer', { ...body, rid: r.rid, asked: sealing.askedOf(r) })
   if (!order && body.decision !== 'ask') return quiet ? false : void tell('Not sent', sentence(blockedFor(r.sid) || NO_KEY))
   const res = await fetch('/api/requests/' + encodeURIComponent(r.rid), {
@@ -5875,7 +5835,7 @@ const autoLeft = (sid) => Math.max(1, Math.ceil((autoUntil(sid) - Date.now()) / 
 // Why it cannot be turned on for a session, where it cannot: '' where it can
 function autoBars(s) {
   if (!s || s.ended) return 'The session is not running.'
-  if (!app.key) return 'A yes is signed with your key: type your passphrase under Account first.'
+  if (!app.key) return 'A yes is signed with your key, which this device does not have: approve it from one of your devices that has it (Account) first.'
   if (s.policy?.approvals === 'local') return 'This session’s prompts are answered in its own app alone (Edit, then Answer, changes that).'
   return ''
 }
@@ -6626,7 +6586,7 @@ async function openFile(target, { from } = {}) {
   if (!el('file-box').open) el('file-box').showModal()
   const no = (text, more) => fileNote(text, { error: true, more })
   if (!home) return no('The session this link is in is no longer open.')
-  if (!app.key) return no('A file comes sealed with your key, which this device does not have: type your passphrase under Account first.')
+  if (!app.key) return no('A file comes sealed with your key, which this device does not have: approve it from one of your devices that has it (Account) first.')
   const m = app.machines.get(home.mid)
   if (!m) return no(`Files are opened through the ManyClaws agent, and ${home.host || "this session's computer"} has none connected. `, [h('a', { href: '#/setup' }, 'Set up a computer'), ' has how to install it.'])
   if (!m.online) return no(`${machineName(m)} is not connected, so its files can't be reached.`)
@@ -6645,7 +6605,7 @@ async function fetchFile(m, what, { still = () => true, says = () => {} } = {}) 
   if (!still()) return null
   if (!r.ok) return { error: sentence(r.error) }
   const info = r.data.file
-  if (!info || typeof info !== 'object') return { error: `What ${machineName(m)} sent could not be opened with the key this device has: the two were given different passphrases.` }
+  if (!info || typeof info !== 'object') return { error: `What ${machineName(m)} sent could not be opened with the key this device has: the two have different keys. Connect it again, from the link its plugin shows.` }
   const pieces = [unb64(r.data.data ?? '')]
   for (let part = 1; part < r.data.parts; part++) {
     says(`Fetching from ${machineName(m)}… ${fileSize(pieces.reduce((n, p) => n + p.length, 0))} of ${fileSize(r.data.size)}`)
@@ -7790,7 +7750,7 @@ function upkeepNode(c, n) {
       'div',
       { class: 'needs-alarm', 'data-need': 'alarm', role: 'alert' },
       h('p', null, h('b', null, n.by === 'differ' ? `The plugin on ${name} says it is something its agent did not find there.` : `${name} is running a ManyClaws plugin that matches no signed release (${n.digest.slice(0, 12)}).`), ' This page sends it nothing until you decide.'),
-      h('p', null, n.by === 'fetched' ? 'It is what Claude Code fetched when it was asked to update the plugin: no session has loaded it yet. ' : n.by === 'plugin' ? 'That is the plugin’s own word of itself: there is no agent there to look from outside. ' : '', 'If you did not change it yourself, someone else may have: take back its access, and change your passphrase (Account) if you think it could have read it.'),
+      h('p', null, n.by === 'fetched' ? 'It is what Claude Code fetched when it was asked to update the plugin: no session has loaded it yet. ' : n.by === 'plugin' ? 'That is the plugin’s own word of itself: there is no agent there to look from outside. ' : '', 'If you did not change it yourself, someone else may have: take back its access, and start afresh with a new key (Account, Encryption key) if you think it could have read your sessions.'),
       h('div', { class: 'needs-do' }, h('a', { href: '#/account', class: 'button-link primary', 'data-part': 'alarm-revoke' }, `Take back ${name}’s access`), ' ', button('alarm-keep', 'Keep it blocked', () => ((stateOf(c).keptBlocked = true), renderComputer()), { primary: false })),
       stateOf(c).keptBlocked && h('p', { class: 'muted', 'data-part': 'alarm-kept' }, `Kept blocked: nothing is sent to ${name}, and no session is started on it.`),
       h('p', null, h('button', { type: 'button', class: 'link', 'data-part': 'alarm-allow', onclick: () => allowPlugin(c, n.digest) }, 'I changed the plugin myself: allow it')),
@@ -7849,31 +7809,17 @@ function upkeepNode(c, n) {
   return null
 }
 
-// A plugin that is no release, allowed on a computer by its digest: signed, with the list of the account's devices, by
-// the passphrase, which is typed for it. Only by the one who changed it: the page says so.
+// A plugin that is no release, allowed on a computer by its digest: signed, with the list of the account's devices,
+// with the root, which this browser's passkey opens for it. Only by the one who changed it: the page says so.
 async function allowPlugin(c, digest) {
-  const u = app.account?.user
-  if (!u || !app.key) return
-  const typed = await ask(`Allow ${digest.slice(0, 12)} on ${c.name}?`, {
-    says: [`Allow this only if you changed the plugin on ${c.name} yourself. Its sessions are shown and asked things again, and its agent starts sessions with it. If it changes again it is asked again.`, 'Type your passphrase: what is allowed is signed with it, with the list of your devices.'],
-    text: '',
-    type: 'password',
+  if (!app.account || !app.key) return
+  const yes = await ask(`Allow ${digest.slice(0, 12)} on ${c.name}?`, {
+    says: [`Allow this only if you changed the plugin on ${c.name} yourself. Its sessions are shown and asked things again, and its agent starts sessions with it. If it changes again it is asked again.`, 'Your passkey is asked for: what is allowed is signed with your key, with the list of your devices.'],
     yes: `Allow ${digest.slice(0, 12)} on ${c.name}`,
     danger: true,
   })
-  if (!typed) return
-  let made = null
-  try {
-    made = await vault.keysOf(typed, u.id)
-  } catch {
-    return void tell('Not allowed', 'Your key could not be made in this browser.')
-  }
-  if (!made.checker.every((b, i) => b === app.key.checker[i])) {
-    vault.forget(made)
-    return void tell('Not allowed', 'That is not the passphrase this browser was given.')
-  }
-  const why = await putDevices(app.key, made.signer, (devices) => devices, { allowed: (was) => [...was.filter((a) => !(a.machine === c.id && a.hash === digest)), { machine: c.id, hash: digest, at: Date.now() }] })
-  vault.forget(made)
+  if (!yes) return
+  const why = await signDevicesHere((devices) => devices, { allowed: (was) => [...was.filter((a) => !(a.machine === c.id && a.hash === digest)), { machine: c.id, hash: digest, at: Date.now() }] })
   if (why) return void tell('Not allowed', sentence(why))
   stateOf(c).upkeep = { kind: 'alarm', done: '' }
   renderComputer()
@@ -8264,10 +8210,9 @@ function connectedLine() {
   return h('p', { class: 'guide-status connected' }, '✓ Connected: ', [sessions ? count(sessions, 'session') + ' open' : '', machines ? count(machines, 'computer') + ' with the agent' : ''].filter(Boolean).join(', ') || 'your sessions have reported', '. ', h('a', { href: '#' }, 'See your sessions'))
 }
 
-// ---- What a computer is given: an API token to sign in with, and the passphrase that
-// opens the account's key there. Both are the person's to type as that computer is set
-// up (into its agent's installer, which gives the plugin the same; or into the plugin
-// itself); neither is put in a command. Drawn on Account, and on Set up a computer.
+// ---- What a computer is given: an API token to sign in with, and the account's key. Both
+// are handed to it sealed, as it is connected from its link (openConnect): the token is made
+// for it, named for it, and is what is taken back to disconnect it. Drawn on Account.
 
 const dayOf = (ts) => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 const TOKEN_LIVES = [['30', '30 days'], ['90', '90 days'], ['365', 'A year'], ['0', 'Never runs out']]
@@ -8333,45 +8278,6 @@ function tokensPart(redraw) {
   ]
 }
 
-// How good a passphrase looks: nothing is known of it but what is typed. `ok`: it may be
-// tried (it is long enough to be the passphrase the account already has, which is taken
-// as it is). `strong`: it may become the account's passphrase, chosen here for the first
-// time or in another's place. The passphrase is all that stands between whoever holds
-// the server's data and what the account's sessions say, and all that makes a browser one
-// of the account's devices, whose orders its computers do: so one that is being chosen is
-// held to four or more unrelated words, or to something long and mixed, and to not being
-// what anyone would try first. (`own`: what is the account's own to say, its email's
-// name: no part of a passphrase.)
-const COMMON_PHRASES = new Set(['correcthorsebatterystaple', 'thequickbrownfoxjumpsoverthelazydog', 'thequickbrownfox', 'tobeornottobethatisthequestion', 'maytheforcebewithyou', 'passwordpasswordpassword', 'letmeinletmeinletmein', 'iloveyouiloveyouiloveyou', 'onetwothreefourfivesix', 'onetwothreefour', 'loremipsumdolorsitamet'])
-const KEY_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm', '1234567890', 'abcdefghijklmnopqrstuvwxyz']
-// How much of a text is keys or letters in a row, one after the next, either way: of 1
-function inARow(letters) {
-  let run = 0
-  for (let i = 1; i < letters.length; i++) {
-    const pair = letters[i - 1] + letters[i]
-    if (letters[i] === letters[i - 1] || KEY_ROWS.some((row) => row.includes(pair) || row.includes(pair[1] + pair[0]))) run++
-  }
-  return letters.length > 1 ? run / (letters.length - 1) : 0
-}
-function passphraseHint(text, own = []) {
-  const plain = text.normalize('NFKC')
-  const lower = plain.toLowerCase()
-  const letters = lower.replace(/[^\p{L}\p{N}]/gu, '')
-  const words = [...new Set(lower.split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 2))]
-  if (plain.length < 12) return { ok: false, strong: false, says: 'At least 12 characters.' }
-  if (letters === 'correcthorsebatterystaple') return { ok: false, strong: false, says: 'Nice try, but no, not that one' }
-  const weak = (why) => ({ ok: true, strong: false, why, says: `If this is the passphrase your account already has, go on. To choose it as a new one it is not strong enough: ${why}` })
-  if (COMMON_PHRASES.has(letters)) return weak('it is a phrase anyone would try.')
-  if (new Set(letters).size < 8) return weak('it is the same few characters over and over.')
-  if (inARow(letters) > 0.6) return weak('it is keys or letters in a row.')
-  const named = ['manyclaws', ...own].map((n) => String(n ?? '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')).find((n) => n.length >= 4 && letters.includes(n))
-  if (named) return weak(`it has “${named}” in it, which is the first thing anyone would try.`)
-  if (words.length >= 4 && plain.length >= 20) return { ok: true, strong: true, says: `Good: ${words.length} words.` }
-  const kinds = [/\p{Ll}/u, /\p{Lu}/u, /\p{N}/u, /[^\p{L}\p{N}\s]/u].filter((k) => k.test(plain)).length
-  if (plain.length >= 16 && kinds >= 3 && new Set(plain).size >= 10) return { ok: true, strong: true, says: 'It will do, and longer is stronger: four or more unrelated words make a good one.' }
-  return weak('use four or more unrelated words (20 characters or more), or 16 or more characters that mix capitals, digits and symbols.')
-}
-
 // The page loaded again, to read everything with a key it has just been given
 // Everything this page was sent so far it read with what it held then: it starts over
 // with what it holds now. By loading again, on a device that keeps its key. One that
@@ -8386,38 +8292,13 @@ async function startOver() {
   app.projectOpen.clear()
   app.search = { q: '', seq: 0, data: null, open: new Set(), sessions: new Map(), hits: new Map(), by: 'title' }
   app.sawSealed = false
-  app.firstSeenTo = null
   if (await loadAccount()) enter()
 }
 
-// ---- The account's own small session. Nothing of the passphrase is on the server, so
-// until a computer has sent something sealed there is nothing here to try a typed one
-// on, and a mistyped one would be taken for the account's. So the first time a browser
-// is given a passphrase, with nothing sealed here yet, it seals a text everybody knows
-// with the key it made and keeps that here as a session of its own: one row, ended as
-// it is made. The next time a passphrase is typed, on this device or another, it is tried
-// on that: it opens to the known text, or it is not the account's passphrase. To the
-// server it is a session like any other, sealed like the rest, kept as long and cleared
-// with the rest: it tells the server no more than any sealed session does. The page
-// knows it by its id, which every device of the account's works out alike from the
-// account's id, and keeps it out of the list: it is nobody's conversation.
-const FIRST_SAYS = 'ManyClaws: the session every device of this account opens.'
-function firstIdOf(account) {
-  if (!sealing) return null
-  const hex = [...sealing.sha256(new TextEncoder().encode('manyclaws first session|' + account))].map((b) => b.toString(16).padStart(2, '0')).join('')
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`
-}
-// It is here, this browser has a key, and the key does not open it: it is this browser,
-// then, that has another passphrase than the account
-// (one with nothing on it yet says nothing either way: it is as if it were not there)
-const firstIsOther = () => !!app.key && !!app.first?.card && app.first.topic !== FIRST_SAYS
-
-// ---- What does not open here, and whose it is. Nothing of the passphrase is on the
-// server, so which device was given another one is told only by what this browser's key
-// opens, of what this page holds:
-//   here      the account's own small session: it opens ('same': this browser has the
-//             account's passphrase), it does not ('other': it is this browser that has
-//             another), or none is kept to say ('unknown')
+// ---- What does not open here, and whose it is. Nothing of the key is on the server, so
+// which device seals with another one is told only by what this browser's key opens, of
+// what this page holds (a browser whose key does not open the list of the account's
+// devices lets go of it: seeToDevice; so this browser's is the account's):
 //   devices   each of the account's computers: whether what its agent says of it opens
 //             (`card`: said again each time it says hello, so it is how the computer
 //             stands now), and which of the sessions on it do not: the ones heard from
@@ -8429,8 +8310,7 @@ const firstIsOther = () => !!app.key && !!app.first?.card && app.first.topic !==
 // A thing counts where the key failed to open it, and it stands as "🔒 (encrypted)" and
 // nothing else: not where it opened and says those words.
 function unopened() {
-  if (!app.key || !sealing) return { any: false, here: 'same', devices: [], unplaced: [], favorites: 0, marks: 0 }
-  const here = firstIsOther() ? 'other' : app.first?.card ? 'same' : 'unknown'
+  if (!app.key || !sealing) return { any: false, devices: [], unplaced: [], favorites: 0, marks: 0 }
   const all = [...app.sessions.values()]
   const running = (s) => s.online && !s.ended
   const devices = [...app.machines.values()].map((m) => {
@@ -8441,8 +8321,8 @@ function unopened() {
   const unplaced = all.filter((s) => isLocked(s.card) && !app.machines.has(s.machine))
   const favorites = app.favorites.filter((f) => [f.title, f.project, f.where].some(isLocked)).length
   const marks = [...app.marks.values()].filter((m) => m.shut).length
-  const any = here === 'other' || unplaced.length > 0 || devices.some((d) => d.card || d.running.length || d.left.length) || favorites > 0 || marks > 0
-  return { any, here, devices, unplaced, favorites, marks }
+  const any = unplaced.length > 0 || devices.some((d) => d.card || d.running.length || d.left.length) || favorites > 0 || marks > 0
+  return { any, devices, unplaced, favorites, marks }
 }
 // How a computer stands, of what it sent: its agent seals with another key now
 // ('other'), or did when it was last heard from ('was'); it has this browser's key, and
@@ -8452,60 +8332,25 @@ const deviceStands = (d) => (d.card ? (d.m.online ? 'other' : 'was') : d.running
 
 // What this page holds is looked at again as it changes: the line across the top says
 // whether anything does not open, and the page that says whose it is is drawn again
-// where it is the one showing. So a computer given the right passphrase is seen to open
-// as it reports, with nothing pressed here.
+// where it is the one showing. So a computer connected again is seen to open as it
+// reports, with nothing pressed here.
 function lookAgain() {
   const u = unopened()
   const ids = (list) => list.map((s) => s.id)
-  const now = JSON.stringify([u.here, u.devices.map((d) => [d.m.id, machineName(d.m), d.m.online, d.card, ids(d.running), ids(d.left), d.opens]), ids(u.unplaced), u.favorites, u.marks])
+  const now = JSON.stringify([u.devices.map((d) => [d.m.id, machineName(d.m), d.m.online, d.card, ids(d.running), ids(d.left), d.opens]), ids(u.unplaced), u.favorites, u.marks])
   if (now === app.unopenedWas) return
   app.unopenedWas = now
   showNotices()
   if (location.hash.split('?')[0] === '#/account/unopened' && !el('account').hidden && app.account && el('account-body').querySelector('[data-part=unopened]')) renderUnopened()
 }
 
-// Kept here, sealed with this key, as a computer's plugin reports a session: it starts,
-// says the one thing, and ends. `there`: one is here already, sealed with whatever key,
-// and goes first. True when the server has taken it.
-async function keepFirst(key, there = !!app.first) {
-  const sid = app.firstId
-  if (!sid) return false
-  if (there) await fetch('/api/sessions/' + sid, { method: 'DELETE' }).catch(() => {})
-  const at = Date.now()
-  // (as a computer's plugin reports a session: a card that says what it is about, a row that says it, and that it has ended)
-  const events = [
-    { type: 'card', card: await vault.seal({ topic: FIRST_SAYS, preview: FIRST_SAYS, state: 'idle', interactive: false }, key) },
-    { type: 'rows', rows: [{ id: await vault.nameOf('first', key), row: await vault.seal({ ts: at, role: 'user', text: FIRST_SAYS }, key) }] },
-    { type: 'session.end' },
-  ]
-  return (await sendJson('/api/sessions', { protocol: 2, meta: { protocol: 2, sealed: 3, orders: true }, events: events.map((e) => ({ sid, ts: at, sealed: 3, ...e })) })).ok
-}
-
-// A browser that has the key sees to it, once each time the page is opened, that the
-// session is here: made where there is none (it went with the rest: cleared, or unheard
-// for longer than anything is kept), and made
-// again once it is half that old, so that it does not go. Not where this browser's key
-// opens nothing of what is kept: then it is this browser that has another passphrase
-// than the account's computers, and it is not for it to say which is the account's.
-async function seeToFirst() {
-  const a = app.account
-  if (!a || !app.key || !app.firstId || app.firstSeenTo === a.user.id) return
-  app.firstSeenTo = a.user.id
-  if (app.first?.card) {
-    if (app.first.topic === FIRST_SAYS && Date.now() - app.first.lastActivity > ((a.retainDays ?? 14) * 86400_000) / 2) await keepFirst(app.key)
-    return
-  }
-  if ((await opensWhatIsKept(app.key)).fits !== 'no') await keepFirst(app.key, false)
-}
-
 // A favorite is kept with what its session was called, sealed, and stays when the
-// account's sessions are cleared. After a reset nobody can open what it was called: each
-// is named again under the new key, by what it was called where this browser still has
-// the key that opened it, and otherwise by the start of its id, until its session next
-// reports and says what it is called itself. `all` false (this browser given the
-// passphrase the account has already, in place of another): only what this browser can
-// still read is sealed again; the rest is not its to name. `was`: what this browser held
-// until now, which is what it can still read with.
+// account's sessions are cleared. After the account starts afresh nobody can open what it
+// was called: each is named again under the new key, by what it was called where this
+// browser still has the key that opened it, and otherwise by the start of its id, until
+// its session next reports and says what it is called itself. `all` false: only what this
+// browser can still read is sealed again; the rest is not its to name. `was`: what this
+// browser held until now, which is what it can still read with.
 async function renameFavorites(key, all = true, was = app.key) {
   const text = await fetch('/api/favorites').then((r) => (r.ok ? r.text() : '')).catch(() => '')
   let kept = []
@@ -8528,7 +8373,7 @@ async function renameFavorites(key, all = true, was = app.key) {
 }
 
 // What the account has put on its sessions (marks) is sealed too, and stays when its
-// sessions are cleared. After a reset each mark is sealed again under the new key, where
+// sessions are cleared. After a new key each mark is sealed again under it, where
 // this browser still has the key that opened it; one that nobody can open now is taken
 // off. (A notification still to come is asked for again, its words under the new key.)
 // `all` false: as for the favorites, one this browser cannot read is left as it is.
@@ -8552,251 +8397,515 @@ async function resealMarks(key, all = true, was = app.key) {
   }
 }
 
-// Whether a key opens what the server keeps of the account's that is sealed (`fits`):
-// 'yes', 'no', or 'nothing' where nothing sealed is there to try it on. Where the
-// account's own small session is here (`first`), it is the word on it: that is what it is
-// for. Where it is not, the key is tried on whatever else is sealed here. It is the only
-// way there is to tell a passphrase typed here from another: the server has nothing of
-// it to ask.
-async function opensWhatIsKept(key) {
-  const found = []
-  let first = null
-  const look = (v, depth = 0) => {
-    if (found.length >= 8 || depth > 6) return
-    if (typeof v === 'string') return void (sealing.isSealed(v) && found.push(v))
-    if (v && typeof v === 'object') for (const x of Object.values(v)) look(x, depth + 1)
+// ---- The account's key. One root for the account (seal.js): made by its first phone or
+// browser, and given by one of the account's devices to another, sealed to a key the new
+// one made for the once, which the server hands over and cannot open. The device that
+// gives it keeps it under a passkey, and gives it only with that: Face ID, Touch ID, a PIN,
+// a security key. Or the person types the recovery key they kept, which is the root
+// written out. Nothing typed makes a key, so nothing the server holds is anything to guess
+// at, and nothing of the root or the passkey is sent to it.
+//
+// The links, each with a key made for the once after the #, which a browser sends nowhere:
+//   #/b/<key>/<name>   a browser or a phone that has no key, asking: opened where the key is, and approved there
+//   #/a/<key>          the other way round: a device that has the key, offering it (Account, Devices, Add a phone or
+//                      browser); opened on one that has none, which says back to it, sealed, the key it is to be given
+//                      it by, and its name. So a phone can be added from a desk's browser, which has no camera to read
+//                      the phone's code with.
+//   #/c/<key>/<name>   a computer's plugin, asking (openConnect)
+// Each answer is put on the server under a name drawn from the key it is sealed to (its SHA-256), and asked for there
+// by that name, by whatever has the other half.
+
+const ASK_EVERY_MS = 3000
+const WAIT_MS = 10 * 60_000
+const linkOf = (kind, pub, name) => `${location.origin}/app#/${kind}/${sealing.toB64(pub)}${name === undefined ? '' : '/' + encodeURIComponent(String(name).slice(0, 24))}`
+const handedAt = (pub) => '/api/connect/' + sealing.toB64(sealing.sha256(pub)).slice(0, 22)
+const noPasskeys = () => !globalThis.PublicKeyCredential || !navigator.credentials?.create
+// (the person said no to the passkey, or let it be: nothing was done)
+const refused = (err) => err?.name === 'NotAllowedError' || err?.name === 'AbortError'
+
+// What is sealed to a key, put on the server where the one that has its other half asks for it: '' when it is there,
+// or why not
+async function handTo(pub, value) {
+  const r = await fetch(handedAt(pub), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sealed: sealing.sealTo(pub, value) }) }).catch(() => null)
+  if (r?.ok) return ''
+  return r?.status === 409 ? 'that link has been answered already' : ((await r?.json().catch(() => null))?.error ?? 'the server could not be reached')
+}
+// What was sealed to a key made here for the once (`pair`), when it comes: asked for every few seconds until `until`,
+// or until `still()` says it is no longer waited for. Null where it did not come; { broken: true } where what came does
+// not open with it.
+async function handedTo(pair, { until = Date.now() + WAIT_MS, still = () => true } = {}) {
+  while (Date.now() < until && still()) {
+    const r = await fetch(handedAt(pair.public)).catch(() => null)
+    if (r?.status === 200) return sealing.openFrom(pair.secret, (await r.json().catch(() => null))?.sealed) ?? { broken: true }
+    await new Promise((done) => setTimeout(done, ASK_EVERY_MS))
   }
-  for (const path of ['/api/sessions', '/api/favorites', '/api/notifications']) {
-    // (read as it came, not opened on the way)
-    const text = await fetch(path).then((r) => (r.ok ? r.text() : '')).catch(() => '')
-    try {
-      const data = JSON.parse(text)
-      if (path === '/api/sessions') first = data.sessions?.find((s) => s.id === app.firstId && sealing.isSealed(s.card)) ?? null
-      look(data)
-    } catch {}
-  }
-  if (first) return { fits: (await vault.open(first.card, key, null))?.topic === FIRST_SAYS ? 'yes' : 'no', first: true }
-  if (!found.length) return { fits: 'nothing', first: false }
-  for (const v of found) if ((await vault.open(v, key, null)) !== null) return { fits: 'yes', first: false }
-  return { fits: 'no', first: false }
+  return null
 }
 
-// The passphrase: typed here, on this browser, and made into the key here with the
-// account's id. Nothing of it goes to the server: no salt, nothing that tells the key,
-// not that there is one. So there is one box for it, whether it is the first time it is
-// chosen or this browser being given the one the account's computers have: the server
-// could not tell those apart, and neither can this page, except by trying the key on what
-// is sealed here: the account's own small session (firstSession), which the first browser
-// given a passphrase keeps here for that, or whatever else is sealed. One that does not
-// open it is mistyped, or is to be the account's from now on: the page says so and asks
-// which. Another passphrase is another key, for the whole account: what is kept on the
-// server is cleared, the small session with it, and one is made with the new key.
-// Its parts by name (the card that asks for it as a browser comes in lays them out its own
-// way: showPassphrase), and as the account's pages have them, one under the other.
-const passphrasePart = (redraw) => Object.values(passphraseParts(redraw))
-function passphraseParts(redraw) {
-  const a = app.account
-  const u = a.user
-  const has = !!app.key
-  const about = h('p', null, 'What your sessions say is sealed with a key that is made from your ', h('b', null, 'passphrase'), ', on each of your own devices: you type it as a computer is set up, and into this page in a browser or on a phone, once each. Choose a passphrase, not a password: four or more unrelated words are stronger than something clever, and easier to type. Don’t reuse the password you sign in with. Nothing of the passphrase is ever sent to the server: not the passphrase, not the key, not anything made from either, not even that you have one. So nobody who runs the server can read your sessions, and nothing but your own devices can tell whether a passphrase is the right one: type the same one everywhere. So that they can tell, the first browser you give it to keeps one small sealed session of its own here, with your others, and a passphrase typed later is tried on that.')
-  // Where to keep it: nobody can give a forgotten one back, so a password manager is said to be a fair place for it
-  const vaultSays = h('p', { 'data-part': 'passphrase-vault' }, 'A passphrase you forget cannot be recovered, by us or by anyone. A password manager whose vault is end-to-end encrypted is a reasonable place to keep it: if your browser or your manager offers to save it, it is saved as “ManyClaws encryption passphrase”, apart from the password you sign in with.')
-  const note = h('span', { class: 'form-note', 'data-part': 'passphrase-note' })
-  // (what a password manager files it under: a name of its own, so that it is kept apart from the password the account
-  // signs in with, and that one is not offered in its place)
-  const filedAs = h('input', { type: 'text', autocomplete: 'username', value: 'ManyClaws encryption passphrase', readonly: '', hidden: '', tabindex: '-1', 'aria-hidden': 'true' })
-  // (it has no name, and nothing else in the form has one: were the form ever sent as a form, nothing typed here would go with it)
-  const box = h('input', { 'data-part': 'passphrase-new', type: 'password', placeholder: has ? 'A new passphrase: four or more unrelated words' : 'Your passphrase: four or more unrelated words', autocomplete: 'new-password', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false' })
-  // The eye in the box, as any password's box has one: pressed, what is typed is shown in the box itself, and pressed
-  // again it is dots. Shown, the box is a plain one, which still asks a keyboard to correct, capitalise and check
-  // nothing; it is a password's again as the form is sent. (Pressing the eye leaves the typing where it is: it takes
-  // no focus from the box, so a phone's keyboard stays up.)
-  const eye = h('button', { type: 'button', class: 'passphrase-eye', 'data-part': 'passphrase-show', onmousedown: (ev) => ev.preventDefault(), onclick: () => see(box.type === 'password') })
-  function see(yes) {
-    box.type = yes ? 'text' : 'password'
-    const does = yes ? 'Hide the passphrase' : 'Show the passphrase'
-    for (const k of ['aria-label', 'title']) eye.setAttribute(k, does)
-    eye.setAttribute('aria-pressed', String(yes))
-    eye.replaceChildren(icon(yes ? 'eyeOff' : 'eye'))
-  }
-  see(false)
-  // Whose device this is, asked as the passphrase is given to it: the key stays on a device that is its owner's, and is
-  // held on any other only while the page is open. One of the two is chosen before the passphrase is taken. (A browser
-  // that has a key and is given another is asked again, with what it said before chosen.)
-  const whose = (part, checked, ...says) => h('label', { class: 'guide-check' }, h('input', { type: 'radio', 'data-part': part, checked, onchange: () => chose(part) }), h('span', null, ...says))
-  const mine = whose('device-own', has && app.key.own, h('b', null, 'Yes, it is mine.'), ' My key stays on it, and my sessions open here whenever I come back.')
-  const notMine = whose('device-other', has && !app.key.own, h('b', null, 'No, it is shared or borrowed.'), ' My key is held only while this page is open: it is gone when the page is closed or I sign out, and what this device asks of my computers is taken for a day at most.')
-  const isMine = () => mine.querySelector('input').checked
-  const chosen = () => isMine() || notMine.querySelector('input').checked
-  const save = h('button', { type: 'submit', class: 'primary', 'data-part': 'passphrase-save', disabled: '' }, has ? 'Change the passphrase' : 'Use this passphrase')
-  // What is asked where a passphrase does not open what is kept here: under the box
-  const asked = h('div', { class: 'token-made', 'data-part': 'passphrase-reset', hidden: '' })
-  // (what is the account's own to say is no part of a passphrase: the name its email has)
-  const hintOf = () => passphraseHint(box.value, [String(u.email ?? '').split('@')[0]])
-  const ready = () => hintOf().ok && chosen()
-  // (the two are one choice: they have no name to make them so, so it is done here)
-  function chose(part) {
-    for (const [name, label] of [['device-own', mine], ['device-other', notMine]]) label.querySelector('input').checked = name === part
-    save.disabled = !ready()
-  }
-  box.addEventListener('input', () => {
-    const hint = hintOf()
-    note.textContent = box.value ? hint.says : ''
-    note.className = 'form-note' + (hint.ok ? '' : ' error')
-    save.disabled = !ready()
-    asked.hidden = true
-  })
-  const f = h(
-    'form',
-    { class: 'guide-form', 'data-part': 'passphrase-form' },
-    filedAs,
-    h('div', { class: 'passphrase-box passphrase-eyed' }, box, eye),
-    h('fieldset', { class: 'device-whose', 'data-part': 'device-whose' }, h('legend', null, 'Is this your own device?'), mine, notMine),
-    h('div', null, save, ' ', note),
-    asked,
-  )
-  const failed = (why) => {
-    note.textContent = why
-    note.className = 'form-note error'
-    save.disabled = !ready()
-  }
-  // The key is this browser's from here on, and this browser one of the account's devices.
-  // `reset`: the key is the whole account's from here on too, and what was sealed with
-  // the one before can be opened by nobody now: all of it goes, the small session with
-  // it, and what is running is sent again. `first`: the small session is here, and opens
-  // with this key; where it is not, it is made with it. `was`: what this browser held
-  // until now, which what it sealed itself is read with once more.
-  const take = async (made, held, { reset = false, first = false, was = app.key } = {}) => {
-    // This device goes on the list of the account's devices first, signed with the passphrase's own signer, which is
-    // then let go of: without that nothing it asks of a computer is done, so without it nothing else is changed either.
-    // (the key this browser signed with before, where it had one, comes off the list: nothing has it now)
-    const stay = held.own ? {} : { until: Date.now() + sealing.DEVICE_STAY_MS }
-    app.listing = true
-    const why = await putDevices(held, made.signer, (devices) => [...devices.filter((d) => d.key !== app.key?.device.key), { key: held.device.key, name: deviceLabel(), at: Date.now(), ...(a.login ? { login: a.login } : {}), ...stay }])
-    vault.forget(made)
-    if (why) {
-      app.listing = false
-      return failed(`This device could not be put among your account’s devices: ${why}. Nothing was changed.`)
-    }
-    if (reset) await fetch('/api/sessions', { method: 'DELETE' }).catch(() => {})
-    // (what this browser sealed itself with the key it had, a favorite's name and what was put on a session, goes under the
-    // new one: the server keeps neither up with its session, having read none of it)
-    if (reset || was) {
-      await renameFavorites(held, reset, was)
-      await resealMarks(held, reset, was)
-    }
-    if (reset || !first) await keepFirst(held, false)
-    await vault.keepKey(u.id, held)
-    await vault.dropBefore(u.id)
-    app.passphraseChanging = false
-    app.listing = false
-    // (everything this page was sent so far it could not open: it starts over, with the key)
-    setTimeout(startOver, 0)
-  }
-  f.addEventListener('submit', async (ev) => {
-    ev.preventDefault()
-    if (!ready()) return
-    save.disabled = true
-    see(false)
-    // (the key takes the browser a second or so to make: that is what makes a guess at a passphrase dear)
-    note.textContent = 'Making your key…'
-    note.className = 'form-note'
-    let made = null
-    let held = null
-    try {
-      made = await vault.keysOf(box.value, u.id)
-      held = await vault.hold(made, { own: isMine() })
-    } catch {
-      return failed('Your key could not be made in this browser: it may be too old to keep one safely. Try an up-to-date browser.')
-    }
-    // Given to this browser: does it open what is kept here for the account?
-    const { fits, first } = await opensWhatIsKept(held)
-    // (once, at the deploy of 2026-10-08: a browser that has the key of before, and is given the same passphrase, seals
-    // again what the account kept under that key and clears what its computers send again themselves. See keys.js.)
-    const before = fits === 'yes' ? null : await vault.keyBefore(u.id, box.value)
-    if (before) return take(made, held, { reset: fits === 'no', was: before })
-    // The passphrase the account has already is taken as it is. One that is to be the account's from here on (its
-    // first, or another in the old one's place) is held to more: strong enough to be chosen (passphraseHint), and not
-    // the password this browser signs in with, which the server keeps stretched far more cheaply (keys.js, isPassword).
-    const isPassword = await vault.isPassword(box.value, a.kdf, await vault.markOf(u.id)).catch(() => false)
-    const hint = hintOf()
-    const unfit = isPassword
-      ? 'it is the password you sign in with. Choose a different one: the server keeps what signs you in, stretched far more cheaply than a passphrase is, so whoever had the server’s data could guess a passphrase that is also your password.'
-      : hint.strong
-        ? ''
-        : hint.why
-    if (fits !== 'yes' && unfit) {
-      vault.forget(made)
-      return failed(fits === 'no' ? `That is not the passphrase your account has. Nor can it become it: ${unfit}` : `That cannot be your passphrase: ${unfit}`)
-    }
-    // (the account's own, and its password too: taken, since it is the account's, and said under Account until one of the two is changed)
-    try {
-      if (isPassword) sessionStorage.setItem('mc.samePassword', u.id)
-      else sessionStorage.removeItem('mc.samePassword')
-    } catch {}
-    // (nothing sealed is here to say, and this browser has a key already: it is asked before it takes another)
-    if (fits === 'nothing' && has && !(await ask('Change your passphrase?', { says: 'It makes a new encryption key: each of your computers and browsers has to be given the new passphrase before it shows here again.', yes: 'Change it' }))) {
-      vault.forget(made)
-      note.textContent = ''
-      return void (save.disabled = !ready())
-    }
-    if (fits !== 'no') return take(made, held, { first })
-    // One that does not is mistyped, or is to be the account's passphrase from now on:
-    // the page says so, asks which, and says how the second goes
-    note.textContent = 'That is not the passphrase your account has.'
-    note.className = 'form-note error'
-    const again = () => {
-      vault.forget(made)
-      asked.hidden = true
-      note.textContent = ''
-      box.value = ''
-      box.focus()
-    }
-    const yes = h('button', { type: 'button', class: 'primary', 'data-part': 'passphrase-reset-yes' }, 'Reset my account’s passphrase to this one')
-    yes.addEventListener('click', () => {
-      yes.disabled = true
-      take(made, held, { reset: true })
-    })
-    fill(
-      asked,
-      h('p', null, h('b', null, 'That passphrase does not open what is kept here for your account.'), ' If it was mistyped, type it again. If you have forgotten your passphrase, or want another, you can reset it for your whole account.'),
-      h('p', null, 'How a reset goes: what you typed becomes the passphrase of your whole account. Everything the server keeps of your sessions is removed, since nobody can open it without the passphrase it was sealed with. Nothing on your computers is touched. Then give the new passphrase to each of your computers (in Claude Code, /plugin configure manyclaws@manyclaws; for its agent, run the installer again), and to each other browser or phone, which asks for it when it is next opened. Your sessions show here again as your computers connect with it.'),
-      h('div', { class: 'passphrase-box' }, yes, h('button', { type: 'button', class: 'ghost', 'data-part': 'passphrase-reset-no', onclick: again }, 'Type it again')),
-    )
-    asked.hidden = false
-  })
-  const changing = has && app.passphraseChanging
-  // What this browser holds stays or goes by what was said of the device when the passphrase was typed
-  const here = !has
-    ? h('p', { 'data-part': 'key-needed' }, app.offList ? 'This browser was taken off your account’s devices, or its day as one of them is over, so it has let go of your key. Type your passphrase to make it one of them again.' : a.sessions ? 'This browser has not been given your passphrase, so it cannot read your sessions or reply to them. Type it here, once.' : 'This browser has no passphrase yet. Type the one your other devices have, or, if this is the first, choose one.')
-    : app.key.own
-      ? h('p', { 'data-part': 'key-here', class: 'guide-status connected' }, '✓ This browser has your key, made here from your passphrase, and it stays here when you sign out: you said this device is yours. Give each computer the same passphrase as you set it up. ', h('a', { href: '#/account/unopened', 'data-part': 'key-check' }, 'See what each of your devices opens'))
-      : h('p', { 'data-part': 'key-here', class: 'guide-status connected' }, '✓ This browser has your key while this page is open: you said this device is not yours, so it is gone when the page is closed or you sign out. ', h('a', { href: '#/account/unopened', 'data-part': 'key-check' }, 'See what each of your devices opens'))
-  let same = false
+// The root, opened on this device for the moment it takes: the person is asked for the passkey it is kept under.
+// { root, made }, both to be let go of once they are used (vault.forget); throws with what to say where it is not opened.
+async function unlocked() {
+  if (!app.key) throw new Error('this browser does not have your key')
+  if (!app.key.root) throw new Error('this browser keeps your key without a passkey, so it cannot do this: do it on one of your devices that keeps it under one')
+  let root = null
   try {
-    same = sessionStorage.getItem('mc.samePassword') === u.id
-  } catch {}
-  return {
-    about,
-    vaultSays,
-    here,
-    same: same && has && h('p', { 'data-part': 'key-is-password', class: 'guide-status' }, 'Your encryption passphrase is the password you sign in with. Change one of them: the server keeps what signs you in, stretched far more cheaply than a passphrase is, so whoever had the server’s data could guess a passphrase that is also your password. ', h('a', { href: '#/account/password' }, 'Change your password')),
-    other: firstIsOther()
-      ? h('p', { 'data-part': 'key-other', class: 'guide-status' }, 'The passphrase this browser was given is not the one your account has now: it was set again on another of your devices, or this browser was given a different one. Type your account’s passphrase here (Change passphrase, below), and your sessions open again.')
-      : unopened().any && h('p', { 'data-part': 'key-other', class: 'guide-status' }, 'Some of what is kept here for your account was sealed with a different passphrase from the one this browser was given, so it cannot be opened here. ', h('a', { href: '#/account/unopened', 'data-part': 'key-other-link' }, 'See which device has the other one, and what to do there')),
-    change: has && !changing && h('div', null, h('button', { type: 'button', class: 'link', 'data-part': 'passphrase-change', onclick: () => ((app.passphraseChanging = true), redraw()) }, 'Change passphrase')),
-    form: (!has || changing) && f,
+    root = await vault.rootOf(app.key)
+  } catch (err) {
+    throw new Error(refused(err) ? 'the passkey was not given' : 'your key could not be opened here: ' + (err?.message || 'the passkey would not open it'))
   }
+  const made = sealing.keysFromRoot(root)
+  if (!made?.checker.every((b, i) => b === app.key.checker[i])) {
+    root.fill(0)
+    throw new Error('what this browser keeps under its passkey is not its key')
+  }
+  return { root, made }
+}
+
+// The root put away on this browser under a passkey of its own: { cred, wrapped }, or null where its authenticator has
+// no secret to give for it (the browser then keeps the key without the root). Throws where no passkey was made.
+async function passkeyFor(root) {
+  if (noPasskeys()) return null
+  const pk = await vault.makePasskey(app.account?.user.email ?? '', deviceLabel())
+  if (!pk.prf) return null
+  const locked = await vault.lockRoot(root, pk)
+  pk.prf.fill(0)
+  return locked
+}
+
+// A root taken on this browser, which goes on the list of the account's devices with it (`fresh`: on a new list, alone;
+// else on the one the server has): { held }, or { why } where it could not be put there
+async function takeRoot(root, locked, { fresh = false } = {}) {
+  const u = app.account.user
+  const made = sealing.keysFromRoot(root)
+  const held = await vault.hold(made, { own: true, root: locked })
+  const self = { key: held.device.key, name: deviceLabel(), at: Date.now(), ...(app.account.login ? { login: app.account.login } : {}) }
+  app.listing = true
+  const why = await putDevices(held, made.signer, (devices) => (fresh ? [self] : [...devices.filter((d) => d.key !== app.key?.device.key), self]))
+  vault.forget(made)
+  if (why) {
+    app.listing = false
+    return { why }
+  }
+  await vault.keepKey(u.id, held)
+  await vault.dropBefore(u.id)
+  app.listing = false
+  return { held }
+}
+
+// The recovery key, shown: once as the key is made (`first`: it is gone on with only once it is said to be kept), and
+// again on a device that keeps it, with the passkey
+function recoveryNode(root, { done, first = false }) {
+  const kept = h('input', { type: 'checkbox', 'data-part': 'recovery-kept' })
+  const go = h('button', { type: 'button', class: 'primary', 'data-part': 'recovery-done', disabled: first ? '' : null, onclick: done }, first ? 'Go on' : 'Done')
+  kept.addEventListener('change', () => (go.disabled = !kept.checked))
+  return h(
+    'div',
+    { class: 'recovery', 'data-part': 'recovery' },
+    h('p', null, h('b', null, 'Your recovery key. '), 'It is your account’s key, written out: with it, a browser can be given your key again if you ever lose every device that has it. Keep it where you keep what matters, in a password manager or on paper. Anyone who has it can read your sessions, and nobody can give it back to you: it is kept nowhere but where you keep it.'),
+    h('div', { class: 'recovery-text', 'data-part': 'recovery-text' }, codeBox(sealing.rootText(root))),
+    first && h('label', { class: 'guide-check' }, kept, h('span', null, 'I have kept my recovery key somewhere of my own.')),
+    h('div', null, go),
+  )
+}
+
+// A recovery key being shown as the key is made (`app.recovery`: { root }): drawn wherever the key's part is drawn, and
+// drawn again there if that is drawn again meanwhile, until the person says they have kept it
+// (`redraw`: what draws the part it is in again, where `box` was drawn over meanwhile and is on the page no longer)
+function showRecovery(box, root, redraw) {
+  app.recovery = { root }
+  if (box.isConnected || !redraw) fill(box, recoveryShown())
+  else redraw()
+}
+const recoveryShown = () =>
+  recoveryNode(app.recovery.root, {
+    first: true,
+    done: () => {
+      app.recovery.root.fill(0)
+      app.recovery = null
+      startOver()
+    },
+  })
+
+// The account's first key, made here: the root, under a passkey of this browser's own, and this browser alone on the
+// list of the account's devices; then the recovery key, shown in `box`
+async function makeKey(box, failed, redraw) {
+  const root = sealing.newRoot()
+  let locked = null
+  try {
+    locked = await passkeyFor(root)
+  } catch (err) {
+    root.fill(0)
+    return failed(refused(err) ? 'no passkey was made, so no key either. Try again, and give Face ID, Touch ID, your device’s PIN or your security key when it is asked for' : err?.message || 'no passkey could be made')
+  }
+  if (!locked) {
+    root.fill(0)
+    return failed('this browser’s passkeys keep no secret to keep your key under. Make your key on your phone (sign in to ManyClaws there), then approve this browser from it')
+  }
+  const { why } = await takeRoot(root, locked, { fresh: true })
+  if (why) {
+    root.fill(0)
+    return failed(`your key could not be kept: ${why}`)
+  }
+  showRecovery(box, root, redraw)
+}
+
+// This browser given the key again from the recovery key: held against the list of the account's devices on the server
+// (it opens with it, and its signature is the root's), then put away under a passkey and put on that list. '' when it
+// is done, or why not.
+async function recoverWith(text) {
+  const root = sealing.rootFromText(text)
+  if (!root) return 'that is not a recovery key: it is 52 letters and digits, in groups of four'
+  const made = sealing.keysFromRoot(root)
+  const probe = await vault.hold(made)
+  const kept = await devicesKept()
+  const list = kept ? await vault.readDevices(kept, probe) : null
+  vault.forget(made)
+  if (!list) {
+    root.fill(0)
+    return kept === null ? 'the server could not be reached' : 'that is not your account’s recovery key'
+  }
+  let locked = null
+  try {
+    locked = await passkeyFor(root)
+  } catch (err) {
+    if (!(await ask('Keep your key here without a passkey?', { says: ['This browser then reads your sessions and asks things of your computers, but cannot approve your other devices or show your recovery key.', refused(err) ? 'No passkey was made.' : sentence(err?.message || 'No passkey could be made.')], yes: 'Keep it without one' }))) {
+      root.fill(0)
+      return 'nothing was taken'
+    }
+  }
+  const { why } = await takeRoot(root, locked)
+  root.fill(0)
+  if (why) return `this browser could not be put among your devices: ${why}`
+  startOver()
+  return ''
+}
+
+// What another of the account's devices gave this one: put away here, and the page starts over with it. The root,
+// where this is the person's own device, kept under a passkey of this browser's (without one, the key alone); the key
+// and the checker alone where it is borrowed. And with either, this device's own signing key, which the device that
+// approved it made and put on the list of the account's devices.
+async function takeGiven(got, failed = (why) => tell('Not taken', sentence(why))) {
+  const u = app.account?.user
+  let seed = null
+  try {
+    seed = typeof got?.seed === 'string' ? sealing.fromB64(got.seed) : null
+  } catch {}
+  if (!u || got?.broken || seed?.length !== 32) return failed('what came back did not open with the key this browser made for it, so nothing of it was taken')
+  let held = null
+  if (typeof got.root === 'string') {
+    const root = sealing.fromB64(got.root)
+    const made = sealing.keysFromRoot(root)
+    if (!made) return failed('what came back is not a key')
+    let locked = null
+    for (;;) {
+      try {
+        locked = await passkeyFor(root)
+        break
+      } catch {
+        if (!(await ask('Keep your key under a passkey here?', { says: ['Without one this browser reads your sessions and asks things of your computers, but cannot approve your other devices or show your recovery key.', 'Make one with Face ID, Touch ID, your device’s PIN or a security key.'], yes: 'Make a passkey', no: 'Not on this browser' }))) break
+      }
+    }
+    held = await vault.hold(made, { own: true, seed, root: locked })
+    vault.forget({ ...made, root })
+  } else {
+    const k = sealing.keysFromText(got.key)
+    if (!k) return failed('what came back is not a key')
+    held = await vault.hold(k, { own: false, seed })
+  }
+  seed.fill(0)
+  held.since = Number(got.v) || 0
+  await vault.keepKey(u.id, held)
+  await vault.dropBefore(u.id)
+  app.waiting = null
+  app.offList = false
+  app.newKey = false
+  if (location.hash.startsWith('#/a/')) history.replaceState(null, '', location.pathname)
+  startOver()
+}
+
+// A browser or a phone approved from this one: put on the list of the account's devices (with a signing key of its own,
+// made here for it and given to it with the rest), and given the root, where it is the person's own (`own`), or only
+// the key, for a day, where it is borrowed. `pub`: the key it made for the once. '' when it is done, or why not.
+async function approveDevice(pub, name, own) {
+  let opened
+  try {
+    opened = await unlocked()
+  } catch (err) {
+    return err.message
+  }
+  const { root, made } = opened
+  const seed = crypto.getRandomValues(new Uint8Array(32))
+  const key = sealing.toB64(sealing.verifyKey(seed))
+  const at = Date.now()
+  const until = own ? 0 : at + sealing.DEVICE_STAY_MS
+  app.listing = true
+  let why = await putDevices(app.key, made.signer, (devices) => [...devices, { key, name, at, ...(until ? { until } : {}) }])
+  if (!why) {
+    const given = own ? { root: sealing.toB64(root) } : { key: sealing.keysText(made), until }
+    why = await handTo(pub, { ...given, seed: sealing.toB64(seed), v: app.devicesList?.v ?? 0, account: String(app.account?.user.email ?? '') })
+    // (one that was not handed over is no device of the account's: off the list again)
+    if (why) await putDevices(app.key, made.signer, (devices) => devices.filter((d) => d.key !== key))
+  }
+  app.listing = false
+  vault.forget({ ...made, root, seed })
+  return why
+}
+
+// Asked, here: is this device to be given the key, and is it the person's own? Drawn into `box`. `how`: 'link' (it
+// showed this one a link) or 'code' (it read this one's code).
+function approveForm(box, pub, name, how) {
+  const note = h('span', { class: 'form-note', 'data-part': 'approve-note' })
+  const go = h('button', { type: 'submit', class: 'primary', 'data-part': 'approve-go' }, 'Approve')
+  const choice = (part, checked, ...says) => h('label', { class: 'guide-check' }, h('input', { type: 'radio', name: 'approve-whose', 'data-part': part, checked }), h('span', null, ...says))
+  const mine = choice('approve-own', true, h('b', null, 'It’s mine. '), 'It keeps your key under a passkey of its own, and can approve your other devices too.')
+  const notMine = choice('approve-other', false, h('b', null, 'It’s borrowed, or shared. '), 'It has your key while its page is open, and is one of your devices for a day: it cannot start sessions, or approve anything.')
+  const form = h(
+    'form',
+    { class: 'guide-form', 'data-part': 'approve-form' },
+    h('p', { 'data-part': 'approve-asks' }, 'Add ', h('b', null, name), ' to your devices?'),
+    h('p', { 'data-part': 'approve-warns' }, how === 'code' ? `Approve only if ${name} is the device you have just read this one’s code with: it is given your account’s key.` : 'Approve only a browser or phone you have just opened yourself, which is showing you this link: it is given your account’s key.'),
+    h('fieldset', { class: 'device-whose' }, h('legend', null, 'Is it yours?'), mine, notMine),
+    h('div', null, go, ' ', note),
+  )
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    go.disabled = true
+    note.textContent = 'Asking for your passkey…'
+    note.className = 'form-note'
+    const why = await approveDevice(pub, name, mine.querySelector('input').checked)
+    if (why) {
+      note.textContent = sentence(why)
+      note.className = 'form-note error'
+      go.disabled = false
+      return
+    }
+    fill(box, h('p', { 'data-part': 'approve-done', class: 'guide-status connected' }, '✓ ', h('b', null, name), ' is one of your devices now: it opens your sessions in a moment.'), h('p', null, h('a', { href: '#' }, 'Back to your sessions')))
+  })
+  fill(box, form)
+}
+
+// The link a browser or a phone with no key showed (#/b/<its key>/<its name>), opened here
+function openApprove(keyText, named) {
+  leaveChat()
+  connectHead('Add a phone or browser', 'From the link it showed.')
+  const body = el('connect-body')
+  let pub = null
+  try {
+    pub = sealing.fromB64(keyText)
+  } catch {}
+  const name = String(named || 'a browser').trim().slice(0, 60) || 'a browser'
+  if (!app.account || !sealing || !vault || pub?.length !== 32) return void fill(body, h('p', { 'data-part': 'approve-not' }, 'This is not a link ManyClaws makes.'))
+  if (!app.key?.root)
+    return void fill(body, h('p', { 'data-part': 'approve-cannot' }, app.key ? 'This browser keeps your key without a passkey, so it cannot approve another device. Open the link on one that keeps it under one.' : 'This browser does not have your key, so it cannot approve another device. Open the link on one that has it.'))
+  approveForm(body, pub, name, 'link')
+}
+
+// This device offering the key the other way round: a code and a link with a key made for the once, which the device
+// to be added opens; it answers with the key it made for itself, and is asked about here (approveForm)
+async function offerKey(box) {
+  const pair = sealing.x25519Keys()
+  const link = linkOf('a', pair.public)
+  const code = h('div', { class: 'key-code', 'data-part': 'offer-code' })
+  import('./qr.js')
+    .then((q) => {
+      const c = q.qrOf(link)
+      if (c) code.replaceChildren(qrPicture(c))
+    })
+    .catch(() => {})
+  const status = h('p', { class: 'muted', 'data-part': 'offer-waiting' }, 'Waiting for the phone or browser to open it…')
+  fill(box, h('p', null, 'On the phone or browser to add, sign in to ManyClaws, then read this code with its camera, or open the link there. This page then asks you to approve it.'), code, codeBox(link), status)
+  const got = await handedTo(pair, { still: () => box.isConnected })
+  let pub = null
+  try {
+    pub = typeof got?.pub === 'string' ? sealing.fromB64(got.pub) : null
+  } catch {}
+  if (!box.isConnected) return
+  if (!got) return void (status.textContent = 'Nothing opened it within ten minutes.')
+  if (pub?.length !== 32) return void (status.textContent = 'What answered is not a device ManyClaws makes.')
+  approveForm(box, pub, String(got.name || 'a browser').slice(0, 60), 'code')
+}
+
+// What a browser with no key is shown, as it comes in and under Account: how it gets the key. Drawn into `box`, and
+// again by `redraw`.
+async function drawKeyless(box, redraw) {
+  if (app.recovery) return fill(box, recoveryShown())
+  fill(box, h('p', { class: 'muted' }, 'Reading…'))
+  const kept = await devicesKept()
+  const note = h('p', { class: 'form-note', 'data-part': 'key-note' })
+  const failed = (why) => ((note.textContent = sentence(why)), (note.className = 'form-note error'))
+  if (kept === null) return fill(box, h('p', { class: 'form-note error' }, 'The server could not be reached. '), h('button', { type: 'button', class: 'ghost', onclick: redraw }, 'Try again'))
+  const was = app.offList
+    ? h('p', { class: 'guide-status', 'data-part': 'key-was' }, 'This browser was taken off your account’s devices, or its day as one of them is over, so it let go of your key.')
+    : app.newKey
+      ? h('p', { class: 'guide-status', 'data-part': 'key-was' }, 'Your account was started afresh with a new key since this browser was given one, so it let go of the one it had.')
+      : null
+  // No key yet: this is the account's first device
+  if (!kept) {
+    const make = h('button', { type: 'button', class: 'primary', 'data-part': 'key-make' }, 'Make your account’s key')
+    make.addEventListener('click', async () => {
+      make.disabled = true
+      note.textContent = 'Asking for a passkey…'
+      note.className = 'form-note'
+      await makeKey(box, failed, redraw)
+      make.disabled = false
+    })
+    return fill(
+      box,
+      was,
+      h('p', { 'data-part': 'key-first' }, 'What your sessions say is end-to-end encrypted, with a key of your account’s own: made here, now, and kept on your own devices, never on the server. This browser keeps it under a passkey (Face ID, Touch ID, your device’s PIN or a security key), and you approve each of your other devices from here, or from one you approved, with that passkey. You are given a recovery key to keep, for if you ever lose them all.'),
+      noPasskeys() ? h('p', { class: 'form-note error', 'data-part': 'key-no-passkeys' }, 'This browser has no passkeys. Make your key on your phone instead (sign in to ManyClaws there), then approve this browser from it.') : h('div', null, make),
+      note,
+    )
+  }
+  // The account has a key. Offered from another device the other way round (#/a/…): it is asked for there.
+  const offer = /^#\/a\/([A-Za-z0-9_-]{43})$/.exec(location.hash)
+  if (offer) {
+    history.replaceState(null, '', location.pathname)
+    const status = h('p', { 'data-part': 'key-offered' }, 'Asking the device that showed you the code…')
+    fill(box, was, status, note)
+    const pair = sealing.x25519Keys()
+    const why = await handTo(sealing.fromB64(offer[1]), { pub: sealing.toB64(pair.public), name: deviceLabel() })
+    if (why) return failed(`it could not be asked: ${why}`)
+    status.textContent = `Now approve ${deviceLabel()} on the device that showed you the code.`
+    const got = await handedTo(pair, { still: () => !app.key })
+    return got ? takeGiven(got, failed) : failed('it was not approved within ten minutes')
+  }
+  // Or from another device by this one's link or code
+  const w = (app.waiting = app.waiting && app.waiting.until > Date.now() + 30_000 ? app.waiting : { pair: sealing.x25519Keys(), until: Date.now() + WAIT_MS })
+  const link = linkOf('b', w.pair.public, deviceLabel())
+  const code = h('div', { class: 'key-code', 'data-part': 'approve-code' })
+  import('./qr.js')
+    .then((q) => {
+      const c = q.qrOf(link)
+      if (c) code.replaceChildren(qrPicture(c))
+    })
+    .catch(() => {})
+  if (!w.asking) {
+    w.asking = true
+    handedTo(w.pair, { until: w.until, still: () => !app.key && app.waiting === w }).then((got) => {
+      w.asking = false
+      if (got) return takeGiven(got)
+      if (app.waiting === w && !app.key) {
+        app.waiting = null
+        redraw()
+      }
+    })
+  }
+  // Or from the recovery key
+  const typed = h('input', { type: 'text', 'data-part': 'recovery-typed', placeholder: 'XXXX-XXXX-XXXX-…', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false' })
+  const use = h('button', { type: 'submit', class: 'primary', 'data-part': 'recovery-go' }, 'Use it')
+  const form = h('form', { class: 'guide-form recovery-form', 'data-part': 'recovery-form' }, typed, use)
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    use.disabled = true
+    note.textContent = 'Opening…'
+    note.className = 'form-note'
+    const why = await recoverWith(typed.value)
+    use.disabled = false
+    if (why) failed(why)
+  })
+  // Or, with neither, afresh
+  const afresh = h('button', { type: 'button', class: 'ghost', 'data-part': 'key-afresh', onclick: () => startAfresh(box, redraw) }, 'Start afresh with a new key')
+  fill(
+    box,
+    was,
+    h('p', { 'data-part': 'key-approve' }, 'Your account’s key is on your other devices. Open this link on one of them, or read the code with your phone’s camera, and approve this browser there.'),
+    code,
+    codeBox(link),
+    h('p', { class: 'muted', 'data-part': 'key-waiting' }, 'Waiting for it to be approved…'),
+    h('p', { class: 'muted' }, 'Or the other way round: on a device that has your key, open Account, Devices, Add a phone or browser, and read its code with this one.'),
+    h('details', { 'data-part': 'recovery-ask' }, h('summary', null, 'I have my recovery key'), form),
+    h('details', { 'data-part': 'afresh-ask' }, h('summary', null, 'I have neither'), h('p', null, 'Without a device that has your key or your recovery key, nobody can open what your sessions said before. You can start afresh with a new key, and connect your computers again.'), afresh),
+    note,
+  )
+}
+
+// The account given a new key, made here: what can no longer be opened goes, every other device and computer has to be
+// given the new one, and the new recovery key is shown in `box`. For an account whose every device and recovery key
+// are lost, or may be in someone else's hands.
+async function startAfresh(box, redraw) {
+  const yes = await ask('Start afresh with a new key?', {
+    says: [
+      'Your account is given a new key, made on this browser and kept under a passkey here, and a new recovery key. What is kept sealed on the server can no longer be opened, so it is removed: your stored sessions (your computers still have them), and the names of your favorites and what you put on your sessions, where this browser cannot read them to seal them again.',
+      'Every other phone and browser lets go of the key it had and has to be approved again, and every computer is disconnected (its API token is taken back): connect each again from the link its plugin shows.',
+    ],
+    yes: 'Start afresh',
+    danger: true,
+  })
+  if (!yes) return
+  const root = sealing.newRoot()
+  let locked = null
+  try {
+    locked = await passkeyFor(root)
+  } catch (err) {
+    root.fill(0)
+    return void tell('Not started afresh', refused(err) ? 'No passkey was made, so no key either: nothing was changed.' : sentence(err?.message || 'No passkey could be made.'))
+  }
+  if (!locked) {
+    root.fill(0)
+    return void tell('Not started afresh', 'This browser has no passkey that can keep your key. Do this on your phone, or on a browser that has one.')
+  }
+  const was = app.key
+  const { why, held } = await takeRoot(root, locked, { fresh: true })
+  if (why) {
+    root.fill(0)
+    return void tell('Not started afresh', `The list of your devices could not be written: ${why}. Nothing was changed.`)
+  }
+  await fetch('/api/sessions', { method: 'DELETE' }).catch(() => {})
+  // (what this browser sealed itself with the key it had, a favorite's name and what was put on a session, goes under the
+  // new one: the server keeps neither up with its session, having read none of it)
+  await renameFavorites(held, true, was)
+  await resealMarks(held, true, was)
+  // (every computer: its token taken back, so that its plugin asks to be connected again)
+  const tokens = await fetch('/api/account/tokens').then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  for (const t of tokens?.tokens ?? []) await fetch('/api/account/tokens/' + encodeURIComponent(t.id), { method: 'DELETE' }).catch(() => {})
+  showRecovery(box, root, redraw)
+}
+
+// Account, Encryption key: what this browser holds, and what it can do with it
+function keyPart(redraw) {
+  const box = h('div', { 'data-part': 'key-part' })
+  if (app.recovery) return [(fill(box, recoveryShown()), box)]
+  if (!app.key) {
+    drawKeyless(box, redraw)
+    return [box]
+  }
+  const k = app.key
+  const shown = h('div', { 'data-part': 'key-shown' })
+  const show = async () => {
+    let opened
+    try {
+      opened = await unlocked()
+    } catch (err) {
+      return void tell('Not shown', sentence(err.message))
+    }
+    vault.forget(opened.made)
+    fill(shown, recoveryNode(opened.root, { done: () => (opened.root.fill(0), fill(shown)) }))
+  }
+  fill(
+    box,
+    h(
+      'p',
+      { 'data-part': 'key-here', class: 'guide-status connected' },
+      k.root ? '✓ This browser has your account’s key, kept under a passkey of its own: it can approve your other devices. ' : k.own ? '✓ This browser has your key. It keeps it without a passkey, so it cannot approve your other devices or show your recovery key: do that on one that keeps it under one. ' : '✓ This browser has your key while this page is open: it is borrowed, and one of your devices for a day. ',
+      h('a', { href: '#/account/unopened', 'data-part': 'key-check' }, 'See what each of your devices opens'),
+    ),
+    unopened().any && h('p', { 'data-part': 'key-other', class: 'guide-status' }, 'Some of what is kept here for your account was sealed with another key than this browser’s, so it cannot be opened here. ', h('a', { href: '#/account/unopened', 'data-part': 'key-other-link' }, 'See which, and what to do')),
+    k.root && h('div', null, h('button', { type: 'button', class: 'ghost', 'data-part': 'key-show-recovery', onclick: show }, 'Show my recovery key')),
+    shown,
+    k.own && h('details', { 'data-part': 'afresh-ask' }, h('summary', null, 'Start afresh with a new key'), h('p', null, 'Only if every device that has your key and your recovery key are lost, or may be in someone else’s hands: what was sealed before can no longer be opened.'), h('button', { type: 'button', class: 'ghost', 'data-part': 'key-afresh', onclick: () => startAfresh(box, redraw) }, 'Start afresh')),
+  )
+  return [box]
 }
 
 // ---- The account's devices: its phones and browsers. Each signs what it asks of the
 // account's computers with a key of its own (keys.js), and a computer goes by it because
-// the list of the account's devices has it. The list is signed with the passphrase's own
-// signer, which a device has only while the passphrase is being typed there, and sealed:
-// the server keeps it as one more sealed thing, and the account's computers read it from
-// there. So a device is put on the list as the passphrase is typed into it, and is taken
-// off it from any other with the passphrase typed again: what it asks is refused from
-// then on, by every computer, and nothing else of the account's has to change.
+// the list of the account's devices has it. The list is signed with the root's signer,
+// which a device makes from the root only while it signs, with its passkey given for it,
+// and sealed: the server keeps it as one more sealed thing, and the account's computers
+// read it from there. So a device is put on the list as another approves it, and is taken
+// off it from any other that keeps the root: what it asks is refused from then on, by
+// every computer, and nothing else of the account's has to change.
 
 // The list as the server has it, sealed: '' where there is none, null where the server did not say
 // (read as it came, not opened on the way: it is handed back as it was, to say which list a new one replaces)
@@ -8809,7 +8918,7 @@ async function devicesKept() {
   }
 }
 
-// The list changed by `change` and signed again with the passphrase's signer, in place of
+// The list changed by `change` and signed again with the root's signer, in place of
 // the one the server has: '' when it is kept, or why it is not. Another device may change
 // it at the same moment: the server takes a list only in place of the one it was made
 // from, so it is made again from the newer one.
@@ -8840,67 +8949,73 @@ async function putDevices(held, signer, change, more = {}) {
   return 'the list of them kept changing as it was written'
 }
 
+// The list signed again here, changed by `change` (and `more`), with the root opened for it by this browser's passkey:
+// '' when it is kept, or why not
+async function signDevicesHere(change, more) {
+  let opened
+  try {
+    opened = await unlocked()
+  } catch (err) {
+    return err.message
+  }
+  const why = await putDevices(app.key, opened.made.signer, change, more)
+  vault.forget({ ...opened.made, root: opened.root })
+  return why
+}
+
 // A device is one of the account's while the list has it. One the list no longer has
 // (taken off it from another device, or on it for a day that is over) lets go of what it
 // holds: every computer refuses what it asks anyway, and its key is not left where it is
-// no longer wanted. (A list this browser cannot read says nothing of it: that one was
-// signed with another passphrase, and what is said of that is said under Account. Nor
-// does a list older than the one this browser put itself on: anyone signed in, or the
-// server, could hand that one over again, and it was written before this device was one.)
+// no longer wanted. So does one whose key does not open the list at all: the account was
+// started afresh with a new key on another device, and this one's opens nothing new. (A
+// list older than the one this browser was put on says nothing of it: anyone signed in,
+// or the server, could hand that one over again, and it was written before this device
+// was one.)
 async function seeToDevice() {
   const held = app.key
   const id = app.account?.user.id
   // (not while this page is itself writing the list: it is on its way onto it, or off it, and says so itself)
   if (!id || !held || app.listing) return
   const kept = await devicesKept()
-  const list = kept ? await vault.readDevices(kept, held) : null
-  if (!list || list.v < (held.since ?? 0) || sealing.deviceIn(list, held.device.key) || app.key !== held) return
+  if (!kept || app.key !== held || app.listing) return
+  const list = await vault.readDevices(kept, held)
+  if (list && (list.v < (held.since ?? 0) || sealing.deviceIn(list, held.device.key))) return
   await vault.dropKey(id)
-  app.offList = true
+  if (list) app.offList = true
+  else app.newKey = true
   startOver()
 }
 
-// The account's devices, on its page: each phone and browser its passphrase was typed
-// into, since when, and the way to take one off. Taking one off is signing the list again
-// without it, which takes the passphrase: so it is asked for, and what is typed is held
-// against what this browser was given before anything is sent. The device taken off is
-// signed out too, by the name its sign-in has on the server, which the list keeps sealed
-// with it: so it reads no more of the account either.
+// The account's devices, on its page: each phone and browser that was approved, since
+// when, the way to add another from here, and the way to take one off. Taking one off is
+// signing the list again without it, which takes the root: so this browser's passkey is
+// asked for. The device taken off is signed out too, where the list says by what name its
+// sign-in has on the server (kept sealed with it): so it reads no more of the account
+// either.
 function devicesPart(redraw) {
   const u = app.account.user
-  const says = h('p', null, 'The phones and browsers that have been given your passphrase. Each asks things of your computers with a key of its own, which never leaves it, and your computers do what one of these asks and nobody else: not the server, and not a device you have removed. A lost phone is removed here, from any other device, and your passphrase stays as it is.')
-  if (!app.key) return [says, h('p', { class: 'muted', 'data-part': 'devices-locked' }, 'They are listed here once this browser has your passphrase.')]
+  const says = h('p', null, 'The phones and browsers that have your key. Each asks things of your computers with a key of its own, which never leaves it, and your computers do what one of these asks and nobody else: not the server, and not a device you have removed. A lost phone is removed here, from any other device that keeps your key under a passkey, and your key stays as it is.')
+  if (!app.key) return [says, h('p', { class: 'muted', 'data-part': 'devices-locked' }, 'They are listed here once this browser has your key.')]
+  // (another added from here: a code it reads, the other way round from the link a device with no key shows)
+  const adding = h('div', { 'data-part': 'device-adding' })
+  const add = app.key.root && h('div', null, h('button', { type: 'button', class: 'ghost', 'data-part': 'device-add', onclick: () => offerKey(adding) }, 'Add a phone or browser'))
   const box = h('div', { 'data-part': 'devices' }, h('p', { class: 'muted' }, 'Reading…'))
   const day = (ts) => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
   const hour = (ts) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   const remove = async (d, here) => {
     const name = d.name || 'this device'
-    const typed = await ask(here ? 'Remove this device from your devices?' : `Remove ${name} from your devices?`, {
+    const yes = await ask(here ? 'Remove this device from your devices?' : `Remove ${name} from your devices?`, {
       says: [
-        here ? 'This browser lets go of your key, and what it asks of your computers is refused from then on. To use it again, type your passphrase here.' : `What ${name} asks of your computers is refused from then on, and it is signed out. Your computers and your other devices are not touched.`,
-        !here && 'Your encryption key stays as it is. If that device may be in someone else’s hands, change your passphrase afterwards as well (Account, Change passphrase): that makes a new key, which a device that kept the old one cannot read with.',
-        'Type your passphrase: the list of your devices is signed with it, and no device keeps what signs.',
+        here ? 'This browser lets go of your key, and what it asks of your computers is refused from then on. To use it again, approve it again from another of your devices.' : `What ${name} asks of your computers is refused from then on, and it is signed out. Your computers and your other devices are not touched.`,
+        !here && 'Your encryption key stays as it is. If that device may be in someone else’s hands, start afresh with a new key afterwards as well (Account, Encryption key): a device that kept the old one cannot read with that.',
+        'Your passkey is asked for: the list of your devices is signed with your key.',
       ],
-      text: '',
-      type: 'password',
       yes: 'Remove',
       danger: true,
     })
-    if (!typed) return
-    let made = null
-    try {
-      made = await vault.keysOf(typed, u.id)
-    } catch {
-      return void tell('Not removed', 'Your key could not be made in this browser.')
-    }
-    // (what was typed makes the checker this browser was given, or it is not the passphrase)
-    if (!made.checker.every((b, i) => b === app.key.checker[i])) {
-      vault.forget(made)
-      return void tell('Not removed', 'That is not the passphrase this browser was given.')
-    }
+    if (!yes) return
     app.listing = here
-    const why = await putDevices(app.key, made.signer, (devices) => devices.filter((x) => x.key !== d.key))
-    vault.forget(made)
+    const why = await signDevicesHere((devices) => devices.filter((x) => x.key !== d.key))
     if (why) return void ((app.listing = false), tell('Not removed', sentence(why)))
     if (here) {
       await vault.dropKey(u.id)
@@ -8915,7 +9030,7 @@ function devicesPart(redraw) {
     const kept = await devicesKept()
     if (kept === null) return fill(box, h('p', { class: 'form-note error' }, 'The server could not be reached.'))
     const list = kept ? await vault.readDevices(kept, app.key) : null
-    if (!list) return fill(box, h('p', { class: 'muted', 'data-part': 'devices-none' }, kept ? 'The list kept here was signed with another passphrase than the one this browser was given, so it cannot be read here.' : 'No phone or browser is on the list yet: type your passphrase into this one again (Change passphrase, below) to put it there.'))
+    if (!list) return fill(box, h('p', { class: 'muted', 'data-part': 'devices-none' }, kept ? 'The list kept here does not open with this browser’s key.' : 'No phone or browser is on the list yet.'))
     const now = Date.now()
     fill(
       box,
@@ -8927,41 +9042,28 @@ function devicesPart(redraw) {
             'div',
             { class: 'person', 'data-device': d.key, 'data-here': here ? 'yes' : 'no' },
             h('div', null, h('b', null, d.name || 'A device'), here ? ' (this one)' : '', h('div', { class: 'muted', 'data-part': 'device-starts' }, d.until ? 'cannot start sessions on your computers' : d.start === false ? 'starting sessions on your computers is turned off' : 'may start sessions on your computers'), h('div', { class: 'muted' }, [`since ${day(d.at)}`, d.until ? `not its owner’s own: one of them until ${hour(d.until)}` : ''].filter(Boolean).join(' · '))),
-            // (one that is its owner's own may start sessions on the account's computers unless that is turned off, with the passphrase)
-            d.until ? null : h('button', { type: 'button', class: 'ghost', 'data-part': 'device-start', onclick: () => startsOrNot(d) }, d.start === false ? 'Let it start sessions' : 'Stop it starting sessions'),
-            h('button', { type: 'button', class: 'ghost', 'data-part': 'device-remove', onclick: () => remove(d, here) }, 'Remove'),
+            // (one that is its owner's own may start sessions on the account's computers unless that is turned off, with the passkey)
+            !app.key.root || d.until ? null : h('button', { type: 'button', class: 'ghost', 'data-part': 'device-start', onclick: () => startsOrNot(d) }, d.start === false ? 'Let it start sessions' : 'Stop it starting sessions'),
+            (app.key.root || here) && h('button', { type: 'button', class: 'ghost', 'data-part': 'device-remove', onclick: () => remove(d, here) }, 'Remove'),
           )
         }),
     )
   }
-  // Whether a device may start sessions on the account's computers: signed into the list with the passphrase
+  // Whether a device may start sessions on the account's computers: signed into the list with the root
   const startsOrNot = async (d) => {
     const name = d.name || 'this device'
     const on = d.start === false
-    const typed = await ask(on ? `Let ${name} start sessions on your computers?` : `Stop ${name} starting sessions on your computers?`, {
-      says: [on ? `${name} can then start a new session on any of your computers that allows it, and pick up one that has ended.` : `${name} can still read your sessions, reply to the ones that are running, and answer what they ask. It cannot start a new one, or pick up one that has ended.`, 'Type your passphrase: the list of your devices is signed with it.'],
-      text: '',
-      type: 'password',
+    const yes = await ask(on ? `Let ${name} start sessions on your computers?` : `Stop ${name} starting sessions on your computers?`, {
+      says: [on ? `${name} can then start a new session on any of your computers that allows it, and pick up one that has ended.` : `${name} can still read your sessions, reply to the ones that are running, and answer what they ask. It cannot start a new one, or pick up one that has ended.`, 'Your passkey is asked for: the list of your devices is signed with your key.'],
       yes: on ? 'Let it' : 'Stop it',
     })
-    if (!typed) return
-    let made = null
-    try {
-      made = await vault.keysOf(typed, u.id)
-    } catch {
-      return void tell('Not changed', 'Your key could not be made in this browser.')
-    }
-    if (!made.checker.every((b, i) => b === app.key.checker[i])) {
-      vault.forget(made)
-      return void tell('Not changed', 'That is not the passphrase this browser was given.')
-    }
-    const why = await putDevices(app.key, made.signer, (devices) => devices.map((x) => (x.key !== d.key ? x : on ? (({ start: _, ...rest }) => rest)(x) : { ...x, start: false })))
-    vault.forget(made)
+    if (!yes) return
+    const why = await signDevicesHere((devices) => devices.map((x) => (x.key !== d.key ? x : on ? (({ start: _, ...rest }) => rest)(x) : { ...x, start: false })))
     if (why) return void tell('Not changed', sentence(why))
     draw()
   }
   draw()
-  return [says, box]
+  return [says, box, add, adding]
 }
 
 // ---- The code this page is running. It is published (github.com/redimaker/manyclaws,
@@ -9011,7 +9113,7 @@ function codePart() {
           ? h('p', { class: 'guide-status connected', 'data-part': 'code-says', 'data-same': 'yes' }, `✓ The ${read.length} files this page is made of are as release ${list.release} lists them (${list.made}).`)
           : onTheWay
             ? h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'html-changed' }, `The page’s HTML reached this browser changed: it is not the file release ${list.release} lists, though the server hands that file to a plain request. Something between the server and this browser adds to pages on their way, as a proxy’s own analytics script is added. This page lets no script from elsewhere run, and every script and style sheet it did run is as listed. It should not be so all the same: whoever runs this server can turn it off there.`)
-            : h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'no' }, `Some of this page’s files are not as release ${list.release} lists them. That is so for a few moments while the server is being brought up to date: load the page again. If it stays so, do not type your passphrase here, and check from outside the page, as below.`),
+            : h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'no' }, `Some of this page’s files are not as release ${list.release} lists them. That is so for a few moments while the server is being brought up to date: load the page again. If it stays so, do not approve anything here, and check from outside the page, as below.`),
       ...read.map((f) =>
         h(
           'div',
@@ -9040,7 +9142,7 @@ function codePart() {
 function keptPart(redraw) {
   const a = app.account
   const days = a.retainDays ?? 14
-  // (where only sealed sessions are taken, a computer sends nothing until it has the passphrase: with none chosen, none does)
+  // (where only sealed sessions are taken, a computer sends nothing until it has the key: with none made, none does)
   const again = 'as they connect'
   const note = h('span', { class: 'form-note', 'data-part': 'kept-note' }, app.keptCleared ?? '')
   const clear = h(
@@ -9052,8 +9154,6 @@ function keptPart(redraw) {
       onclick: async () => {
         if (!(await ask('Clear everything the server keeps of your sessions?', { says: 'A session that is running sends its chat again in a moment. One that is not running is gone from this page until it next runs. Nothing on your computers is touched.', yes: 'Clear', danger: true }))) return
         clear.disabled = true
-        // (the account's own small session goes with the rest, and is none of what is counted)
-        const first = app.first
         const r = await fetch('/api/sessions', { method: 'DELETE' }).catch(() => null)
         const out = await r?.json().catch(() => null)
         clear.disabled = false
@@ -9062,9 +9162,7 @@ function keptPart(redraw) {
           note.className = 'form-note error'
           return
         }
-        const gone = Math.max(0, out.sessions - (first ? 1 : 0))
-        // (the passphrase is as it was: a browser that has its key keeps the small session here again)
-        if (first?.topic === FIRST_SAYS && app.key) await keepFirst(app.key, false)
+        const gone = Math.max(0, out.sessions)
         app.keptCleared = gone ? `Cleared: ${gone} session${gone === 1 ? '' : 's'}. Your computers send them again ${again}.` : 'There was nothing to clear.'
         await loadAccount()
         redraw()
@@ -9077,71 +9175,44 @@ function keptPart(redraw) {
       'p',
       { 'data-part': 'kept-says' },
       `What your sessions say is kept here for ${days} days after a session is last heard from, so you can read a session while its computer is asleep or restarting, and sooner than the computer could send it. `,
-      'It is kept encrypted: only your own devices can open it, with your passphrase. ',
+      'It is kept encrypted: only your own devices can open it, with your account’s key. ',
       `You can clear all of it whenever you like. Your computers send their sessions again ${again}.`,
     ),
     h('div', null, clear, ' ', note),
   ]
 }
 
-// What a device is set up with is two things of the account's, and how it is done is
-// the same for everyone: so this is an API token, made here and shown once, the line to
-// paste into Claude Code on the computer, which sets it up from the guide, and the way to
-// the guide for doing it by hand (the server's /setup, which has nothing of anyone's in it).
+// How a computer is set up is the same for everyone: the line to paste into Claude Code
+// on it, which installs the plugin from the guide (the server's /setup, which has nothing
+// of anyone's in it), and then the link the plugin shows there, opened here and approved
+// with this browser's passkey. Nothing of the account's is typed into Claude Code. This
+// browser has to have the key, under a passkey, to approve it: where it has not, that is
+// what the page shows first.
 function renderSetup() {
   const a = app.account
   if (!a) return
   const guide = a.server + '/setup'
-  const note = h('span', { class: 'form-note error' })
-  const make = h(
-    'button',
-    {
-      type: 'button',
-      class: 'primary',
-      'data-part': 'token-create',
-      onclick: async () => {
-        make.disabled = true
-        // (good until it is taken back, under Account, where one can be made that runs out)
-        const r = await sendJson('/api/account/tokens', { days: 0 })
-        make.disabled = false
-        if (!r.ok) return (note.textContent = r.error)
-        app.madeToken = r.data
-        await loadAccount()
-        renderSetup()
-      },
-    },
-    app.madeToken ? 'Create another' : 'Create an API token',
-  )
-  const made = app.madeToken && (a.tokens ?? []).some((t) => t.id === app.madeToken.id) ? app.madeToken : null
   const body = el('setup-body')
   const at = body.scrollTop
   fill(
     body,
-    accountHead('Set up a computer', 'Connect a computer', 'Each computer you run Claude Code on is given two things of yours: an API token, and your encryption passphrase.'),
+    accountHead('Set up a computer', 'Connect a computer', 'Each computer you run Claude Code on is connected from a link its ManyClaws plugin shows there: you open it here and approve it with your passkey. Nothing of yours is typed into Claude Code.'),
     h('div', { id: 'setup-status' }, connectedLine()),
+    // (this browser approves it, with the key under its passkey: where it has none, how it gets it, first)
+    !app.key?.root &&
+      accountPart(
+        'Your key, on this browser',
+        { id: 'setup-key' },
+        ...(app.key ? [h('p', { 'data-part': 'setup-key' }, 'This browser has your key, but not under a passkey, so it cannot approve a computer. Open the computer’s link on one of your devices that keeps it under one.')] : keyPart(renderSetup)),
+      ),
     accountPart(
-      'Your API token',
-      { id: 'setup-token' },
-      h('p', null, 'A device signs in with an API token. It is shown once, as it is made.'),
-      made && h('div', { class: 'token-made', 'data-part': 'token-made' }, h('p', null, h('b', null, 'Your API token.'), ' Copy it now, or leave this open until the device has it: it is not shown again.'), codeBox(made.token)),
-      h('div', null, make, ' ', note),
-      h('p', { class: 'muted' }, 'The tokens you have made are under ', h('a', { href: '#/account' }, 'Account'), ', where any of them can be taken back.'),
-    ),
-    // The passphrase: asked for here where this browser has not been given one, since the device is about to
-    // ask for the same one; where it has, only said
-    accountPart(
-      'Encryption passphrase',
-      { id: 'setup-passphrase' },
-      ...(app.key ? [h('p', { 'data-part': 'setup-passphrase' }, 'The device also asks for your encryption passphrase: the same one this browser was given. It can be changed under ', h('a', { href: '#/account' }, 'Account'), '.')] : passphrasePart(renderSetup)),
-    ),
-    accountPart(
-      'Set up a device',
+      'Set up a computer',
       { id: 'setup-device' },
-      // (the short way first: one line pasted into Claude Code there, which has neither of the two things in it)
+      // (the short way first: one line pasted into Claude Code there, which has nothing of the account's in it)
       h('p', { 'data-part': 'setup-say' }, 'On the computer, start Claude Code and paste this:'),
       codeBox(`Read ${guide}.md and set this computer up.`),
-      // (what the person does there themselves, said where the two things are got: the rest is Claude Code's, by the guide)
-      h('p', { 'data-part': 'setup-where' }, 'Claude Code installs everything from the guide. The one step that is yours there: in Claude Code, type ', h('code', null, '/plugin'), ', press the gear beside manyclaws, and fill in ', h('b', null, 'API token'), ' and ', h('b', null, 'Encryption passphrase'), ' with these two. Then start a new Claude Code session.'),
+      // (what the person does themselves: the rest is Claude Code's, by the guide)
+      h('p', { 'data-part': 'setup-where' }, 'Claude Code installs the plugin from the guide. Then start a new Claude Code session there: it shows a link, and a code for your phone’s camera. Open it here, or on your phone, and approve the computer.'),
       // (and the guide itself, for whoever would rather do each step)
       h('p', null, h('a', { href: guide, target: '_blank', rel: 'noopener', id: 'setup-guide' }, 'Or set it up by hand')),
     ),
@@ -9209,8 +9280,7 @@ function renderAccount() {
   const a = app.account
   if (!a) return
   const u = a.user
-  // (its sessions, as it thinks of them: the small one the page keeps for itself is not one)
-  const sessions = Math.max(0, a.sessions - (app.first ? 1 : 0))
+  const sessions = Math.max(0, a.sessions)
   el('account-sub').textContent = accountSays(u)
   const form = (fields, button, send) => accountForm(fields, button, send, renderAccount)
   // The password is set or changed on a page of its own (renderPassword): here is whether
@@ -9224,10 +9294,10 @@ function renderAccount() {
     ),
     app.passwordSaid && h('p', { class: 'guide-status connected', 'data-part': 'password-said' }, app.passwordSaid),
   ]
-  // Signing out of this device: its key stays or goes by whose device it was said to be, as the passphrase was typed
+  // Signing out of this device: its key stays or goes by whose device it was said to be, as it was approved
   const signOutPart = () => [
     h('p', null, 'This signs out this device only: your computers go on reporting, and your other devices stay signed in. Alerts stop here until you sign in again.'),
-    app.key && h('p', { class: 'muted', 'data-part': 'logout-key' }, app.key.own ? 'Your key stays on this device, as you said it is yours, and opens your sessions as soon as you sign in here again. To take it off, remove this device under Devices.' : 'Your key goes from this device as you sign out, as you said it is not yours: your passphrase is typed again the next time.'),
+    app.key && h('p', { class: 'muted', 'data-part': 'logout-key' }, app.key.own ? 'Your key stays on this device, as you said it is yours, and opens your sessions as soon as you sign in here again. To take it off, remove this device under Devices.' : 'Your key goes from this device as you sign out, as it is borrowed: it is approved again the next time.'),
     h('div', { class: 'guide-end' }, h('button', { type: 'button', id: 'account-logout', class: 'ghost', onclick: () => signOut() }, 'Sign out')),
   ]
   fill(
@@ -9245,12 +9315,12 @@ function renderAccount() {
     accountPart(
       'API tokens',
       { id: 'api-tokens' },
-      h('p', { class: 'muted' }, 'What your devices sign in with: each is given one as it is set up. A token only reports sessions here; it cannot sign in to this page. Each can be taken back on its own.'),
+      h('p', { class: 'muted' }, 'What your computers sign in with: each is given one of its own as it is connected, named for it. A token only reports sessions here; it cannot sign in to this page. Take one back to disconnect its computer.'),
       // (a token is made to set a device up with: the way to how that is done, the server's own guide, from where tokens are made)
       h('p', null, h('a', { href: a.server + '/setup', target: '_blank', rel: 'noopener', 'data-part': 'tokens-guide' }, 'How to set up a device')),
       ...tokensPart(renderAccount),
     ),
-    accountPart('Encryption passphrase', { id: 'passphrase' }, ...passphrasePart(renderAccount)),
+    accountPart('Encryption key', { id: 'key' }, ...keyPart(renderAccount)),
     accountPart('Devices', { id: 'devices' }, ...devicesPart(renderAccount)),
     accountPart('This page’s code', { id: 'page-code' }, ...codePart()),
     a.agentToken && accountPart('This server', { id: 'server-token' }, secretRow('Server token', a.agentToken, 'This server’s own agent token, from its environment file. It works in the plugin as an API token does, and is changed there.')),
@@ -9258,12 +9328,6 @@ function renderAccount() {
     u.admin && accountPart('People', { id: 'admin' }, h('p', { class: 'muted' }, 'Reading…')),
   )
   if (u.admin) renderAdmin()
-  // (come here to type the passphrase, from the page that says this browser has another: its box, in sight and in hand)
-  if (app.toPassphrase) {
-    app.toPassphrase = false
-    el('passphrase').scrollIntoView({ block: 'start' })
-    el('passphrase').querySelector('[data-part=passphrase-new]')?.focus({ preventScroll: true })
-  }
 }
 
 // The one-time upgrade, on a page of its own: which of the account's computers it is for,
@@ -9334,18 +9398,9 @@ function renderPassword() {
   const send = async (v) => {
     const K = await keys()
     if (v.password.length < K.MIN_PASSWORD) return 'The password needs at least 8 characters.'
-    // (not the passphrase: where this browser has the account's key, what was typed is made into a key as a passphrase
-    // is, here, and that is held against the one it has. Nothing of it is sent.)
-    if (app.key) {
-      const as = await K.keysOf(v.password, u.id).catch(() => null)
-      const same = !!as && as.checker.every((b, i) => b === app.key.checker[i])
-      K.forget(as)
-      if (same) return 'That is your encryption passphrase. Choose a different password: the server keeps what signs you in, stretched far more cheaply than your passphrase is, so whoever had the server’s data could guess a passphrase that is also your password'
-    }
     const current = u.hasPassword && a.kdf ? await K.signInKey(v.currentPassword, a.kdf) : undefined
     const made = await K.newPassword(v.password)
     const why = await accountPut('/api/account', 'PUT', { password: made.auth, currentPassword: current, kdf: made.kdf })
-    if (!why) await K.keepMark(u.id, await K.passwordMark(made.auth)).catch(() => {})
     return /current password is not right/.test(why) ? 'The current password is not right.' : why
   }
   // (that it is done is said on the account's page)
@@ -9377,11 +9432,11 @@ function renderPassword() {
 }
 
 // ---- What does not open here: a page of its own, which the line across the top leads
-// to. It says which device has another passphrase than the rest, as far as this browser
-// can tell (unopened), and what to do on that device: here, where it is this browser; in
-// the plugin's own options, where it is a computer. Nothing on it is typed or pressed to
-// find out: it is drawn again as what it says changes (lookAgain), so a computer that
-// has been seen to is seen to open.
+// to. It says which device seals with another key than this browser's (unopened), which
+// is the account's (a browser whose key does not open the list of the account's devices
+// lets go of it), and what to do on that device: connect it again, from its link. Nothing
+// on it is typed or pressed to find out: it is drawn again as what it says changes
+// (lookAgain), so a computer that has been seen to is seen to open.
 function renderUnopened() {
   const a = app.account
   if (!a) return
@@ -9391,34 +9446,16 @@ function renderUnopened() {
   const count = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`
   const body = el('account-body')
   const at = body.querySelector('[data-part=unopened]') ? body.scrollTop : 0
-  // (with no small session to tell by, this browser's passphrase is taken for the account's where it opens anything a computer sent)
-  const opensSome = u.devices.some((d) => d.opens || (d.m.card && !d.card)) || [...app.sessions.values()].some((s) => s.card && !isLocked(s.card))
-  const mine = u.here === 'same' || (u.here === 'unknown' && opensSome)
-  // To where the passphrase is typed on this browser: the account's page, its box open and in hand
-  const typeIt = (says) =>
-    h(
-      'button',
-      {
-        type: 'button',
-        class: 'primary',
-        'data-part': 'unopened-type',
-        onclick: () => {
-          app.passphraseChanging = app.toPassphrase = true
-          location.hash = '#/account'
-        },
-      },
-      says,
-    )
-  // What is done on a computer that has another passphrase: in the plugin's own options there, and nowhere else
+  // What is done on a computer that has another key: it is connected again, from its link
   const steps = (where) =>
     h(
       'ol',
       { class: 'shut-steps', 'data-part': 'unopened-steps' },
-      h('li', null, 'On ', where, ', open the ManyClaws plugin’s options in Claude Code. In a terminal, type', codeBox('/plugin configure manyclaws@manyclaws'), 'In the VS Code extension, type /plugin and press the gear beside manyclaws.'),
-      h('li', null, 'In ', h('b', null, 'Encryption passphrase'), ', type the passphrase this browser was given. Nothing can show it to you: this browser keeps the key it made from it and not the passphrase, and the server has nothing of either.'),
-      h('li', null, 'Start a new Claude Code session there. It seals with the new key, and the computer’s agent takes the same key from the plugin within half a minute. A session that was already running goes on with the key it started with, until it is started again.'),
+      h('li', null, 'On ', where, ', in Claude Code, type', codeBox('/manyclaws disconnect')),
+      h('li', null, 'Start a new Claude Code session there. It shows a link, and a code for your phone’s camera.'),
+      h('li', null, 'Open the link here, or on your phone, and approve the computer. Its sessions seal with your key from then on, and its agent takes the same key from the plugin within half a minute. A session that was already running goes on with the key it started with, until it is started again.'),
     )
-  // Sessions kept from before, which nobody who has this passphrase can open: taken off the server, when asked
+  // Sessions kept from before, which nobody who has this key can open: taken off the server, when asked
   const removal = (list) => {
     const note = h('span', { class: 'form-note error' })
     const button = h(
@@ -9428,7 +9465,7 @@ function renderUnopened() {
         class: 'ghost',
         'data-part': 'unopened-remove',
         onclick: async () => {
-          if (!(await ask(`Remove ${count(list.length, 'session')} that cannot be opened?`, { says: ['What the server keeps of them is removed. Nobody who has this passphrase could read it.', 'Nothing on your computers is touched: a session that is still on its computer shows here again when it next runs.'], yes: 'Remove', danger: true }))) return
+          if (!(await ask(`Remove ${count(list.length, 'session')} that cannot be opened?`, { says: ['What the server keeps of them is removed. Nobody who has your key could read it.', 'Nothing on your computers is touched: a session that is still on its computer shows here again when it next runs.'], yes: 'Remove', danger: true }))) return
           button.disabled = true
           let kept = 0
           for (const s of list) if (!(await fetch('/api/sessions/' + encodeURIComponent(s.id), { method: 'DELETE' }).catch(() => null))?.ok) kept++
@@ -9442,7 +9479,7 @@ function renderUnopened() {
   }
   const leftSays = (list, lead) => {
     const one = list.length === 1
-    return [h('p', { 'data-part': 'unopened-left' }, lead, `${count(list.length, 'session')} ${one ? 'is' : 'are'} kept here from before, sealed with another passphrase: nobody who has this one can open ${one ? 'it' : 'them'}. ${one ? 'It goes by itself' : 'They go by themselves'} ${days} days after ${one ? 'it' : 'each'} was last heard from, or now:`), removal(list)]
+    return [h('p', { 'data-part': 'unopened-left' }, lead, `${count(list.length, 'session')} ${one ? 'is' : 'are'} kept here from before, sealed with another key: nobody who has your key can open ${one ? 'it' : 'them'}. ${one ? 'It goes by itself' : 'They go by themselves'} ${days} days after ${one ? 'it' : 'each'} was last heard from, or now:`), removal(list)]
   }
   // One of the account's computers: what it is called, whether it is connected, how it stands, and what to do on it
   const device = (d) => {
@@ -9454,20 +9491,20 @@ function renderUnopened() {
     const one = d.running.length === 1
     const says = {
       other: () => [
-        h('p', { 'data-part': 'unopened-says' }, h('b', null, `${name} has a different passphrase from this browser.`), ` What its agent says of it does not open here${also}`),
+        h('p', { 'data-part': 'unopened-says' }, h('b', null, `${name} has another key than this browser’s.`), ` What its agent says of it does not open here${also}`),
         h('p', null, h('b', null, 'What to do there:')),
         steps(h('b', null, name)),
-        h('p', { class: 'muted' }, 'Nothing more is done here: its sessions open by themselves as it reports with the new key, and this page says so.'),
+        h('p', { class: 'muted' }, 'Nothing more is done here: its sessions open by themselves as it reports with your key, and this page says so.'),
         ...(d.left.length ? leftSays(d.left, 'Of its sessions, ') : []),
       ],
       was: () => [
-        h('p', { 'data-part': 'unopened-says' }, h('b', null, `${name} had a different passphrase from this browser when it was last heard from.`), ` What its agent said of it does not open here${also}`),
-        h('p', null, h('b', null, 'What to do there, '), 'when it is next on, if it has not been given this browser’s passphrase since:'),
+        h('p', { 'data-part': 'unopened-says' }, h('b', null, `${name} had another key than this browser’s when it was last heard from.`), ` What its agent said of it does not open here${also}`),
+        h('p', null, h('b', null, 'What to do there, '), 'when it is next on, if it has not been connected again since:'),
         steps(h('b', null, name)),
         ...(d.left.length ? leftSays(d.left, 'Of its sessions, ') : []),
       ],
       running: () => [
-        h('p', { 'data-part': 'unopened-says' }, h('b', null, `${name} has this browser’s passphrase now`), `: what its agent says of it opens. ${count(d.running.length, 'session')} still running on it ${one ? 'was' : 'were'} started before it was given it, and ${one ? 'goes' : 'go'} on sealing with the other one.`),
+        h('p', { 'data-part': 'unopened-says' }, h('b', null, `${name} has your key now`), `: what its agent says of it opens. ${count(d.running.length, 'session')} still running on it ${one ? 'was' : 'were'} started before it was given it, and ${one ? 'goes' : 'go'} on sealing with the other one.`),
         h('p', null, h('b', null, 'What to do there: '), `start ${one ? 'that session' : 'each of those sessions'} again (close it, and resume it or start a new one). Nothing is typed: a session takes the key the plugin has as it starts.`),
         ...(d.left.length ? leftSays(d.left, 'And ') : []),
       ],
@@ -9480,27 +9517,12 @@ function renderUnopened() {
   const devices = [...u.devices].sort((x, y) => order.indexOf(deviceStands(x)) - order.indexOf(deviceStands(y)))
   const closed = u.unplaced.length + u.devices.reduce((n, d) => n + d.running.length + d.left.length, 0)
 
-  // This browser: whether it is the one, by the account's own small session
+  // This browser: it has the account's key, or none
   const here = !app.key
-    ? [h('p', { 'data-part': 'unopened-here' }, 'This browser has not been given your passphrase, so nothing that is sealed opens here. ', h('a', { href: '#/account' }, 'Type it in'))]
-    : u.here === 'other'
-      ? [
-          h('p', { 'data-part': 'unopened-here', class: 'guide-status' }, h('b', null, 'It is this browser.'), ' The passphrase it was given does not open the small session your account keeps here for telling, so it is not the one your account has now: your passphrase was set again on another of your devices, or this browser was given a different one.'),
-          h('p', null, h('b', null, 'What to do here: '), 'type your account’s passphrase into this browser. Your sessions open again at once, and nothing is cleared.'),
-          h('div', null, typeIt('Type your account’s passphrase')),
-          h('p', { class: 'muted' }, 'If the passphrase this browser has is the one you want your account to have, type it there all the same: the page asks whether to reset your account to it, and says how that goes.'),
-          closed + u.devices.filter((d) => d.card).length > 0 && h('p', { class: 'muted', 'data-part': 'unopened-rest' }, 'Nothing your computers sent opens here until then. Nothing is wrong on them.'),
-        ]
-      : !u.any
-        ? [h('p', { 'data-part': 'unopened-here', class: 'guide-status connected' }, '✓ Everything kept here for your account opens with this browser’s key. Nothing needs doing.')]
-        : mine
-          ? [h('p', { 'data-part': 'unopened-here', class: 'guide-status connected' }, u.here === 'same' ? '✓ It is not this browser. It opens the small session your account keeps here for telling, so the passphrase it was given is your account’s.' : '✓ This browser opens what your computers sent, apart from what is listed here.')]
-          : [
-              h('p', { 'data-part': 'unopened-here', class: 'guide-status' }, 'Nothing here says which passphrase is your account’s: this browser’s key opens nothing your computers have sent, and no small session is kept here for telling. Either this browser was given another passphrase than your computers, or they another than it.'),
-              h('p', null, h('b', null, 'If your computers have the right one: '), 'type it into this browser.'),
-              h('div', null, typeIt('Type the passphrase here')),
-              h('p', null, h('b', null, 'If this browser has the right one: '), 'give it to each computer, as below.'),
-            ]
+    ? [h('p', { 'data-part': 'unopened-here' }, 'This browser does not have your key, so nothing that is sealed opens here. ', h('a', { href: '#/account' }, 'Get it'))]
+    : !u.any
+      ? [h('p', { 'data-part': 'unopened-here', class: 'guide-status connected' }, '✓ Everything kept here for your account opens with your key. Nothing needs doing.')]
+      : [h('p', { 'data-part': 'unopened-here', class: 'guide-status connected' }, '✓ This browser has your account’s key, and opens what your devices sent with it, apart from what is listed here.')]
 
   // The sessions that do not open and that no computer here says are its own
   const lost = () => {
@@ -9519,19 +9541,19 @@ function renderUnopened() {
   const kept = () => {
     const what = [u.favorites && `${u.favorites === 1 ? 'the name' : 'the names'} of ${count(u.favorites, 'favorite')}`, u.marks && `what you put on ${count(u.marks, 'session')} (a name, a label, a reminder)`].filter(Boolean).join(', and ')
     return [
-      h('p', { 'data-part': 'unopened-kept' }, `Of what you keep here yourself, ${what} was sealed on a browser or a phone with another passphrase than this one, or on this one before it was given the one it has.`),
-      h('p', null, h('b', null, 'What to do there: '), 'on that browser or phone, open Account, choose Change passphrase, and type the passphrase this browser was given. It seals again what it can read with the right key. A favorite is also named again here by itself when its session next reports.'),
+      h('p', { 'data-part': 'unopened-kept' }, `Of what you keep here yourself, ${what} was sealed with another key than your account’s, before it was started afresh.`),
+      h('p', null, 'Nobody can read it now. A favorite is named again here by itself when its session next reports; what you put on a session can be put on it again.'),
     ]
   }
-  const shown = app.key && u.here !== 'other'
+  const shown = !!app.key
   const parts = [
-    accountPart('This browser', { id: 'unopened-here', 'data-part': 'unopened', 'data-here': u.here, 'data-any': u.any ? 'yes' : 'no' }, ...here),
+    accountPart('This browser', { id: 'unopened-here', 'data-part': 'unopened', 'data-any': u.any ? 'yes' : 'no' }, ...here),
     shown && devices.length > 0 && accountPart('Your computers', { id: 'unopened-computers' }, ...devices.map(device)),
     shown && u.unplaced.length > 0 && accountPart('Sessions no computer says are its own', { id: 'unopened-unplaced' }, ...lost()),
     shown && u.favorites + u.marks > 0 && accountPart('Kept by a browser or a phone', { id: 'unopened-kept' }, ...kept()),
   ].filter(Boolean)
   parts.at(-1).querySelector('.acct-body').append(h('p', null, h('a', { href: '#/account', 'data-part': 'unopened-back' }, 'Back to your account')))
-  fill(body, accountHead('Your account', 'What does not open here', 'Nothing of your passphrase is on the server, so only your own devices can tell whether they were all given the same one: by what opens. This is what this browser finds, as it stands now.'), ...parts)
+  fill(body, accountHead('Your account', 'What does not open here', 'Nothing of your key is on the server, so only your own devices can tell whether each has the same one: by what opens. This is what this browser finds, as it stands now.'), ...parts)
   body.scrollTop = at
 }
 
