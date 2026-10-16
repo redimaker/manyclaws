@@ -1138,15 +1138,32 @@ async function askConnect($) {
   const got = openFrom(c.secret, sealed)
   const keys = keysFromText(got?.key)
   if (!got || typeof got.token !== 'string' || !got.token || !keys) return void $.ui.log('ManyClaws: what came back to connect this computer did not open with the key its link was made with, so nothing of it was taken. /manyclaws connect makes another link.')
-  // (kept where a person typing them would have them kept: the key written out in the passphrase's place)
+  // (kept where a person typing them would have them kept: the key written out in the passphrase's place. Only where
+  // this plugin is the one Claude Code installed: one loaded from a folder of its own, a checkout's, keeps them for this
+  // session alone, and leaves the installed plugin's as they are)
+  const installed = await installedHere($)
   let kept = false
   try {
     const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
-    kept = (await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ token: got.token, key: got.key }), timeoutMs: 60_000 })).exitCode === 0
+    if (installed) kept = (await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ token: got.token, key: got.key }), timeoutMs: 60_000 })).exitCode === 0
   } catch {}
   const account = typeof got.account === 'string' && got.account ? `the account of ${got.account}` : 'your ManyClaws account'
-  $.ui.log(`ManyClaws: connected to ${account}. This session is on your page.${kept ? '' : ' (Claude Code would not keep the two among the plugin\'s options here, so the next session asks again.)'} Not your account? Type /manyclaws disconnect.`)
+  const unkept = !installed ? ' (This plugin was loaded from a folder of its own, not installed by Claude Code, so the two are kept for this session only.)' : kept ? '' : ' (Claude Code would not keep the two among the plugin\'s options here, so the next session asks again.)'
+  $.ui.log(`ManyClaws: connected to ${account}. This session is on your page.${unkept} Not your account? Type /manyclaws disconnect.`)
   if (!config) await begin($, c.e, { url: c.url, token: got.token, passphrase: got.key, label: '', capabilities: 'default' }, keys)
+}
+// Whether this plugin is a copy Claude Code installed from the marketplace (manyclaws@manyclaws), by its folder: the only
+// one whose options `claude plugin configure` changes. One loaded from elsewhere (--plugin-dir) is not, and changes none.
+async function installedHere($) {
+  const root = ownRoot($).replace(/[\\/]+$/, '')
+  if (!root) return false
+  try {
+    const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || ((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '') + '/.claude'
+    const copies = JSON.parse(await $.fs.read(configDir + '/plugins/installed_plugins.json')).plugins?.[PLUGIN] ?? []
+    return copies.some((one) => typeof one?.installPath === 'string' && one.installPath.replace(/[\\/]+$/, '') === root)
+  } catch {
+    return false
+  }
 }
 // /manyclaws: connect (another link), disconnect (no token from here on: Claude Code cannot clear an option, so `none`
 // is kept in its place)
@@ -1157,6 +1174,7 @@ async function manyclawsCommand($, e) {
     return { text: (await offerConnect($, { isInteractive: true }, { asked: true })) ?? '' }
   }
   if (what === 'disconnect') {
+    if (!(await installedHere($))) return { text: 'This plugin was loaded from a folder of its own, not installed by Claude Code: its token is the one it was started with, and there is nothing of the installed plugin\'s to change from here.' }
     const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
     const r = await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ token: NO_TOKEN, key: NO_TOKEN }), timeoutMs: 60_000 }).catch((err) => ({ exitCode: 1, stderr: String(err?.message ?? err) }))
     if (r.exitCode !== 0) return { text: 'Claude Code would not change the plugin\'s options: ' + lastLine(r) }
@@ -1203,6 +1221,8 @@ async function pluginFolder($, dir) {
   return { release: released?.release ?? null, plugin: released?.plugin ?? null, digest, signed: !!released, as: !!released && digest === pluginDigest(pluginOfList(released)) }
 }
 // Said on the card, once the session is under way; and the agent beside it told where this plugin was loaded from
+// (only an agent of this plugin's own server, as for its token: one that is another server's is left nothing, and so
+// is one this plugin reports through)
 async function selfCheck($) {
   try {
     meta.release = await pluginFolder($, ownRoot($))
@@ -1210,7 +1230,7 @@ async function selfCheck($) {
   } catch {}
   try {
     const agent = await agentKeeps($)
-    if (agent && ownRoot($)) await $.fs.write(`${agent.home}/plugin-${hexSha256(ownRoot($)).slice(0, 16)}.json`, JSON.stringify({ root: ownRoot($), at: Date.now() }))
+    if (agent && ownRoot($) && config && (!agent.kept.server || sameServer(agent.kept.server, config.url))) await $.fs.write(`${agent.home}/plugin-${hexSha256(ownRoot($)).slice(0, 16)}.json`, JSON.stringify({ root: ownRoot($), at: Date.now() }))
   } catch {}
 }
 // Claude Code's own: { exitCode, stdout, stderr }

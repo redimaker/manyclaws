@@ -1,7 +1,7 @@
 // The hooks, with every Claude Code and network answer stubbed
 import { expect, mock, test } from 'claude-code/testing'
 import { PLUGIN_VERSION } from '../hooks/lib.js'
-import { keysText, toB64, fromB64, sha256, sha512, sign, verifyKey, contentKey, seal, open, isSealed, nameOf, makeOrder, makeDevices, readOrder, askedOf, sealedLength, gcmDecrypt, ORDER_MS, hexSha256, pluginDigest } from '../hooks/seal.js'
+import { keysText, toB64, fromB64, sha256, sha512, sign, verifyKey, contentKey, seal, open, isSealed, nameOf, makeOrder, makeDevices, readOrder, askedOf, sealedLength, gcmDecrypt, ORDER_MS, hexSha256, pluginDigest, sealTo } from '../hooks/seal.js'
 
 // Every session here is its account's, sealed with its key: there is no other kind (a
 // mod with no passphrase sends nothing and asks for nothing, which is the second test).
@@ -42,7 +42,7 @@ const polled = (sent: Sent[]) => sent.filter((s) => s.url.includes('/api/agent/p
 // The stubs a configured session.start needs, plus a scripted server.
 // `tools: false`: nothing answers tool.register, or the test answers it itself.
 // `run`: what answers any other command the mod runs (its argv and how it was run), where it answers anything
-function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, surfaces = ['terminal'], whose = 'u_test', whoseStatus = 200, whoseAway = false, derive = false, swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>) } = {}) {
+function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, surfaces = ['terminal'], whose = 'u_test', whoseStatus = 200, whoseAway = false, derive = false, swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>), connected = null as null | ((url: string) => string | null) } = {}) {
   const clock = mock.clock(on)
   // A mod given a passphrase has, as a rule here, made its key in a session before, and has it written out where the
   // passphrase was (the making is a quarter of a minute of arithmetic): `derive` is for the tests of the making
@@ -111,6 +111,9 @@ function setup(on: any, { run = null as null | ((argv: string[], init: any) => a
     }
     const body = e.init?.body ? JSON.parse(e.init.body) : null
     sent.push({ url: e.url, body })
+    // (what the page sealed to a computer being connected, where a test has it there: `connected`)
+    const sealed = e.url.includes('/api/connect/') ? connected?.(e.url) : null
+    if (sealed) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ sealed }) } }
     if (e.url.includes('/api/agent/poll')) {
       // (an answer to a poll, or what gives one once it has waited as long as it means to)
       let next = polls.shift()
@@ -168,6 +171,41 @@ test('without a token the mod sends nothing of the session: it offers the link t
   await clock.advance(30_000)
   expect(sent.length).toBe(asked)
   expect(said.some((l) => l.includes('the link to connect this computer has run out'))).toBe(true)
+})
+
+// Connected by its link: the page's answer, sealed to the key after the #, as the server hands it over
+async function connectedBy($: any, on: any, { installed }: { installed: boolean }) {
+  const m = await made()
+  // (the plugin's own folder: the one these tests are in, which is where it is loaded from here)
+  const root = decodeURIComponent(new URL('..', import.meta.url).pathname).replace(/\/+$/, '')
+  const list = { version: 2, plugins: { 'manyclaws@manyclaws': [{ scope: 'user', installPath: installed ? root : '/home/me/.claude/plugins/cache/manyclaws/manyclaws/6.0.0', version: '6.0.0' }] } }
+  folders(on, { own: released(9).files, files: { '/home/me/.claude/plugins/installed_plugins.json': JSON.stringify(list) } })
+  let link = ''
+  const s = setup(on, {
+    env: { MANYCLAWS_URL: 'https://mc.test', HOME: '/home/me' },
+    connected: () => (link ? sealTo(fromB64(/#\/connect\/([A-Za-z0-9_-]{43})\//.exec(link)![1]), { token: 'mct_made-for-this-computer', key: keysText(m.keys), account: 'me@example.test' }) : null),
+  })
+  await start($)
+  await s.clock.advance(1000)
+  link = String(s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l)).find((l) => String(l).includes('/app#/connect/')))
+  await until(s.clock, () => s.said.some((l) => l.includes('connected to the account of me@example.test')))
+  return s
+}
+
+test('connected by its link, the plugin Claude Code installed keeps the token and the key among its own options, as typed ones are kept', async ($, on) => {
+  const { said, configured } = await connectedBy($, on, { installed: true })
+  expect(configured.map((c) => c.argv.slice(1))).toEqual([['plugin', 'configure', 'manyclaws@manyclaws', '--values-stdin']])
+  expect(JSON.parse(configured[0].stdin).token).toBe('mct_made-for-this-computer')
+  expect(said.some((l) => l.includes('for this session only'))).toBe(false)
+})
+
+test("one loaded from a folder of its own (a checkout's, a test's) changes nothing of the installed plugin's: it keeps the two for its session, and says so; nor does it disconnect the installed one", async ($, on) => {
+  const { said, configured } = await connectedBy($, on, { installed: false })
+  expect(configured).toEqual([])
+  expect(said.some((l) => l.includes('connected to the account of me@example.test. This session is on your page. (This plugin was loaded from a folder of its own, not installed by Claude Code, so the two are kept for this session only.)'))).toBe(true)
+  const r = await $.command.run({ command: 'manyclaws', args: 'disconnect' })
+  expect(String(r?.text)).toMatch(/^This plugin was loaded from a folder of its own/)
+  expect(configured).toEqual([])
 })
 
 test('with a token and no passphrase the mod sends nothing and asks for nothing, whatever happens in the session: it says once that it needs the passphrase, and where to give it', async ($, on) => {
