@@ -2,7 +2,7 @@
 // load them directly. register.js holds everything that touches `$`.
 
 export const PROTOCOL = 2
-export const PLUGIN_VERSION = '5.1.1'
+export const PLUGIN_VERSION = '6.0.0'
 
 // Where the mod reports. ManyClaws has one server, so the plugin has no option for its
 // address and its dialog asks for none: MANYCLAWS_URL names another (a test's, or one
@@ -53,12 +53,15 @@ export const METHOD_CAPABILITY = {
   'settings.read': 'config',
   'mcp.call': 'mcp',
   'mcp.connect': 'mcp',
+  // (this computer's plugin and agent kept up to date: on an order from a device that may start sessions)
+  'manyclaws.update': 'upkeep',
+  'manyclaws.agent': 'upkeep',
 }
 
 // Capabilities on unless the machine's config says otherwise. "approve" lets permission
 // prompts and questions be asked on the page; the rest are listed above.
-export const DEFAULT_CAPABILITIES = ['core', 'inspect', 'chat', 'notify', 'message', 'approve']
-export const ALL_CAPABILITIES = ['core', 'inspect', 'chat', 'notify', 'message', 'approve', 'tools', 'files', 'write', 'exec', 'model', 'config', 'mcp']
+export const DEFAULT_CAPABILITIES = ['core', 'inspect', 'chat', 'notify', 'message', 'approve', 'upkeep']
+export const ALL_CAPABILITIES = ['core', 'inspect', 'chat', 'notify', 'message', 'approve', 'upkeep', 'tools', 'files', 'write', 'exec', 'model', 'config', 'mcp']
 
 // "default", "all", or a list such as "default,+files,-message" or "inspect,chat"
 export function parseCapabilities(spec) {

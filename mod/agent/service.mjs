@@ -20,7 +20,7 @@ import { historyRows } from './rows.mjs'
 import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, FILE_MAX } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '5.2.0'
+export const VERSION = '6.0.0'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
@@ -220,14 +220,13 @@ export async function run(config, flags = {}) {
 
   // ---- The plugin on this machine, held against the release it carries. The agent was installed from a signed
   // release and kept the keys it was checked by (agent/release-signers): by those, each copy of the ManyClaws plugin
-  // Claude Code installed here, and each folder a session's plugin said it was loaded from (it leaves a note under
-  // plugins/), is the release its list says, or not; either way its digest says what it is. That is said to the
+  // Claude Code installed here, and each folder a session's plugin said it was loaded from (it leaves a note here,
+  // plugin-<…>.json), is the release its list says, or not; either way its digest says what it is. That is said to the
   // account's own devices, sealed, and a session the agent starts loads a plugin that is a release, or one the
   // account's owner allowed on this computer by its digest with the passphrase (the list of devices). An agent that
   // was not installed from a release (run from a checkout) has no keys to go by, and says so.
   const signersFile = path.join(ownHome, 'agent', 'release-signers')
   const checks = () => fs.existsSync(signersFile)
-  const notesDir = path.join(ownHome, 'plugins')
   const NOTE_MS = 7 * 86400_000
   const pluginDirs = () => {
     const out = []
@@ -239,10 +238,10 @@ export async function run(config, flags = {}) {
     for (const root of config.roots) for (const one of installedPlugins(root)) add(one.dir, 'installed')
     let names = []
     try {
-      names = fs.readdirSync(notesDir).filter((n) => n.endsWith('.json'))
+      names = fs.readdirSync(ownHome).filter((n) => /^plugin-[0-9a-f]{16}\.json$/.test(n))
     } catch {}
     for (const name of names) {
-      const file = path.join(notesDir, name)
+      const file = path.join(ownHome, name)
       try {
         const note = JSON.parse(fs.readFileSync(file, 'utf8'))
         if (Date.now() - (Number(note.at) || 0) > NOTE_MS || typeof note.root !== 'string' || !fs.existsSync(note.root)) fs.rmSync(file, { force: true })

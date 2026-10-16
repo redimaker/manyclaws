@@ -55,7 +55,7 @@ import {
   isAttended,
   randomId,
 } from './lib.js'
-import { seal, open, isSealed, openBytes, keysFromText, keysText, contentKey, nameOf, toB64, fromB64, sha256, keysFromPassphrase, isOrder, readOrder, takeOrder, orderMemory, devicesMemory, askedOf, OrderRefused } from './seal.js'
+import { seal, open, isSealed, openBytes, keysFromText, keysText, contentKey, nameOf, toB64, fromB64, sha256, keysFromPassphrase, isOrder, readOrder, takeOrder, orderMemory, devicesMemory, askedOf, OrderRefused, sshSigned, pluginDigest, pluginOfList, notPlugin, hexSha256, mayStart } from './seal.js'
 import { messageRows, resultRow, historyRows, summarizeInput } from './rows.js'
 
 const FLUSH_MS = 250 // how often what is in the queue is sent
@@ -475,6 +475,7 @@ async function begin($, e, given, keys) {
   }
   // None of these hold up the first prompt
   void describe($)
+  $.clock.after(SELF_CHECK_MS, () => void selfCheck($))
   // The history goes once the first poll is back: under the server's ask if it has one
   // (see sendHistory), unasked if not. If no poll comes back, unasked all the same.
   historyOwed = true
@@ -1077,6 +1078,95 @@ async function tellAgent($) {
   } catch {}
 }
 
+// ---- What this plugin is, and keeping it and the agent beside it up to date
+//
+// A release lists every file with its SHA-256 (release.json), signed with a key kept neither in the public repository
+// nor on any server (release.json.sig), and every copy of the plugin carries the list it was released by. Claude Code
+// checks no signature: so the plugin holds its own folder against its list itself, by the keys its installer names
+// (SIGNERS, in agent/install.sh), and says on the session's card what it is: the release, and one digest of its files
+// (seal.js, pluginDigest). That is its own word, which a plugin that had been changed could say anything of: the
+// agent beside it, installed from a signed release and checking with the keys it has, is what looks from outside, and
+// it is told where this plugin was loaded from (a note in its folder). Where there is no agent, the plugin brings
+// itself up to date on an order (manyclaws.update), and holds what Claude Code fetched to its list before any session
+// loads it; and it sets the agent up from its own folder, where the agent is carried (manyclaws.agent).
+const SELF_CHECK_MS = 10_000
+const NOT_TO_START = "keeping this computer's ManyClaws plugin and agent up to date is asked for only from one of your own devices that may start sessions, and this was asked from one that may not (Account, Devices)"
+// The plugin's own folder: what Claude Code says it is
+const ownRoot = ($) => $.plugin.root ?? ''
+// A plugin's folder held against the list it carries: { release, plugin, digest, signed, as }
+async function pluginFolder($, dir) {
+  const files = {}
+  const walk = async (at) => {
+    for (const e of await $.fs.list(at ? dir + '/' + at : dir)) {
+      const rel = at ? at + '/' + e.name : e.name
+      if (notPlugin(rel)) continue
+      if (e.kind === 'dir') await walk(rel)
+      else if (e.kind === 'file') files[rel] = hexSha256(fromB64((await $.fs.read(dir + '/' + rel, { as: 'bytes' })).base64))
+    }
+  }
+  await walk('')
+  const digest = pluginDigest(files)
+  const text = (file) => Promise.resolve($.fs.read(file)).catch(() => null)
+  const [list, sig, installer] = await Promise.all([text(dir + '/release.json'), text(dir + '/release.json.sig'), text(ownRoot($) + '/agent/install.sh')])
+  const signers = /^SIGNERS='(.*)'$/m.exec(installer ?? '')?.[1] ?? ''
+  let released = null
+  try {
+    released = list && signers && sshSigned(list, sig ?? '', signers) ? JSON.parse(list) : null
+  } catch {}
+  return { release: released?.release ?? null, plugin: released?.plugin ?? null, digest, signed: !!released, as: !!released && digest === pluginDigest(pluginOfList(released)) }
+}
+// Said on the card, once the session is under way; and the agent beside it told where this plugin was loaded from
+async function selfCheck($) {
+  try {
+    meta.release = await pluginFolder($, ownRoot($))
+    cardChanged(true)
+  } catch {}
+  try {
+    const agent = await agentKeeps($)
+    if (agent && ownRoot($)) await $.fs.write(`${agent.home}/plugin-${hexSha256(ownRoot($)).slice(0, 16)}.json`, JSON.stringify({ root: ownRoot($), at: Date.now() }))
+  } catch {}
+}
+// Claude Code's own: { exitCode, stdout, stderr }
+async function claudeRun($, args, timeoutMs) {
+  const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
+  return $.process.run([claude, ...args], { timeoutMs })
+}
+const lastLine = (r) => String(r?.stderr || r?.stdout || '').trim().split('\n').pop()?.slice(0, 400) ?? ''
+// The plugin brought up to date: Claude Code fetches it, and what it fetched is held against the list it carries, by
+// this plugin's keys, before any session loads it. This session goes on with the plugin it loaded; each one started
+// from now on loads the new one. What was found is said on the card (`next`), and answered.
+async function updatePlugin($) {
+  for (const args of [['plugin', 'marketplace', 'update', 'manyclaws'], ['plugin', 'update', 'manyclaws@manyclaws']]) {
+    const r = await claudeRun($, args, 180_000)
+    if (r.exitCode !== 0) throw new Error(`claude ${args.join(' ')} did not do it: ${lastLine(r)}`)
+  }
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || ((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '') + '/.claude'
+  let dir = null
+  try {
+    dir = JSON.parse(await $.fs.read(configDir + '/plugins/installed_plugins.json')).plugins?.['manyclaws@manyclaws']?.find((one) => one?.installPath)?.installPath ?? null
+  } catch {}
+  if (!dir) throw new Error('Claude Code has no ManyClaws plugin installed on this computer to update')
+  const found = await pluginFolder($, dir)
+  meta.next = { ...found, at: Date.now() }
+  cardChanged(true)
+  return found
+}
+// The agent set up on this computer, from the plugin's own folder, where it is carried with the list it was released
+// by: its installer checks every file of it against that list, and its signature, before anything is installed. The
+// folders sessions may be started in are the ones a person has used Claude Code in, within the installer's limits. It
+// asks for nothing: it takes the token and the key from this plugin, which leaves them for it.
+async function installAgent($, args) {
+  if (!/^(Darwin|Linux)\b/.test(meta.platform ?? '')) throw new Error('the ManyClaws agent runs on macOS and Linux, and this computer is neither')
+  if (!attended) throw new Error('this session is one a program runs: the agent is set up from a session started on the computer itself, in a terminal, an editor or the desktop app')
+  const root = ownRoot($)
+  const r = await $.process.run(['bash', root + '/agent/install.sh', '--from', root, ...(args?.autoFolders === false ? [] : ['--auto-folders'])], { timeoutMs: 300_000 })
+  if (r.exitCode !== 0) throw new Error('the agent was not set up: ' + lastLine(r))
+  // (and given the token and the key now, not in half a minute)
+  agentLookedAt = 0
+  await tellAgent($)
+  return { said: String(r.stdout ?? '').trim().split('\n').slice(-8) }
+}
+
 // One line in the transcript the first time something goes wrong, not on every retry
 function warn($, text) {
   if (hasWarned) return
@@ -1214,7 +1304,7 @@ function asked(command) {
       throw unsigned_(err.message)
     }
     if (taken.do === 'prompt') return { method: 'prompt.submit', args: { text: String(taken.with.text ?? ''), force: taken.with.force === true ? true : undefined } }
-    return { method: String(taken.with.method ?? ''), args: taken.with.args && typeof taken.with.args === 'object' ? taken.with.args : {} }
+    return { method: String(taken.with.method ?? ''), args: taken.with.args && typeof taken.with.args === 'object' ? taken.with.args : {}, by: taken.by }
   }
   if (isSealed(command.c)) {
     const what = open(command.c, sealKey, null)
@@ -1239,10 +1329,14 @@ async function execute($, command) {
   let method
   let args = {}
   try {
-    ;({ method, args } = asked(command))
+    let by
+    ;({ method, args, by } = asked(command))
     const capability = METHOD_CAPABILITY[method]
     if (!capability) throw new Error('unknown method ' + method)
     if (!caps.has(capability)) throw new Error(`${method} needs the "${capability}" capability, which this machine's ManyClaws config doesn't grant`)
+    // (what keeps this computer up to date, the plugin and the agent, is asked for only by one of the owner's own devices
+    // that may start sessions: the agent is what starts them)
+    if (capability === 'upkeep' && !mayStart(devices.list?.devices?.find((d) => d.key === by))) throw new Error(NOT_TO_START)
     const value = await call($, method, args)
     await emit($, 'result', { id, ok: true, value: cap(value, MAX_RESULT) })
   } catch (err) {
@@ -1258,6 +1352,10 @@ async function execute($, command) {
 
 async function call($, method, args) {
   switch (method) {
+    case 'manyclaws.update':
+      return updatePlugin($)
+    case 'manyclaws.agent':
+      return installAgent($, args)
     case 'ping':
       return { pong: true, instance, protocol: PROTOCOL, plugin: PLUGIN_VERSION, at: Date.now() }
     case 'session.info':

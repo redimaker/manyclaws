@@ -4,8 +4,8 @@ import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, parseSl
 import { summarizeInput } from '../hooks/rows.js'
 
 test('capabilities: default, all, additions and exact lists', async () => {
-  expect([...parseCapabilities('')].sort()).toEqual(['approve', 'chat', 'core', 'inspect', 'message', 'notify'])
-  expect([...parseCapabilities('default')].sort()).toEqual(['approve', 'chat', 'core', 'inspect', 'message', 'notify'])
+  expect([...parseCapabilities('')].sort()).toEqual(['approve', 'chat', 'core', 'inspect', 'message', 'notify', 'upkeep'])
+  expect([...parseCapabilities('default')].sort()).toEqual(['approve', 'chat', 'core', 'inspect', 'message', 'notify', 'upkeep'])
   expect(parseCapabilities('all').has('exec')).toBe(true)
   const plus = parseCapabilities('+files,+exec,-message')
   expect(plus.has('files')).toBe(true)

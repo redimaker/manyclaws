@@ -1,7 +1,7 @@
 // The hooks, with every Claude Code and network answer stubbed
 import { expect, mock, test } from 'claude-code/testing'
 import { PLUGIN_VERSION } from '../hooks/lib.js'
-import { keysText, toB64, fromB64, sha256, verifyKey, contentKey, seal, open, isSealed, nameOf, makeOrder, makeDevices, readOrder, askedOf, sealedLength, gcmDecrypt, ORDER_MS } from '../hooks/seal.js'
+import { keysText, toB64, fromB64, sha256, sha512, sign, verifyKey, contentKey, seal, open, isSealed, nameOf, makeOrder, makeDevices, readOrder, askedOf, sealedLength, gcmDecrypt, ORDER_MS, hexSha256, pluginDigest } from '../hooks/seal.js'
 
 // Every session here is its account's, sealed with its key: there is no other kind (a
 // mod with no passphrase sends nothing and asks for nothing, which is the second test).
@@ -41,7 +41,8 @@ const polled = (sent: Sent[]) => sent.filter((s) => s.url.includes('/api/agent/p
 
 // The stubs a configured session.start needs, plus a scripted server.
 // `tools: false`: nothing answers tool.register, or the test answers it itself.
-function setup(on: any, { env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, surfaces = ['terminal'], whose = 'u_test', whoseStatus = 200, whoseAway = false, derive = false, swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>) } = {}) {
+// `run`: what answers any other command the mod runs (its argv and how it was run), where it answers anything
+function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, surfaces = ['terminal'], whose = 'u_test', whoseStatus = 200, whoseAway = false, derive = false, swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>) } = {}) {
   const clock = mock.clock(on)
   // A mod given a passphrase has, as a rule here, made its key in a session before, and has it written out where the
   // passphrase was (the making is a quarter of a minute of arithmetic): `derive` is for the tests of the making
@@ -83,6 +84,8 @@ function setup(on: any, { env = ENV as Record<string, string>, poll = [] as any[
       configured.push({ argv: e.argv, stdin: e.init?.stdin })
       return { value: swaps ? { exitCode: 0, stdout: '', stderr: '' } : { exitCode: 1, stdout: '', stderr: 'Plugin "manyclaws@manyclaws" is not installed' } }
     }
+    const answered = run?.(e.argv, e.init)
+    if (answered) return { value: answered }
     return { value: { exitCode: 1, stdout: '', stderr: '' } }
   })
   on('ui.log', ($: any, e: any) => {
@@ -1639,4 +1642,195 @@ test('a tool of its own that could not be put before Claude is said in the sessi
   expect(new Set(got.rows.map((r) => r.id)).size).toBe(2)
   for (const e of got.all) expect(TYPES).toContain(e.type)
   expect(JSON.stringify(got.all)).not.toMatch(/notify_user|could not add/)
+})
+
+// ---- What the plugin is, and keeping it and the agent beside it up to date
+
+// A release's list signed as ssh-keygen -Y sign signs one, by a key of the test's own that the plugin's own installer
+// names (SIGNERS, in agent/install.sh)
+const enc = new TextEncoder()
+const sshString = (b: Uint8Array) => {
+  const out = new Uint8Array(4 + b.length)
+  new DataView(out.buffer).setUint32(0, b.length)
+  out.set(b, 4)
+  return out
+}
+const joined = (...parts: Uint8Array[]) => {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+  let at = 0
+  for (const p of parts) (out.set(p, at), (at += p.length))
+  return out
+}
+const std64 = (b: Uint8Array) => {
+  const s = toB64(b).replace(/-/g, '+').replace(/_/g, '/')
+  return s + '='.repeat((4 - (s.length % 4)) % 4)
+}
+const RELEASE_KEY = random()
+const ED = enc.encode('ssh-ed25519')
+const signersOf = (seed: Uint8Array) => `manyclaws namespaces="manyclaws-release" ssh-ed25519 ${std64(joined(sshString(ED), sshString(verifyKey(seed))))}`
+function sshSign(text: string, seed = RELEASE_KEY) {
+  const [ns, none, alg] = [enc.encode('manyclaws-release'), new Uint8Array(0), enc.encode('sha512')]
+  const signed = joined(enc.encode('SSHSIG'), sshString(ns), sshString(none), sshString(alg), sshString(sha512(enc.encode(text))))
+  const version = new Uint8Array([0, 0, 0, 1])
+  const blob = joined(enc.encode('SSHSIG'), version, sshString(joined(sshString(ED), sshString(verifyKey(seed)))), sshString(ns), sshString(none), sshString(alg), sshString(joined(sshString(ED), sshString(sign(signed, seed)))))
+  return `-----BEGIN SSH SIGNATURE-----\n${std64(blob)}\n-----END SSH SIGNATURE-----\n`
+}
+// A plugin's folder, released as `release` (its list, signed by `by`): { files, digest }; `changed` is a file of it
+// that is not what was signed
+function released(release: number, { by = RELEASE_KEY, changed = '' } = {}) {
+  const files: Record<string, string> = {
+    '.claude-plugin/plugin.json': JSON.stringify({ name: 'manyclaws', version: '6.0.' + release }),
+    'hooks/register.js': '// the plugin, release ' + release + '\n',
+    'agent/install.sh': `#!/usr/bin/env bash\nSIGNERS='${signersOf(RELEASE_KEY)}'\n`,
+  }
+  const hashes = Object.fromEntries(Object.entries(files).map(([rel, text]) => [rel, hexSha256(text)]))
+  const list = JSON.stringify({ release, plugin: '6.0.' + release, agent: '6.0.' + release, files: Object.fromEntries(Object.entries(hashes).map(([rel, h]) => ['mod/' + rel, h])) }, null, 2) + '\n'
+  if (changed) files[changed] += '// not what was signed\n'
+  return { files: { ...files, 'release.json': list, 'release.json.sig': sshSign(list, by), '.orphaned_at': '1' }, digest: pluginDigest(Object.fromEntries(Object.entries(files).map(([rel, text]) => [rel, hexSha256(text)]))) }
+}
+// The file system as the plugin finds it: its own folder (the first it lists, which is where Claude Code loaded it
+// from), other folders by where they are, and single files; and what it writes
+function folders(on: any, { own, at = {}, files = {} }: { own: Record<string, string>; at?: Record<string, Record<string, string>>; files?: Record<string, string> }) {
+  let root = ''
+  const where = (p: string): [Record<string, string>, string] | null => {
+    for (const [dir, tree] of Object.entries(at)) if (p === dir || p.startsWith(dir + '/')) return [tree, p.slice(dir.length + 1)]
+    // (a file of its own read before its folder is listed says where that folder is)
+    if (!root) for (const rel of Object.keys(own)) if (p.endsWith('/' + rel) && files[p] === undefined) root = p.slice(0, -(rel.length + 1))
+    if (root && (p === root || p.startsWith(root + '/'))) return [own, p.slice(root.length + 1)]
+    return null
+  }
+  const written: { path: string; text: string }[] = []
+  on('fs.list', ($: any, e: any) => {
+    if (!root && !where(e.path)) root = e.path
+    const [tree, rel] = where(e.path) ?? [{}, '']
+    const names = new Map<string, 'file' | 'dir'>()
+    for (const f of Object.keys(tree)) {
+      if (rel && !f.startsWith(rel + '/')) continue
+      const rest = rel ? f.slice(rel.length + 1) : f
+      const [first, ...more] = rest.split('/')
+      names.set(first, more.length ? 'dir' : 'file')
+    }
+    return { value: [...names].map(([name, kind]) => ({ name, kind, size: 0, mtimeMs: 0, isLink: false })) }
+  })
+  on('fs.read', ($: any, e: any) => {
+    const found = where(e.path)
+    const text = found ? found[0][found[1]] : files[e.path]
+    if (text === undefined) return { deny: 'ENOENT' }
+    const bytes = e.as === 'bytes' || e.options?.as === 'bytes' || e.init?.as === 'bytes'
+    return { value: bytes ? { base64: std64(enc.encode(text)) } : text }
+  })
+  on('fs.exists', ($: any, e: any) => ({ value: files[e.path] !== undefined || !!where(e.path) }))
+  on('fs.write', ($: any, e: any) => {
+    written.push({ path: e.path, text: e.text })
+    return { value: undefined }
+  })
+  return { written, root: () => root }
+}
+const DARWIN = (argv: string[]) => (argv[0] === 'uname' ? { exitCode: 0, stdout: 'Darwin arm64\n', stderr: '' } : null)
+const releaseOnCard = (events: any, m: Made) => (open(events().findLast((e: any) => e.type === 'card').card, contentKey(m.keys.key)) as any)
+
+test('on its card, what the plugin is: the release its list is, signed by a key its own installer names, and one digest of its files; and the agent beside it is told where it was loaded from', async ($, on) => {
+  const m = await made()
+  const r = released(9)
+  const fsNow = folders(on, { own: r.files, files: { '/home/me/.manyclaws/agent.json': JSON.stringify({ server: 'https://mc.test', id: 'm1' }) } })
+  const { clock, events } = setup(on, { env: AT_HOME })
+  await starting($, clock)
+  await clock.advance(12_000)
+  expect(releaseOnCard(events, m).release).toEqual({ release: 9, plugin: '6.0.9', digest: r.digest, signed: true, as: true })
+  // (what Claude Code keeps beside it of its own, .orphaned_at, is not the plugin's)
+  const note = fsNow.written.find((w) => /\/home\/me\/\.manyclaws\/plugin-[0-9a-f]{16}\.json$/.test(w.path))
+  expect(JSON.parse(note!.text).root).toBe(fsNow.root())
+})
+
+test('a plugin changed where it is says so of itself; one whose list is signed by a key its installer does not name is no release', async ($, on) => {
+  const m = await made()
+  const r = released(9, { changed: 'hooks/register.js' })
+  folders(on, { own: r.files })
+  const { clock, events } = setup(on, { env: AT_HOME })
+  await starting($, clock)
+  await clock.advance(12_000)
+  const said = releaseOnCard(events, m).release
+  expect([said.release, said.signed, said.as, said.digest]).toEqual([9, true, false, r.digest])
+})
+
+test('nor one signed by a key it does not know', async ($, on) => {
+  const m = await made()
+  folders(on, { own: released(9, { by: random() }).files })
+  const { clock, events } = setup(on, { env: AT_HOME })
+  await starting($, clock)
+  await clock.advance(12_000)
+  expect(releaseOnCard(events, m).release).toMatchObject({ release: null, signed: false, as: false })
+})
+
+// What Claude Code fetches when it is asked to update the plugin, and where it puts it
+const FETCHED = '/home/me/.claude/plugins/cache/manyclaws/manyclaws/6.0.10'
+const INSTALLED = { '/home/me/.claude/plugins/installed_plugins.json': JSON.stringify({ version: 2, plugins: { 'manyclaws@manyclaws': [{ scope: 'user', installPath: FETCHED, version: '6.0.10' }] } }) }
+const upkeep = (m: Made, method: string, args: any = {}, device = m.device) => ({ commands: [{ seq: 1, id: 'u1', order: order(m, 'call', { method, args }, { device }) }] })
+
+test('brought up to date on an order, where no agent does it: Claude Code fetches the plugin, and what it fetched is held to the list it carries before any session loads it, and said', async ($, on) => {
+  const m = await made()
+  const ran: string[][] = []
+  folders(on, { own: released(9).files, at: { [FETCHED]: released(10).files }, files: INSTALLED })
+  const s = session(on, m, { env: AT_HOME, poll: [upkeep(m, 'manyclaws.update')], run: (argv: string[]) => (ran.push(argv), DARWIN(argv) ?? (argv[1] === 'plugin' ? { exitCode: 0, stdout: '', stderr: '' } : null)) })
+  await starting($, s.clock)
+  await s.clock.advance(3000)
+  expect(ran.filter((a) => a[1] === 'plugin')).toEqual([
+    ['claude', 'plugin', 'marketplace', 'update', 'manyclaws'],
+    ['claude', 'plugin', 'update', 'manyclaws@manyclaws'],
+  ])
+  const done = s.results().find((r) => r.id === 'u1')
+  expect([done.ok, done.value.release, done.value.as]).toEqual([true, 10, true])
+  await s.clock.advance(12_000)
+  expect(releaseOnCard(s.events, m).next).toMatchObject({ release: 10, signed: true, as: true })
+})
+
+test('what Claude Code fetched that is not its release is said, and the update is not counted done', async ($, on) => {
+  const m = await made()
+  folders(on, { own: released(9).files, at: { [FETCHED]: released(10, { changed: 'hooks/register.js' }).files }, files: INSTALLED })
+  const s = session(on, m, { env: AT_HOME, poll: [upkeep(m, 'manyclaws.update')], run: (argv: string[]) => DARWIN(argv) ?? (argv[1] === 'plugin' ? { exitCode: 0, stdout: '', stderr: '' } : null) })
+  await starting($, s.clock)
+  await s.clock.advance(3000)
+  const done = s.results().find((r) => r.id === 'u1')
+  expect([done.ok, done.value.as, done.value.signed]).toEqual([true, false, true])
+  expect(releaseOnCard(s.events, m).next).toMatchObject({ release: 10, as: false })
+})
+
+test('the agent set up from the plugin\'s own folder, where it is carried: its installer, with the folders a person used, and given the token and key at once', async ($, on) => {
+  const m = await made()
+  const ran: string[][] = []
+  const fsNow = folders(on, { own: released(9).files })
+  const s = session(on, m, { env: AT_HOME, poll: [upkeep(m, 'manyclaws.agent')], run: (argv: string[]) => (ran.push(argv), DARWIN(argv) ?? (argv[0] === 'bash' ? { exitCode: 0, stdout: 'The ManyClaws agent is installed\n', stderr: '' } : null)) })
+  await starting($, s.clock)
+  await s.clock.advance(3000)
+  const root = fsNow.root() || ran.find((a) => a[0] === 'bash')?.[3]
+  expect(ran.find((a) => a[0] === 'bash')).toEqual(['bash', root + '/agent/install.sh', '--from', root, '--auto-folders'])
+  const done = s.results().find((r) => r.id === 'u1')
+  expect([done.ok, done.value.said]).toEqual([true, ['The ManyClaws agent is installed']])
+})
+
+test('neither is done for a device that may not start sessions, nor the agent set up from a session a program runs', async ($, on) => {
+  const m = await made()
+  const borrowed = newDevice()
+  const list = { v: 2, devices: [...m.list.devices, { key: borrowed.key, name: 'Borrowed', at: 1, until: Date.now() + 86_400_000 }] }
+  const ran: string[][] = []
+  folders(on, { own: released(9).files })
+  const s = session(on, m, {
+    env: AT_HOME,
+    devices: makeDevices(list, contentKey(m.key), m.signer),
+    poll: [{ commands: [{ seq: 1, id: 'u1', order: order(m, 'call', { method: 'manyclaws.update', args: {} }, { device: borrowed }) }, { seq: 2, id: 'u2', order: order(m, 'call', { method: 'manyclaws.agent', args: {} }, { device: borrowed }) }] }],
+    run: (argv: string[]) => (ran.push(argv), DARWIN(argv)),
+  })
+  await starting($, s.clock)
+  await s.clock.advance(3000)
+  for (const id of ['u1', 'u2']) expect(s.results().find((r) => r.id === id)).toMatchObject({ ok: false, error: expect.stringContaining('only from one of your own devices that may start sessions') })
+  expect(ran.filter((a) => a[0] === 'bash' || a[1] === 'plugin')).toEqual([])
+})
+
+test('nor from a session a program runs', async ($, on) => {
+  const m = await made()
+  folders(on, { own: released(9).files })
+  const s = session(on, m, { ...HEADLESS, env: { ...HEADLESS.env, HOME: '/home/me' }, poll: [...HEADLESS.poll, upkeep(m, 'manyclaws.agent')], run: DARWIN })
+  await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
+  await s.clock.advance(3000)
+  expect(s.results().find((r) => r.id === 'u1')).toMatchObject({ ok: false, error: expect.stringContaining('this session is one a program runs') })
 })

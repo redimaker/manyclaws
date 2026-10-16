@@ -1,6 +1,6 @@
 {
   "name": "manyclaws",
-  "version": "5.1.1",
+  "version": "6.0.0",
   "description": "Connects this session to a ManyClaws server: its chat, state and approvals on one web page for every machine and account, with replies from anywhere",
   "author": {
     "name": "Deon Brewis"
@@ -26,7 +26,7 @@
     "capabilities": {
       "type": "string",
       "title": "Capabilities (optional)",
-      "description": "What the server may do here: default, all, or changes such as +files,+exec. Default: inspect, chat, notify, message, approve"
+      "description": "What the server may do here: default, all, or changes such as +files,+exec. Default: inspect, chat, notify, message, approve, upkeep (keeping this computer's plugin and agent up to date, when one of your own devices asks)"
     }
   }
 }
