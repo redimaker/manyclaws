@@ -3,6 +3,7 @@
 // the sessions it's asked to, and carries the machine's mods' traffic to the server. It
 // runs with an API token and the account's key, and without both it only waits for them:
 // everything it sends is sealed with that key, and there is no other way for it to send.
+import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -11,7 +12,7 @@ import path from 'node:path'
 import { Store } from './store.mjs'
 import { Indexer } from './indexer.mjs'
 import { Transcript } from './transcript.mjs'
-import { Host, HostError, CARRY_MAX, expandHome } from './host.mjs'
+import { Host, HostError, CARRY_MAX, expandHome, findClaude, sessionEnv } from './host.mjs'
 import { Cswap } from './cswap.mjs'
 import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused, WIRE, mayStart, allowedOn, pluginDigest } from './seal.mjs'
 import { pluginRelease, pluginFiles, installedPlugins } from './verify.mjs'
@@ -281,6 +282,107 @@ export async function run(config, flags = {}) {
       return {}
     }
   }
+  // ---- An upgrade, on an order for it: the plugin as Claude Code fetches it, held against the release the order names
+  // before anything of it is gone by; then, where that release has other files for the agent, this agent's own, by the
+  // installer the release carries, in a job of its own: stopping the agent ends whatever the agent started, so what
+  // replaces it does not run under it. That is done once the agent runs no sessions, or at once where the order says
+  // so (it ends them: the page said how many). The installer puts the agent before it back where the new one does not
+  // start. What is waiting to be done is kept (upgrade.json), and said, sealed.
+  const upgradeFile = path.join(ownHome, 'upgrade.json')
+  let waitingUpgrade = null
+  try {
+    const w = JSON.parse(fs.readFileSync(upgradeFile, 'utf8'))
+    const mine = agentRelease()
+    if (w?.dir && fs.existsSync(path.join(w.dir, 'agent', 'install.sh')) && (!mine || w.release > mine.release)) waitingUpgrade = w
+    else fs.rmSync(upgradeFile, { force: true })
+  } catch {}
+  // Claude Code, asked something of its own (its plugin commands): { code, out }
+  const runClaude = (args, ms = 180_000) =>
+    new Promise((done) => {
+      const claude = config.claude || findClaude(host.shellEnv())
+      if (!claude) return done({ code: -1, out: 'claude was not found on this machine' })
+      const p = spawn(claude, args, { env: sessionEnv(host.shellEnv()), stdio: ['ignore', 'pipe', 'pipe'] })
+      let out = ''
+      p.stdout.on('data', (c) => (out += c))
+      p.stderr.on('data', (c) => (out += c))
+      const timer = setTimeout(() => p.kill(), ms)
+      p.on('error', (err) => (clearTimeout(timer), done({ code: -1, out: err.message })))
+      p.on('exit', (code) => (clearTimeout(timer), done({ code, out })))
+    })
+  const agentFilesOf = (list) => JSON.stringify(Object.entries(list?.files ?? {}).filter(([f]) => f.startsWith('mod/agent/')))
+  // A job of this user's own, apart from the agent's: launchd's on a Mac, systemd's elsewhere. (MANYCLAWS_JOB_RUNNER, a
+  // program that starts what it is given on its own: what the tests run in their place.)
+  const JOB = 'com.manyclaws.upgrade'
+  const startJob = async (argv) => {
+    const env = { MANYCLAWS_HOME: ownHome, HOME: os.homedir(), PATH: host.shellEnv().PATH ?? process.env.PATH ?? '/usr/bin:/bin', ...(process.env.MANYCLAWS_SIGNERS ? { MANYCLAWS_SIGNERS: process.env.MANYCLAWS_SIGNERS } : {}) }
+    if (process.env.MANYCLAWS_JOB_RUNNER) return void spawn(process.env.MANYCLAWS_JOB_RUNNER, argv, { detached: true, stdio: 'ignore', env: { ...process.env, ...env } }).unref()
+    if (process.platform === 'darwin') {
+      const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      const plist = path.join(ownHome, 'upgrade.plist')
+      const logFile = esc(path.join(ownHome, 'upgrade.log'))
+      fs.writeFileSync(
+        plist,
+        `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n  <key>Label</key><string>${JOB}</string>\n  <key>ProgramArguments</key><array>${argv.map((a) => `<string>${esc(a)}</string>`).join('')}</array>\n  <key>EnvironmentVariables</key><dict>${Object.entries(env).map(([k, v]) => `<key>${esc(k)}</key><string>${esc(v)}</string>`).join('')}</dict>\n  <key>RunAtLoad</key><true/>\n  <key>StandardOutPath</key><string>${logFile}</string>\n  <key>StandardErrorPath</key><string>${logFile}</string>\n</dict></plist>\n`,
+      )
+      const uid = process.getuid()
+      // (the one before it, done, is let go of first: launchd takes no second job by the same name)
+      spawnSync('launchctl', ['bootout', `gui/${uid}/${JOB}`], { stdio: 'ignore' })
+      for (let tries = 0; ; tries++) {
+        const r = spawnSync('launchctl', ['bootstrap', `gui/${uid}`, plist], { encoding: 'utf8' })
+        if (r.status === 0) return
+        if (tries >= 8) throw new Error('launchd would not start it: ' + String(r.stderr ?? '').trim())
+        await new Promise((done) => setTimeout(done, 300))
+      }
+    }
+    const r = spawnSync('systemd-run', ['--user', '--collect', '--unit', `manyclaws-upgrade-${Date.now()}`, ...Object.entries(env).flatMap(([k, v]) => ['--setenv', `${k}=${v}`]), ...argv], { encoding: 'utf8' })
+    if (r.status !== 0) throw new Error('systemd would not start it: ' + String(r.stderr ?? '').trim())
+  }
+  const replaceAgent = async (w, { endSessions }) => {
+    w.tried = Date.now()
+    log(`the agent is to be replaced by release ${w.release}'s, from ${w.dir}${endSessions ? ', ending the sessions it runs' : ''}`)
+    await startJob(['/bin/bash', path.join(w.dir, 'agent', 'install.sh'), '--update', '--from', w.dir, '--wait-start', '60', ...(endSessions ? ['--end-sessions'] : [])])
+  }
+  // (waiting for its sessions to be done: tried once there are none, and again a while later where it is still here)
+  setInterval(() => {
+    if (!waitingUpgrade || host.hosted.size || Date.now() - (waitingUpgrade.tried ?? 0) < 5 * 60_000) return
+    replaceAgent(waitingUpgrade, { endSessions: false }).catch((err) => log('the agent could not be replaced:', err.message))
+  }, 15_000).unref()
+  async function upgrade({ release, digest, now }) {
+    if (!checks()) throw new HostError('this agent was not installed from a signed release, and has no keys to hold one against: install it again, as the guide has it')
+    if (!Number.isInteger(release) || release < 1 || !/^[0-9a-f]{64}$/.test(digest)) throw new HostError('the upgrade asked for did not say which release it is')
+    const mine = agentRelease()
+    if (mine && release < mine.release) throw new HostError(`release ${release} is older than this agent's (${mine.release}): it is not gone back to`)
+    for (const args of [['plugin', 'marketplace', 'update', 'manyclaws'], ['plugin', 'update', 'manyclaws@manyclaws']]) {
+      const r = await runClaude(args)
+      if (r.code !== 0) throw new HostError(`claude ${args.join(' ')} did not do it: ${String(r.out).trim().split('\n').pop()?.slice(0, 300) ?? ''}`)
+    }
+    const installed = config.roots.flatMap((root) => installedPlugins(root))[0]
+    if (!installed) throw new HostError('Claude Code has no ManyClaws plugin installed on this computer to update')
+    const got = pluginRelease(installed.dir, signersFile)
+    measuredAt = 0
+    announce()
+    if (!got.as) throw new HostError(`what Claude Code fetched ${got.signed ? `is not as release ${got.release} lists it` : 'carries no release signed by a key this computer knows'} (what it is: ${got.digest.slice(0, 12)}): nothing of it is gone by, and no session is started with it`)
+    if (got.release !== release) throw new HostError(`what Claude Code fetched is release ${got.release}, not release ${release} as asked: the repository has moved on since it was asked; ask again`)
+    if (got.digest !== digest) throw new HostError(`what Claude Code fetched is release ${got.release}, and its plugin is not the one that was asked for (what it is: ${got.digest.slice(0, 12)}): ask again`)
+    log(`the plugin is release ${release} now (plugin ${got.plugin}), as asked`)
+    let had = null
+    try {
+      had = JSON.parse(fs.readFileSync(path.join(ownHome, 'agent', 'release.json'), 'utf8'))
+    } catch {}
+    if (had && agentFilesOf(had) === agentFilesOf(got.list)) return { release, plugin: got.plugin, agent: 'unchanged' }
+    const w = { dir: installed.dir, release, at: Date.now() }
+    const sessions = host.hosted.size
+    if (now || !sessions) {
+      // (once this answer is on its way: the job stops the agent)
+      setTimeout(() => replaceAgent(w, { endSessions: sessions > 0 }).catch((err) => log('the agent could not be replaced:', err.message)), 1500).unref()
+      return { release, plugin: got.plugin, agent: 'now', ends: sessions }
+    }
+    fs.writeFileSync(upgradeFile, JSON.stringify(w), { mode: 0o600 })
+    waitingUpgrade = w
+    announce()
+    return { release, plugin: got.plugin, agent: 'when its sessions are done', sessions }
+  }
+
   // The plugin a session this agent starts loads: one named on its command line (spawn.args), else the one installed
   const hostedPlugin = () => {
     const args = host.spawnConfig.args ?? []
@@ -581,6 +683,8 @@ export async function run(config, flags = {}) {
     }),
     // The folders a person used, allowed or not (`auto`), and those of them turned off (`off`)
     'spawn.folders': ({ auto, off } = {}) => setFolders({ auto, off }),
+    // The plugin and this agent brought up to the release asked for
+    'agent.upgrade': (args) => upgrade(args ?? {}),
   }
 
   // The folders a person used: allowed or not, and which of them are turned off. Written to agent.json, and gone by
@@ -609,6 +713,8 @@ export async function run(config, flags = {}) {
       plugins: measure().map(({ wrong, extra, ...m }) => ({ ...m, wrong: wrong?.length ?? 0, extra: extra?.length ?? 0 })),
       release: agentRelease(),
       checks: checks(),
+      // (an upgrade of this agent waiting for its sessions to be done)
+      upgrade: waitingUpgrade ? { release: waitingUpgrade.release, at: waitingUpgrade.at } : null,
       // (the folders a file may be opened from, and the ones a file is taken into)
       files: filesFrom ?? [],
       upload: takesInto ?? [],
@@ -624,7 +730,7 @@ export async function run(config, flags = {}) {
       ...machine,
       agent: VERSION,
       node: process.version,
-      capabilities: ['sessions', 'search', 'measure', 'folders', ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
+      capabilities: ['sessions', 'search', 'measure', 'folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
       sealed: 3,
       spawn: host.canStart(),
       card: seal(about, sealKey),
@@ -792,6 +898,12 @@ export async function run(config, flags = {}) {
     // Which of the folders a person used sessions may be started in: allowed or not, and those turned off. Any of the
     // account's devices may narrow that; widening it is starting sessions where they could not be, which is for one
     // that may start them
+    // An upgrade to a release, named with what its plugin is (its digest); `now`: the sessions this agent runs are ended
+    // for it, where it has to be started again, rather than waited for
+    'agent.upgrade': (a) => {
+      const w = startedBy(take(a.order, machine.id, ['upgrade'])).with
+      return { release: Number(w.release), digest: String(w.digest ?? ''), now: w.now === true }
+    },
     'spawn.folders': (a) => {
       const o = take(a.order, machine.id, ['folders'])
       const auto = typeof o.with.auto === 'boolean' ? o.with.auto : undefined
@@ -1086,6 +1198,10 @@ export async function run(config, flags = {}) {
   process.on('SIGTERM', stop)
   process.on('SIGINT', stop)
   log(`ManyClaws agent ${VERSION} on ${machine.name}: ${config.roots.join(', ')} -> ${server || '(no server)'}`)
+  // (that it started, for the installer that replaced the one before it: which puts that one back where no word of this comes)
+  try {
+    fs.writeFileSync(path.join(ownHome, 'agent.started'), JSON.stringify({ version: VERSION, pid: process.pid, at: Date.now() }) + '\n', { mode: 0o600 })
+  } catch {}
   for (const line of flags.said ?? []) log(line)
   // The id is kept, so the machine is the same one after a restart
   if (!flags.ephemeral) saveId(config)

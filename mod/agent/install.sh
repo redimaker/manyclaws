@@ -40,8 +40,8 @@
 #                       repository, or the plugin's own folder (or MANYCLAWS_AGENT_FROM). It
 #                       is checked all the same
 #   --signers FILE      the keys a release may be signed by, in place of the ones this installer
-#                       knows: a file as ssh-keygen's "allowed signers" are written. For a
-#                       release of your own making
+#                       knows: a file as ssh-keygen's "allowed signers" are written (or
+#                       MANYCLAWS_SIGNERS). For a release of your own making
 #   --label NAME        what the page calls this machine (default: its host name)
 #   --root DIR          a Claude Code config dir to index; repeat for several (default: ~/.claude)
 #   --spawn DIR         let the page start and resume sessions in DIR; repeat for several.
@@ -79,6 +79,9 @@
 #                       Starting the agent again ends the sessions it is running (the ones
 #                       started from the page), so while there are any nothing is done
 #   --end-sessions      with --update or --reinstall: do it all the same, and end those sessions
+#   --wait-start SECS   with --update: once the new agent is started, wait this long for it to say so
+#                       (agent.started); where it does not, put the agent that was there back and
+#                       start that again. What the agent's own upgrade from the page runs
 #   --reinstall         remove the agent that is here, with everything it kept, and install the
 #                       newest release in its place, set up as the old one was (who the machine
 #                       is, its name, its folders and the rest of agent.json) but for its API
@@ -105,7 +108,7 @@ from="${MANYCLAWS_AGENT_FROM:-https://codeload.github.com/$REPO/tar.gz/refs/head
 # release signed by one of these may bring an installer with others: that is how a key is
 # replaced, and it is why an installed agent is updated by its own copy of this script.
 SIGNERS='manyclaws namespaces="manyclaws-release" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMPeEfWVnYHahu/dRpMq7J+2eRNg67sQS+IJh/bH8PDD'
-server="" token="" label="" relay=0 uninstall=0 rekey=0 typed=0 update=0 end_sessions=0 keychain=1 signers="" reinstall=0 auto_folders=0
+server="" token="" label="" relay=0 uninstall=0 rekey=0 typed=0 update=0 end_sessions=0 keychain=1 signers="${MANYCLAWS_SIGNERS:-}" reinstall=0 auto_folders=0 wait_start=0
 roots=() spawn=() modes=() files=() key=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -128,6 +131,7 @@ while [ $# -gt 0 ]; do
     # (an update that first takes away what is here: nothing is asked, and nothing of the options is written)
     --reinstall) reinstall=1; update=1; shift ;;
     --end-sessions) end_sessions=1; shift ;;
+    --wait-start) wait_start="$2"; shift 2 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -314,6 +318,11 @@ if [ "$reinstall" = 1 ]; then
   stop_service
   rm -rf "$HOME_DIR"
 fi
+# (the agent that was there, kept until the new one has said it started: --wait-start puts it back where it does not)
+if [ "$update" = 1 ] && [ "$reinstall" = 0 ] && [ "$wait_start" -gt 0 ] && [ -d "$HOME_DIR/agent" ]; then
+  rm -rf "$HOME_DIR/agent.before"
+  cp -R "$HOME_DIR/agent" "$HOME_DIR/agent.before"
+fi
 mkdir -p "$HOME_DIR/agent"
 chmod 700 "$HOME_DIR"
 cp "$src"/*.mjs "$HOME_DIR/agent/"
@@ -349,6 +358,9 @@ else
 fi
 
 stop_service
+# (from here, whatever the new agent writes of its own start is what is waited for)
+begun="$(date +%s)"
+start_service() {
 if [ "$(uname)" = Darwin ]; then
   mkdir -p "$(dirname "$PLIST")"
   cat > "$PLIST" <<EOF
@@ -390,6 +402,27 @@ EOF
   systemctl --user daemon-reload
   systemctl --user enable --now manyclaws-agent.service
   loginctl enable-linger "$USER" 2>/dev/null || echo "Note: without 'loginctl enable-linger $USER' the agent stops when you log out."
+fi
+}
+start_service
+# Started: the new agent says so (agent.started, newer than this run). Where it does not in the time given, the agent
+# that was there is put back as it was, and started again.
+if [ "$wait_start" -gt 0 ] && [ -d "$HOME_DIR/agent.before" ]; then
+  said=""
+  for _ in $(seq 1 $((wait_start * 4))); do
+    at="$(sed -n 's/.*"at":\([0-9][0-9]*\).*/\1/p' "$HOME_DIR/agent.started" 2>/dev/null | head -1 || true)"
+    if [ -n "$at" ] && [ "$((at / 1000))" -ge "$begun" ]; then said=1; break; fi
+    sleep 0.25
+  done
+  if [ -z "$said" ]; then
+    stop_service
+    rm -rf "$HOME_DIR/agent"
+    mv "$HOME_DIR/agent.before" "$HOME_DIR/agent"
+    start_service
+    echo "The new ManyClaws agent did not say it had started within $wait_start seconds: the one that was here is put back, as it was, and started again. Its log: $HOME_DIR/agent.log" >&2
+    exit 1
+  fi
+  rm -rf "$HOME_DIR/agent.before"
 fi
 
 if [ "$reinstall" = 1 ]; then
