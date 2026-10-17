@@ -1027,6 +1027,13 @@ const CONNECT_MS = 10 * 60_000
 const CONNECT_EVERY_MS = 3000
 // The link as a code a phone's camera reads, drawn with blocks for a terminal whose ground is dark: a light module is a
 // block, a dark one is the ground, two rows to a line, with a light band about it
+async function inTerminal($) {
+  try {
+    return (await $.session.surfaces()).includes('terminal')
+  } catch {
+    return false
+  }
+}
 function codeLines(text) {
   const code = qrOf(text)
   if (!code) return ''
@@ -1054,9 +1061,11 @@ async function offerConnect($, e, { asked = false, again = false } = {}) {
   const name = (await output($, ['hostname'])).trim().replace(/\.local$/, '').slice(0, 20) || 'this computer'
   const link = `${url}/app#/c/${toB64(pair.public)}/${encodeURIComponent(name)}`
   connecting = { secret: pair.secret, id: toB64(sha256(pair.public)).slice(0, 22), url, until: (await $.clock.now()) + CONNECT_MS, e: startedWith ?? e }
-  const said = `ManyClaws: ${again ? 'the server refused this computer’s API token (it was taken back, or ran out), so this session is not shown on your page. Open this link to connect it again' : 'this computer is not connected yet. Open this link to connect it'}, in a browser where you are signed in to ManyClaws, or read the code with your phone’s camera, and approve it there: ${link}\nIt works once, for ten minutes; /manyclaws connect makes another.`
+  // The code for a phone is rows of blocks, which a terminal shows as they are. VS Code's panel and the desktop app run
+  // a message's lines together, and what they would show is no code: there the link alone is offered
+  const drawn = (await inTerminal($)) ? codeLines(link) : ''
+  const said = `ManyClaws: ${again ? 'the server refused this computer’s API token (it was taken back, or ran out), so this session is not shown on your page. Open this link to connect it again' : 'this computer is not connected yet. Open this link to connect it'}, in a browser where you are signed in to ManyClaws${drawn ? ', or read the code with your phone’s camera,' : ''} and approve it there: ${link}\nIt works once, for ten minutes; /manyclaws connect makes another.`
   $.ui.log(said)
-  const drawn = codeLines(link)
   if (drawn) $.ui.log(drawn)
   $.ui.status(`ManyClaws: connect this computer → ${link}`)
   $.clock.after(CONNECT_EVERY_MS, () => void askConnect($))

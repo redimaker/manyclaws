@@ -231,6 +231,15 @@ test('with a token and no key the mod sends nothing of the session, whatever hap
   expect(code.every((line) => line.length === width && /^[█▀▄ ]+$/.test(line))).toBe(true)
 })
 
+test("in VS Code's panel, which runs a message's lines together, the link alone is offered: no code for a phone, and nothing said of one", async ($, on) => {
+  const s = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_TOKEN: 'agent-token', CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' }, surfaces: [] })
+  await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
+  await s.clock.advance(10)
+  const told = s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l))
+  expect(told.length).toBe(1)
+  expect(String(told[0])).toMatch(/^ManyClaws: this computer is not connected yet\. Open this link to connect it, in a browser where you are signed in to ManyClaws and approve it there: https:\/\/mc\.test\/app#\/c\/[A-Za-z0-9_-]{43}\/this%20computer\n/)
+})
+
 test('given no address, the mod reports to manyclaws.dev: it has no option for one, and MANYCLAWS_URL is what names another server', async ($, on) => {
   await made()
   const { clock, sent } = setup(on, { env: { MANYCLAWS_TOKEN: 'agent-token', MANYCLAWS_KEY: WORDS } })
