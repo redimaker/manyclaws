@@ -108,6 +108,7 @@ const app = {
   tourAt: 0, // which of the tour's steps is showing
   recovery: null, // the recovery key being shown as the key is made here, until it is said to be kept (showRecovery): { root }
   keyLater: undefined, // the sign-in "Not now" was said of to the key's card on this page, where it was (keyLater): null once that is taken back
+  before: false, // this browser held a key of before for the account, made from a passphrase, and has not been given its key since (keys.js wasBefore)
   unopenedWas: '', // what did not open here when that was last looked at (lookAgain), to tell when it has changed
   auto: new Map(), // the sessions this browser says yes to by itself (auto approve), each with when that ends: session id -> time
 }
@@ -806,6 +807,7 @@ async function loadAccount() {
   // person's own device, the root under a passkey). What a browser kept before there was a root is not taken.
   app.key = app.account && vault && sealing ? await vault.heldKey(app.account.user.id).catch(() => null) : null
   if (app.account && vault && !app.key) await vault.dropBefore(app.account.user.id)
+  app.before = !!(app.account && vault && !app.key) && (await vault.wasBefore(app.account.user.id))
   showNotices()
   lookAgain()
   await readDrafts()
@@ -1548,12 +1550,13 @@ function showNotices() {
   el('offline').hidden = !(app.downSince && Date.now() - app.downSince > 4000)
   el('update').hidden = !app.old
   // (sealed things are here and this browser has no key; or it has one, and some of them do not open with it)
-  const locked = app.sawSealed && !app.key ? 'none' : unopened().any ? 'other' : ''
+  // (and a browser that had a key of before, made from a passphrase, is told that the account starts afresh once)
+  const locked = app.before && !app.key ? 'before' : app.sawSealed && !app.key ? 'none' : unopened().any ? 'other' : ''
   el('locked').hidden = !locked
   el('locked').dataset.why = locked
-  el('locked-says').textContent = locked !== 'other' ? 'Your sessions are encrypted, and this browser has not been given your key.' : 'Some of your sessions were sealed with another key than this browser’s, and cannot be opened here.'
+  el('locked-says').textContent = locked === 'before' ? 'ManyClaws no longer uses a passphrase: your account starts afresh once, with a new key.' : locked !== 'other' ? 'Your sessions are encrypted, and this browser has not been given your key.' : 'Some of your sessions were sealed with another key than this browser’s, and cannot be opened here.'
   // (with no key, the way to how it is given one; with one, to what does not open with it, whose that is and what to do there)
-  el('locked-link').textContent = locked === 'other' ? 'What to do' : 'Get it'
+  el('locked-link').textContent = locked === 'none' ? 'Get it' : 'What to do'
   el('locked-link').setAttribute('href', locked === 'other' ? '#/account/unopened' : '#/account')
   // (computers of the account's that are to be upgraded, once: said for as long as there is one, but on the page that says all of it)
   const old = app.account ? toUpgrade() : []
@@ -8488,6 +8491,8 @@ async function takeRoot(root, locked, { fresh = false } = {}) {
   }
   await vault.keepKey(u.id, held)
   await vault.dropBefore(u.id)
+  await vault.forgetBefore(u.id)
+  app.before = false
   app.listing = false
   return { held }
 }
@@ -8616,6 +8621,8 @@ async function takeGiven(got, failed = (why) => tell('Not taken', sentence(why))
   held.since = Number(got.v) || 0
   await vault.keepKey(u.id, held)
   await vault.dropBefore(u.id)
+  await vault.forgetBefore(u.id)
+  app.before = false
   app.waiting = null
   app.offList = false
   app.newKey = false
@@ -8752,6 +8759,8 @@ async function drawKeyless(box, redraw) {
     return fill(
       box,
       was,
+      // (an account of before whose list of devices is gone: what its passphrase made is not carried over here either)
+      app.before && !was && h('p', { 'data-part': 'key-before' }, h('b', null, 'ManyClaws no longer uses a passphrase.'), ' The key made from yours is not carried over: your account’s key is made here, now.'),
       h('p', { 'data-part': 'key-first' }, 'What your sessions say is end-to-end encrypted, with a key of your account’s own: made here, now, and kept on your own devices, never on the server. This browser keeps it under a passkey (Face ID, Touch ID, your device’s PIN or a security key), and you approve each of your other devices from here, or from one you approved, with that passkey. You are given a recovery key to keep, for if you ever lose them all.'),
       noPasskeys() ? h('p', { class: 'form-note error', 'data-part': 'key-no-passkeys' }, 'This browser has no passkeys. Make your key on your phone instead (sign in to ManyClaws there), then approve this browser from it.') : h('div', null, make),
       note,
@@ -8806,6 +8815,31 @@ async function drawKeyless(box, redraw) {
   })
   // Or, with neither, afresh
   const afresh = h('button', { type: 'button', class: 'ghost', 'data-part': 'key-afresh', onclick: () => startAfresh(box, redraw) }, 'Start afresh with a new key')
+  // A browser that held a key of before, made from a passphrase: the account starts afresh once, which is said first, with
+  // what it does. (It cannot tell whether that was done already, on another of the account's devices: the list of them
+  // opens with neither key here. So being approved from one is said too, after.)
+  if (app.before) {
+    const start = h('button', { type: 'button', class: 'primary', 'data-part': 'key-afresh', onclick: () => startAfresh(box, redraw) }, 'Start afresh')
+    return fill(
+      box,
+      h('p', { 'data-part': 'key-before' }, h('b', null, 'ManyClaws no longer uses a passphrase.'), ' Your account’s key is a random one now, made on one of your devices and kept there under a passkey (Face ID, Touch ID, your device’s PIN or a security key), with a recovery key for if you ever lose them all. The key made from your passphrase is not carried over, so your account starts afresh once, with a new key:'),
+      h(
+        'ul',
+        { class: 'key-before', 'data-part': 'key-before-does' },
+        h('li', null, 'What the server kept of your sessions is removed. Your computers still have their sessions, and show them again once they are connected.'),
+        h('li', null, 'Your favorites stay, and are named again as their sessions next report. The names, labels, colors and reminders you put on sessions were sealed with the old key, and are removed.'),
+        h('li', null, 'Your other phones and browsers are approved again, from this one.'),
+        h('li', null, 'Each computer is connected again, from the link its plugin shows, once its plugin and agent are moved to this version: the page says which, and how.'),
+      ),
+      noPasskeys() ? h('p', { class: 'form-note error', 'data-part': 'key-no-passkeys' }, 'This browser has no passkeys. Start afresh on your phone instead (sign in to ManyClaws there), then approve this browser from it.') : h('div', null, start),
+      note,
+      h('p', { class: 'key-before-then', 'data-part': 'key-approve' }, h('b', null, 'Started afresh already, on another of your devices?'), ' Approve this browser from it: open this link there, or read the code with your phone’s camera.'),
+      code,
+      codeBox(link),
+      h('p', { class: 'muted', 'data-part': 'key-waiting' }, 'Waiting for it to be approved…'),
+      h('details', { 'data-part': 'recovery-ask' }, h('summary', null, 'I have my new recovery key'), form),
+    )
+  }
   fill(
     box,
     was,

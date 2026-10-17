@@ -281,5 +281,20 @@ export async function dropKey(user) {
 }
 
 // What a browser kept for an account before there was a root (the key made from a passphrase, as it was kept from
-// 2026-10-08, and before that): not taken, and gone (an account of before starts afresh: app.js)
-export const dropBefore = (user) => store('readwrite', (s) => (s.delete('v4|' + user), s.delete('v3|' + user), s.delete(user))).catch(() => {})
+// 2026-10-08, and before that): not taken, and gone (an account of before starts afresh: app.js). That there was one
+// is kept in its place (`before|<account>`, which holds no key), until this browser holds the account's key: so the
+// page can say why it has none, and what to do, for as long as that is so.
+export const dropBefore = (user) =>
+  store('readwrite', (s) => {
+    for (const name of ['v4|' + user, 'v3|' + user, user]) {
+      const had = s.get(name)
+      had.onsuccess = () => {
+        if (had.result === undefined) return
+        s.delete(name)
+        s.put({ at: Date.now() }, 'before|' + user)
+      }
+    }
+  }).catch(() => {})
+// Whether this browser held a key of before for the account, and has not been given its key since
+export const wasBefore = (user) => store('readonly', (s) => s.get('before|' + user)).then((v) => !!v, () => false)
+export const forgetBefore = (user) => store('readwrite', (s) => s.delete('before|' + user)).catch(() => {})
