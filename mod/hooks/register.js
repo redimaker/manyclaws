@@ -1177,12 +1177,15 @@ async function selfCheck($) {
     cardChanged(true)
   } catch {}
   // What only the settings hook events carry is missing where they pass this plugin over: the page's answer to an app's
-  // own dialog, the permission mode, Claude Code's notifications. The card says so, for the page not to guess, and the
-  // session is told once, with why
+  // own dialog, the permission mode, Claude Code's notifications. The card says so, for the page not to guess, and a
+  // person is told why, once on this computer: every session of theirs here is the same, and the page says so of each
   if (await classicSkipped($)) {
     meta.classicHooks = false
     cardChanged(true)
-    if (attended) $.ui.log(CLASSIC_SKIPPED)
+    if (attended && !(await Promise.resolve($.store.get('told:classic')).catch(() => null))) {
+      $.ui.log(CLASSIC_SKIPPED)
+      void Promise.resolve($.store.set('told:classic', Date.now())).catch(() => {})
+    }
   }
   try {
     const agent = await agentKeeps($)
@@ -1931,3 +1934,5 @@ async function answerLocally($, rid, answer) {
 }
 
 // changed by 08-resilience at 1792222959603
+
+// changed by 08-resilience at 1792236960743

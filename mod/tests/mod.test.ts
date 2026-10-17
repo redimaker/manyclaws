@@ -441,6 +441,7 @@ test("auto in VS Code where an organization manages Claude Code and no settings 
   expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'local' })
   expect(opened(s, m).cards.at(-1).classicHooks).toBe(false)
   expect(s.said.filter((l: string) => l.includes('an organization manages Claude Code here')).length).toBe(1)
+  expect(s.kept.has('told:classic')).toBe(true)
   // (one that comes says the organization lists this plugin: the page is asked again, and the card says so)
   await ($ as any).classic.Stop({ hook_event_name: 'Stop' })
   await s.clock.advance(300)
@@ -448,6 +449,16 @@ test("auto in VS Code where an organization manages Claude Code and no settings 
   await $.tool.check({ tool: 'Bash', input: { command: 'rm y' }, tool_use_id: 'tv7' })
   await s.clock.advance(300)
   expect(opened(s, m).requests.at(-1)).toMatchObject({ tool: 'Bash', route: 'both' })
+})
+
+test('told once on this computer that the settings hook events pass the plugin over, a session is not told again; its card says so all the same', async ($, on) => {
+  on('settings.read', ($: any, e: any) => ({ value: e.source === 'policy' ? { channelsEnabled: true } : {} }))
+  const m = await made()
+  const s: any = session(on, m, { store: { 'told:classic': 1 } })
+  await starting($, s.clock)
+  await s.clock.advance(10_300)
+  expect(opened(s, m).cards.at(-1).classicHooks).toBe(false)
+  expect(s.said.filter((l: string) => l.includes('an organization manages Claude Code here'))).toEqual([])
 })
 
 // ---- The key: given to this computer written out (mcf_…) as it is connected, and taken as it is. There is no passphrase.
