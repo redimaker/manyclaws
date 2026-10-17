@@ -121,6 +121,8 @@ const landing = new Set() // those told of and not yet kept: a promise each, set
 const endedIds = new Set() // sessions this process has ended: never reported again
 let hasWarned = false
 let permissionMode = null // the permission mode, as last reported
+let classicHeard = false // a settings hook event (classic.*) has reached this plugin
+let managedHere = null // a promise of whether an organization manages Claude Code here (classicSkipped)
 let effortNow // the effort the session thinks at, as last reported: null when it has none, undefined until something says
 let modelAskedUntil = 0 // a /model the page asked for is on its way: until then, the switch is not asked about again
 const pendingList = [] // requests the band above the prompt offers to answer: { rid, kind, ... }
@@ -280,6 +282,12 @@ export function register(on, options) {
 
   // Every settings hook event: what the mods API has no hook or getter of its own for is read off these
   on('classic.*', async ($, e, next) => {
+    // (they come: this plugin is one the organization lists, or no organization manages Claude Code here)
+    classicHeard = true
+    if (config && meta.classicHooks !== true) {
+      meta.classicHooks = true
+      cardChanged(true)
+    }
     if (config) {
       const event = e.hook_event_name
       if (event === 'Notification') await notified($, e)
@@ -456,6 +464,8 @@ async function begin($, e, given, keys) {
     surface: e.surface,
     label: config.label || undefined,
     capabilities: [...caps],
+    // (whether the settings hook events reach it: so once one has, and said by selfCheck where they pass it over)
+    classicHooks: classicHeard || undefined,
   }
   cursor = at
   // (a turn that started while the key was being made is still running: the session's card says so)
@@ -1166,10 +1176,36 @@ async function selfCheck($) {
     meta.release = await pluginFolder($, ownRoot($))
     cardChanged(true)
   } catch {}
+  // What only the settings hook events carry is missing where they pass this plugin over: the page's answer to an app's
+  // own dialog, the permission mode, Claude Code's notifications. The card says so, for the page not to guess, and the
+  // session is told once, with why
+  if (await classicSkipped($)) {
+    meta.classicHooks = false
+    cardChanged(true)
+    if (attended) $.ui.log(CLASSIC_SKIPPED)
+  }
   try {
     const agent = await agentKeeps($)
     if (agent && ownRoot($) && config && (!agent.kept.server || sameServer(agent.kept.server, config.url))) await $.fs.write(`${agent.home}/plugin-${hexSha256(ownRoot($)).slice(0, 16)}.json`, JSON.stringify({ root: ownRoot($), at: Date.now() }))
   } catch {}
+}
+const CLASSIC_SKIPPED =
+  "ManyClaws: an organization manages Claude Code here, and Claude Code doesn't pass a plugin a person installed its settings hook events (classic.*). So the page can't answer a permission prompt VS Code asks in its own dialog, doesn't see the session's permission mode, and gets no notifications from it; the rest works. An administrator who lists ManyClaws in the organization's managed settings brings them back."
+// Whether the settings hook events pass this plugin over: where an organization manages Claude Code (it has settings in
+// force here), they reach only a plugin it lists itself. One that has come says this plugin is such a one, or that the
+// organization manages nothing
+async function classicSkipped($) {
+  if (classicHeard) return false
+  managedHere ??= orgManaged($)
+  return (await managedHere) && !classicHeard
+}
+async function orgManaged($) {
+  try {
+    const set = await $.settings.read({ source: 'policy' })
+    return !!set && typeof set === 'object' && Object.keys(set).length > 0
+  } catch {
+    return false
+  }
 }
 // Claude Code's own: { exitCode, stdout, stderr }
 async function claudeRun($, args, timeoutMs) {
@@ -1581,7 +1617,9 @@ async function routeOf($, kind) {
   if (surfaces.some((s) => s === 'terminal' || s === 'desktop')) return 'remote'
   // An app that can't draw the band (VS Code's panel) asks in its own dialog. The page
   // asks as well: the engine takes an answer given through a hook while that dialog is
-  // up, and tells the app to close it.
+  // up, and tells the app to close it. (A permission prompt's answer is given by a settings hook event: where those
+  // pass this plugin over, its dialog is the one place it is answered. A question's is not, see askQuestion.)
+  if (kind === 'approvals' && (await classicSkipped($))) return 'local'
   return 'both'
 }
 

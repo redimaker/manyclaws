@@ -223,6 +223,8 @@ function sessionOf(s, devices) {
     contextPercent: card.contextPercent ?? null,
     costUsd: card.costUsd ?? null,
     permissionMode: card.permissionMode ?? null,
+    // (false where its plugin is passed over by the settings hook events, which alone say the mode: see renderHeader)
+    classicHooks: typeof card.classicHooks === 'boolean' ? card.classicHooks : null,
     effort: card.effort ?? null,
     since: card.since ?? s.lastActivity,
     shaped: true,
@@ -5166,14 +5168,22 @@ function renderHeader() {
   if (resumes) {
     renderResumeMode(m, s)
   } else {
+    // One whose plugin is not told its mode says it is not known, not that it is Manual: where an organization manages
+    // Claude Code, the settings hook events that say it pass over a plugin a person installed
+    const unknown = !s.ended && !modeOf(s) && s.classicHooks === false
     // (drawn already: drawing it again would take the button from under a finger)
-    const drawn = 'shown|' + inMode + '|' + s.ended
+    const drawn = 'shown|' + (unknown ? '?' : inMode) + '|' + s.ended
     app.modeMenu = { mode: inMode, allowed: [], onPick: null }
     if (el('foot-mode').dataset.modes !== drawn) {
       el('foot-mode').dataset.modes = drawn
       const inTerminal = (PERMISSION_MODES[inMode] ?? PERMISSION_MODES.default)[1]
-      el('foot-mode').replaceChildren(h('span', { class: 'for-terminal' }, inTerminal), modeButton(inMode))
-      el('foot-mode').title = s.ended ? '' : 'The mode this session is in. It is changed where the session runs (shift+tab in a terminal, the mode button in an editor).'
+      if (unknown) el('foot-mode').replaceChildren(h('span', { class: 'mode-unknown' }, 'Mode not known'))
+      else el('foot-mode').replaceChildren(h('span', { class: 'for-terminal' }, inTerminal), modeButton(inMode))
+      el('foot-mode').title = unknown
+        ? "An organization manages Claude Code on this computer, and Claude Code doesn't tell a plugin a person installed which mode a session is in. It is changed where the session runs (shift+tab in a terminal, the mode button in an editor)."
+        : s.ended
+          ? ''
+          : 'The mode this session is in. It is changed where the session runs (shift+tab in a terminal, the mode button in an editor).'
     }
   }
   // (one that has exited has no model or effort of its own until it runs again)

@@ -426,6 +426,30 @@ test('local in VS Code: its own dialog only', async ($, on) => {
   expect(asked?.decision).toBeUndefined()
 })
 
+// Where an organization manages Claude Code, the settings hook events pass over a plugin a person installed: the page's
+// answer to a permission prompt in the app's own dialog would come by one, so the dialog is the one place it is answered
+test("auto in VS Code where an organization manages Claude Code and no settings hook event has come: a permission prompt is its own dialog's alone, and the card and the session say why; one that comes puts it back", async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  on('settings.read', ($: any, e: any) => ({ value: e.source === 'policy' ? { channelsEnabled: true } : {} }))
+  on('classic.Stop', () => ({}))
+  const m = await made()
+  const s: any = session(on, m, { ...VSCODE, poll: [{ policy: { version: 1, approvals: 'auto' }, commands: [] }] })
+  await startHosted($)
+  await s.clock.advance(10)
+  expect((await $.tool.check({ tool: 'Bash', input: { command: 'rm x' }, tool_use_id: 'tv6' })).decision).toBe('ask')
+  await s.clock.advance(10_300)
+  expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'local' })
+  expect(opened(s, m).cards.at(-1).classicHooks).toBe(false)
+  expect(s.said.filter((l: string) => l.includes('an organization manages Claude Code here')).length).toBe(1)
+  // (one that comes says the organization lists this plugin: the page is asked again, and the card says so)
+  await ($ as any).classic.Stop({ hook_event_name: 'Stop' })
+  await s.clock.advance(300)
+  expect(opened(s, m).cards.at(-1).classicHooks).toBe(true)
+  await $.tool.check({ tool: 'Bash', input: { command: 'rm y' }, tool_use_id: 'tv7' })
+  await s.clock.advance(300)
+  expect(opened(s, m).requests.at(-1)).toMatchObject({ tool: 'Bash', route: 'both' })
+})
+
 // ---- The key: given to this computer written out (mcf_…) as it is connected, and taken as it is. There is no passphrase.
 
 test('the key written out among its options is used as it is: the session starts at once, sealed, saying nothing of which key, and the server is asked nothing of whose computer this is', { options: { key: '' } }, async ($, on) => {
