@@ -6,7 +6,7 @@
 
 > Read {{origin}}/setup.md and set this computer up.
 
-Claude installs the plugin. Then, in a new Claude Code session, the plugin shows a link that connects the computer, and a code for your phone's camera: open it where you are signed in to {{name}}, on your phone or in a browser that has your key, press **Connect**, and give your passkey (Face ID, Touch ID, your device's PIN or a security key). Nothing is typed into Claude Code, a chat, a command or a file. From your page you can then give the computer its agent, which lets your phone start sessions there, and keep the plugin and the agent up to date.
+Claude installs the plugin. Then, in a new Claude Code session, the plugin shows a code of nine digits that connects the computer: enter it under **Connect a computer** ({{origin}}/app#/connect) where you are signed in to {{name}}, on your phone or in a browser that has your key, press **Connect**, and give your passkey (Face ID, Touch ID, your device's PIN or a security key). Nothing is typed into Claude Code, a chat, a command or a file. From your page you can then give the computer its agent, which lets your phone start sessions there, and keep the plugin and the agent up to date.
 
 ## 1. Before you start: your account's key
 
@@ -14,7 +14,7 @@ Everything a computer's sessions say is sealed on that computer before it is sen
 
 As the key is made, the page shows your **recovery key**: 52 letters and digits, in groups of four. Keep it where you keep what matters, in a password manager or on paper. With it, a browser can be given your key again if you ever lose every device that has it; without it, and with none of them, nobody can give it back, and you start afresh with a new key.
 
-Each other phone or browser you read your sessions on is given the key by one that has it: signed in there, it shows a link and a code, which you open on a device that has your key and approve with your passkey (or, the other way round, on that device: **Account**, **Devices**, **Add a phone or browser**, and read its code with the new one). Each computer is given it the same way, in step 3.
+Each other phone or browser you read your sessions on is given the key by one that has it: signed in there, it shows a code of six digits, and each of your devices that has your key asks you for it by itself. Type it there, say whether the new one is yours or borrowed, and approve it with your passkey. Each computer is given the key the same way, by the code it shows, in step 3.
 
 ## 2. Install the plugin
 
@@ -39,13 +39,13 @@ Claude Code can do this part, or you can paste the commands yourself. It needs C
 
 This step is yours, and it is the one that matters: until it is done, nothing of this computer shows.
 
-Start a new Claude Code session (in a terminal, VS Code or the desktop app). The plugin says that the computer is not connected yet, and shows a link to `{{origin}}/app#/c/…`, and the same link as a code for your phone's camera. Open it where you are signed in to {{name}}: on your phone, or in a browser that keeps your key under a passkey. The page asks whether to connect the computer, by its name: press **Connect**, and give your passkey. The link works once, for ten minutes; `/manyclaws connect` in Claude Code makes another.
+Start a new Claude Code session (in a terminal, VS Code or the desktop app). The plugin says that the computer is not connected yet, and shows a code of nine digits, with a link to `{{origin}}/app#/connect`, where it is typed. Type it there, where you are signed in to {{name}}: on your phone, or in a browser that keeps your key under a passkey. The page asks whether to connect the computer, by its name: press **Connect**, and give your passkey. The code works once, for ten minutes, and three wrong tries end it; `/manyclaws connect` in Claude Code makes another.
 
-What the link carries, after the `#`, is a key the plugin made for that one asking, which a browser sends nowhere: so it goes from that session to your device, and never to {{name}}'s server. The page makes an API token for the computer, named for it, and seals it and your key to that key. Only the plugin that showed the link opens it. Claude Code then says which account it joined: if it is not yours, type `/manyclaws disconnect`.
+The first three digits find the computer on {{name}}'s server; the other six the plugin made, and never sends. With them the plugin and the page make a key between them (SPAKE2) through the server, which passes what each side makes and can make nothing of it, nor test a code by itself. The page makes an API token for the computer, named for it, and seals it and your key with that key. Only the plugin that showed the code opens it. Claude Code then says which account it joined: if it is not yours, type `/manyclaws disconnect`.
 
 The first session after that starts at once, and the computer is on your page. The key does one more thing than keep what is said private. What you ask of this computer from your phone or a browser (a reply, a yes to a permission prompt, a new session) is signed there, and this computer checks. It keeps what it needs to check and nothing it could sign with, so nobody between your phone and this computer, {{name}}'s server included, can ask in your name or send again what you asked before.
 
-**A computer nobody sits at** (a server you reach over SSH): start one Claude Code session there, in a terminal, and connect it from its link. From then on its sessions, and its agent, go on with nobody there.
+**A computer nobody sits at** (a server you reach over SSH): start one Claude Code session there, in a terminal, and connect it with its code. From then on its sessions, and its agent, go on with nobody there.
 
 ## 4. The agent
 
@@ -68,11 +68,11 @@ bash <the plugin's folder>/agent/install.sh --from <the plugin's folder> --auto-
 - The new session appears at {{origin}}/app within a few seconds, under the computer's name, with "encrypted" under its title.
 - With the agent, the computer is listed there by its name with every session Claude Code has had on it, running or not, and its page says which release it is, as its agent checked it.
 - `claude plugin configure manyclaws@manyclaws` lists the plugin's options and says which are set. It never shows their values.
-- If the session does not appear, the plugin says why in Claude Code itself: a token that has run out or been taken back (it then shows the link that connects the computer again), no key yet, or a server it cannot reach. A computer sends nothing unsealed, and the server takes nothing that is not sealed. Nothing of your key is on the server, so nothing checks it for you: if the page says some sessions were sealed with another key and cannot be opened, a computer of yours has another one, from before your account was started afresh. **What to do**, beside it, says which, and how it is connected again.
+- If the session does not appear, the plugin says why in Claude Code itself: a token that has run out or been taken back (it then shows the code that connects the computer again), no key yet, or a server it cannot reach. A computer sends nothing unsealed, and the server takes nothing that is not sealed. Nothing of your key is on the server, so nothing checks it for you: if the page says some sessions were sealed with another key and cannot be opened, a computer of yours has another one, from before your account was started afresh. **What to do**, beside it, says which, and how it is connected again.
 
 ## 6. Your phone
 
-Open {{origin}}/app on your phone and sign in. Where your account has no key yet, make it there: your phone keeps it under Face ID or Touch ID. Where it has one, approve the phone from a browser that has it: there, **Account**, **Devices**, **Add a phone or browser**, and read the code it shows with the phone's camera. Put the page on the Home Screen (on an iPhone: Share, then Add to Home Screen), open it from there, tap **Settings** at the foot of the list, and then **Turn on alerts**. Your phone then tells you when a session needs you or has finished.
+Open {{origin}}/app on your phone and sign in. Where your account has no key yet, make it there: your phone keeps it under Face ID or Touch ID. Where it has one, approve the phone from a browser that has it: the phone shows a code, and that browser asks you for it. Put the page on the Home Screen (on an iPhone: Share, then Add to Home Screen), open it from there, tap **Settings** at the foot of the list, and then **Turn on alerts**. Your phone then tells you when a session needs you or has finished.
 
 ## Keeping it up to date and running
 
@@ -117,15 +117,15 @@ claude plugin install manyclaws@manyclaws
 bash mod/agent/install.sh --from mod
 ```
 
-Claude Code loads the plugin from that folder as it is, so nothing changes until you check out another release. Connect the computer from the link a new session shows, as step 3 has it; the installer asks for nothing. Under **Account → Devices** on your page, each of your devices can be stopped from starting sessions on your computers.
+Claude Code loads the plugin from that folder as it is, so nothing changes until you check out another release. Connect the computer with the code a new session shows, as step 3 has it; the installer asks for nothing. Under **Account → Devices** on your page, each of your devices can be stopped from starting sessions on your computers.
 
 ## For Claude Code, when you are asked to follow this guide
 
 - Do step 2 yourself, without stopping to ask: install the plugin. It asks the person for nothing.
-- Step 3 is the person's, and it is the most important thing you tell them. When the plugin is installed, say it first and plainly: start a new Claude Code session, open the link the plugin shows there (or read its code with their phone) where they are signed in to {{name}}, press **Connect** and give their passkey. The link works for ten minutes; `/manyclaws connect` makes another.
+- Step 3 is the person's, and it is the most important thing you tell them. When the plugin is installed, say it first and plainly: start a new Claude Code session, and type the code of nine digits the plugin shows there under **Connect a computer** ({{origin}}/app#/connect) where they are signed in to {{name}}, press **Connect** and give their passkey. The code works for ten minutes; `/manyclaws connect` makes another.
 - Do not install the agent unless you are asked to: it is set up from their page, once the computer is connected (step 4). Where you are asked to, run it as step 4 has it, by hand, with `--from` the plugin's folder and `--auto-folders`, and no other option unless the person named one.
 - Keep what you say short: what you installed, in a line or two; then step 3, as above; then that the computer's page can give it the agent, and the phone (step 6). Do not explain how the plugin works or what is and is not encrypted, unless you are asked: the guide says those things for whoever wants them.
-- Never ask for the API token, the key or the recovery key, and do not use any of them if it is offered in the conversation: say that the computer is connected from its link, and that the recovery key is for them to keep, and is typed on their page alone.
+- Never ask for the API token, the key or the recovery key, and do not use any of them if it is offered in the conversation: say that the computer is connected with its code, and that the recovery key is for them to keep, and is typed on their page alone.
 - Never put a token or a key in a command, in `settings.json`, in an environment variable or in any file.
 - Edit `~/.claude/settings.json` by merging: keep every setting that is already there.
 - If `claude plugin marketplace add` says a marketplace named `manyclaws` is already there, go on. If it says that its source does not match its `extraKnownMarketplaces` entry, the computer was set up from {{name}}'s server long ago: it is moved as `{{origin}}/upgrade.md` has it, which is another guide than this one, so say so and stop. Never run `claude plugin marketplace remove manyclaws` here: it deletes the API token and the key the plugin was given. If `claude plugin install` says the plugin is already installed, run `claude plugin update manyclaws@manyclaws` and go on.

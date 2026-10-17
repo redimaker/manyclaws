@@ -9,7 +9,7 @@
     "token": {
       "type": "string",
       "title": "API token",
-      "description": "Filled in for you as this computer is connected from the link the plugin shows in a new session. It signs this computer in, and is taken back on your page (Account, API tokens) to disconnect it",
+      "description": "Filled in for you as this computer is connected with the code the plugin shows in a new session. It signs this computer in, and is taken back on your page (Account, API tokens) to disconnect it",
       "sensitive": true
     },
     "label": {
@@ -20,7 +20,7 @@
     "key": {
       "type": "string",
       "title": "Encryption key",
-      "description": "Filled in for you as this computer is connected from the link the plugin shows in a new session: there is nothing to type here. It is your account's key, written out (mcf_…), which everything this computer's sessions say is sealed with before it is sent, so only your own devices can read it. Without it nothing is sent, and the link is shown. ManyClaws has no passphrase: anything here that is not a key is no key",
+      "description": "Filled in for you as this computer is connected with the code the plugin shows in a new session: there is nothing to type here. It is your account's key, written out (mcf_…), which everything this computer's sessions say is sealed with before it is sent, so only your own devices can read it. Without it nothing is sent, and the link is shown. ManyClaws has no passphrase: anything here that is not a key is no key",
       "sensitive": true
     },
     "capabilities": {

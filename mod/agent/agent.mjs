@@ -23,7 +23,7 @@
 //                                         devices). There is no passphrase. With --wait it may
 //                                         be written without them: the agent then waits for the
 //                                         ManyClaws plugin, which is given both as the computer
-//                                         is connected from its link.
+//                                         is connected with its code.
 //                                         On a Mac the token and the key are kept in the
 //                                         keychain (secrets.mjs), unless --no-keychain
 //   node agent.mjs verify [--server URL] [--here]
@@ -132,7 +132,7 @@ export function configure(opts, { home = HOME, env = process.env } = {}) {
 // What the ManyClaws plugin was given, taken by this machine's agent: the note the plugin
 // leaves in the agent's own folder (from-plugin.json) once the server has taken its token.
 // The plugin is given its API token and the account's key as the computer is connected
-// from its link, and the agent waits for them here. The token, and the
+// with its code, and the agent waits for them here. The token, and the
 // key written out as a computer keeps it (mcf_…), go into agent.json, and the note is
 // gone. Only what is whole is taken, and only from a plugin that reports to the server
 // this machine does. Answers what changed ('token', 'key'), for the service to start
@@ -224,7 +224,7 @@ export function pluginSays(r) {
   if (!r.given)
     return [
       `The ManyClaws plugin was NOT given its API token and key: ${r.why}.`,
-      'No session of this computer shows on the page until it has both. Start a new Claude Code session on it: the plugin shows a link that connects it, to open where you are signed in to ManyClaws and approve.',
+      'No session of this computer shows on the page until it has both. Start a new Claude Code session on it: the plugin shows a code that connects it, to type under Connect a computer where you are signed in to ManyClaws, and approve.',
     ]
   const how = r.relay ? `now goes through the agent (http://127.0.0.1:${r.relay})` : 'has been given the same API token'
   return [`The ManyClaws plugin in Claude Code ${how}, and this computer's encryption key: it is configured, and there is nothing to type into it.`, next]
@@ -252,7 +252,7 @@ export function pluginHas(config, { run = spawnSync } = {}) {
 }
 
 // What is left for the person to do, where the agent was installed with nothing given to
-// it: the computer is connected from the link the plugin shows in a new session, and the
+// it: the computer is connected with the code the plugin shows in a new session, and the
 // agent takes the token and the key from the plugin. Said in so many words, for whoever
 // ran the installer to read, and for Claude Code to pass on.
 export function leftSays(has, { server = '', waiting = true } = {}) {
@@ -261,14 +261,14 @@ export function leftSays(has, { server = '', waiting = true } = {}) {
   return [
     ...(has.installed === false ? [`The ManyClaws plugin is not installed in Claude Code on this computer. Install it first: claude plugin marketplace add redimaker/manyclaws, then claude plugin install manyclaws@manyclaws`] : []),
     "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer.",
-    '  Start a new Claude Code session on it, in a terminal, VS Code or the desktop app: the plugin shows a link, and a code for a phone’s camera.',
-    `  Open the link in a browser where you are signed in to ${server || 'ManyClaws'}, or read the code with your phone, and approve the computer there.`,
+    '  Start a new Claude Code session on it, in a terminal, VS Code or the desktop app: the plugin shows a code of nine digits.',
+    `  Type it under Connect a computer (${server || 'https://manyclaws.dev'}/app#/connect), on a phone or in a browser where you are signed in, and approve the computer there.`,
     `Then the plugin connects, and ${takes}.`,
   ]
 }
 
 // What a key that is not one is told: there is no passphrase to give in its place
-const NOT_A_KEY = 'the key is not what a ManyClaws computer keeps (mcf_, 43 characters, a dot, 43 more). There is no passphrase: a computer is given its key as it is connected from the link the ManyClaws plugin shows in a new session'
+const NOT_A_KEY = 'the key is not what a ManyClaws computer keeps (mcf_, 43 characters, a dot, 43 more). There is no passphrase: a computer is given its key as it is connected with the code the ManyClaws plugin shows in a new session'
 
 async function main() {
   const [command = 'help', ...rest] = process.argv.slice(2)

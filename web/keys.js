@@ -6,7 +6,7 @@
 //
 // The account's key is drawn from its root (seal.js says how), which is 32 random bytes:
 // nothing typed makes it, and nothing of it is sent to the server. A phone or a browser is
-// given it by another of the account's devices, sealed to it (seal.js, sealTo), or by the
+// given it by another of the account’s devices, sealed with a key the two made from a code (seal.js, Pairing), or by the
 // person, from the recovery key they kept.
 //
 // What this device keeps (`held`) is kept where no script can read it back: the key and

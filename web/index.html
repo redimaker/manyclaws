@@ -22,15 +22,15 @@
        imports it), and again in the import map, which is what a browser holds a module to wherever it is imported
        from: a preload that fails its check is otherwise fetched again by the import, unchecked (the server names
        the map by its own hash in the page's policy, since it is inline). -->
-  <script type="importmap">{"integrity":{"/seal.js":"sha384-wQtSoQAWNwwDAYJwxuIIPqr6TL1K8ebV0gRVOQI5yE0Dl16fXzUuAPtg3iKL3rwO","/keys.js":"sha384-GOAdfHj2KRKDuh4CCSdozP2kz8+gEJQezxFGrKLC5GTZ0VodozXf+2FVih0u4Vnw","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
-  <link rel="stylesheet" href="app.css" integrity="sha384-iQ+uR8mK99X6/gnNn71kNFbqK9VONbVCTXvzi2CwDTyBj+szHPclRvqvgRBYxzYq">
+  <script type="importmap">{"integrity":{"/seal.js":"sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6","/keys.js":"sha384-KMrQGmsTgTDsv8haNdolF2N7TMYyuRCof6Iod+M1G1NKfbcT32pLhOT3joO9yPye","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
+  <link rel="stylesheet" href="app.css" integrity="sha384-Tta/hFlUrA6/Kq7iVH1rB8CI4AcFLA+k/ACN7vqkt4aDNNk4gCXN/pQ7KRIbe/X4">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-ZBAepwzX59yX/T4v2jPhynXRXQmV/WgAsqIknvZ9LHWeO3OB7xBW1UPhZ3X31Yzv">
-  <link rel="modulepreload" href="/seal.js" integrity="sha384-wQtSoQAWNwwDAYJwxuIIPqr6TL1K8ebV0gRVOQI5yE0Dl16fXzUuAPtg3iKL3rwO">
-  <link rel="modulepreload" href="/keys.js" integrity="sha384-GOAdfHj2KRKDuh4CCSdozP2kz8+gEJQezxFGrKLC5GTZ0VodozXf+2FVih0u4Vnw">
+  <link rel="modulepreload" href="/seal.js" integrity="sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6">
+  <link rel="modulepreload" href="/keys.js" integrity="sha384-KMrQGmsTgTDsv8haNdolF2N7TMYyuRCof6Iod+M1G1NKfbcT32pLhOT3joO9yPye">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
-  <script src="app.js" defer integrity="sha384-mBfQyEbUBzSzH/2PjE/ocdl1iLPiyIzwEcQZY5tpqkaXPcBzwOk63pZAhdSxmu8r"></script>
+  <script src="app.js" defer integrity="sha384-5XytMr17yvbsS0d+n/DH0yAOfT1JpUy8TMlKqoIqUg6nrXByeJfkAIlb09ZmKCYj"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -525,6 +525,11 @@
   <!-- What the page asks before it does what is not undone with a press, and what it has to say that can't
        wait (app.js, ask and tell): a box of its own, in the new-session box's dress, where the browser's own
        ("manyclaws.dev says") was. Its words, and what its two ways out are called, are put in as it opens. -->
+  <!-- A phone or browser of the account's asking to join it (app.js, lookForPairings): the code it shows is typed here,
+       then whether it is the person's own, then the passkey. Over whatever is open, as the box the page asks in. -->
+  <dialog id="pair-box" class="ns-box ask-box pair-box" aria-label="A phone or browser is asking to join your account">
+    <div id="pair-body"></div>
+  </dialog>
   <dialog id="ask-box" class="ns-box ask-box" aria-labelledby="ask-title" aria-describedby="ask-says">
     <form id="ask-form" method="dialog" novalidate>
       <h2 id="ask-title" class="ask-title"></h2>

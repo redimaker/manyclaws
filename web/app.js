@@ -1025,6 +1025,7 @@ async function signOut() {
   const sub = await app.worker?.pushManager?.getSubscription().catch(() => null)
   if (sub) await fetch('/api/push/unsubscribe', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {})
   app.pushOn = false
+  await withdrawAsking()
   await fetch('/api/logout', { method: 'POST' })
   if (id && !app.key?.own) await vault?.dropKey(id).catch(() => {})
   app.key = null
@@ -1083,6 +1084,8 @@ function showKeyCard() {
 }
 el('key-later').addEventListener('click', () => {
   keyLater(true)
+  // (left for later: the account's other devices are no longer asked)
+  void withdrawAsking()
   showApp()
 })
 el('key-logout').addEventListener('click', () => signOut())
@@ -1222,7 +1225,7 @@ const TOUR = [
   },
   {
     title: 'Sign in there, and approve it from here.',
-    says: ['Sign in with the email and password you use here. Then, on this browser, open Account, Devices, Add a phone or browser, and read its code with the phone: approve it here with your passkey. Your sessions are sealed, and each device opens them with your key, which never goes through the server in the open.'],
+    says: ['Sign in with the email and password you use here. It shows a code, and this browser asks you for it: approve the phone here with your passkey. Your sessions are sealed, and each device opens them with your key, which never goes through the server in the open.'],
     shot: ['shot-question', 'A session on a phone asking a question, with two answers to tap and a box to type another'],
   },
   {
@@ -1360,10 +1363,14 @@ function connect() {
     showNotices()
     // (the list of the account's devices may have been put anew while nothing was heard: is this one still on it?)
     seeToDevice().catch(() => {})
+    // (and a phone or browser of the account's may be asking to join it)
+    lookForPairings().catch(() => {})
   })
   on('ping', (ev) => pageBuild(JSON.parse(ev.data).build))
   // (the list of the account's devices was put anew, from here or from another of them: is this one still on it?)
   on('devices', () => seeToDevice().catch(() => {}))
+  // (a phone or browser of the account's asking to join it, or one that was, answered or gone)
+  on('pairing', () => lookForPairings().catch(() => {}))
   stream.addEventListener('error', async () => {
     if (stream !== app.stream) return
     el('conn').classList.remove('live')
@@ -1630,11 +1637,10 @@ const canPush = () => 'Notification' in window && 'PushManager' in window && !!a
 // An iPhone or iPad gives notifications only to a page kept on the Home Screen
 const needsHomeScreen = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? !isStandalone() && !('PushManager' in window) : false
 
-function deviceLabel() {
-  const ua = navigator.userAgent
+function deviceLabel(ua = navigator.userAgent, here = true) {
   const device = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : 'A device'
   const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : ''
-  return [device, isStandalone() ? 'app' : browser].filter(Boolean).join(' ')
+  return [device, here && isStandalone() ? 'app' : browser].filter(Boolean).join(' ')
 }
 
 // One notification to see it arrive. A push service doesn't always know of a
@@ -1802,11 +1808,8 @@ function route() {
   el('setup').hidden = path !== '#/setup'
   el('account').hidden = !ACCOUNT_PAGES.includes(path)
   el('settings-page').hidden = path !== '#/settings'
-  const connect = /^#\/c\/([A-Za-z0-9_-]{43})(?:\/([^/]*))?$/.exec(path)
-  const approve = /^#\/b\/([A-Za-z0-9_-]{43})(?:\/([^/]*))?$/.exec(path)
-  el('connect').hidden = !connect && !approve
-  // (a device that has the key offering it, opened here: where this browser has none, it is asked for there)
-  if (/^#\/a\/[A-Za-z0-9_-]{43}$/.test(path)) return app.key ? void (history.replaceState(null, '', location.pathname), tell('Nothing to do', 'This browser has your key already.')) : showKeyCard()
+  const connect = path === '#/connect'
+  el('connect').hidden = !connect
   if (path !== '#/account') app.passwordSaid = ''
   // (a computer's Claude accounts had a page of their own, #/cswap/<machine>: they are a part of the computer's now)
   const swap = /^#\/cswap\/([^/]+)$/.exec(path)
@@ -1817,8 +1820,7 @@ function route() {
   if (computer) return openComputer(decodeURIComponent(computer[1]))
   if (path === '#/setup' || ACCOUNT_PAGES.includes(path)) return openGuide(path.slice(2))
   if (path === '#/settings') return openSettings()
-  if (connect) return openConnect(connect[1], decodeURIComponent(connect[2] ?? ''))
-  if (approve) return openApprove(approve[1], decodeURIComponent(approve[2] ?? ''))
+  if (connect) return openConnect()
   if (live) return openSession(decodeURIComponent(live[1]))
   if (past) {
     const q = new URLSearchParams(query)
@@ -3411,31 +3413,64 @@ function renderRow(s, { favorite = false, due = false } = {}) {
 // kept in its browser: another device has its own. (Until 2026-10-08 they opened over the
 // foot of the list, and were the first three of these.)
 
-// ---- A computer connected from the link its ManyClaws plugin showed in Claude Code
-// (#/c/<its key>/<its name>). The plugin, with no token, made a pair of keys for the asking, and the link has the
-// public one in it after the #, which a browser sends nowhere: so it came from that session to this browser, and the
-// server has never had it. Approved here with this browser's passkey, this page makes an API token for the computer
-// and seals it and the account's key, written out as a computer keeps it (the key and the checker, not the root), to
-// that key; and puts that on the server under a name drawn from the key, which the plugin asks for. Nothing but the
-// plugin that showed the link opens it.
-// (the page the two links open: its head says which)
+// ---- A computer connected with the code its ManyClaws plugin shows in Claude Code (#/connect): nine digits, the first
+// three of which find it on the server, the other six of which it made and never sent. With them this page and the
+// plugin make a key (pairAnswer), the plugin sends its computer's name sealed with it, and, approved here with the
+// passkey, the page makes a token for that computer and gives it the token and the account's key (written out, mcf_…),
+// sealed with the key the two made. Nothing of it is the server's to read.
+// (the page connecting one: its head says what it is)
 function connectHead(name, sub) {
   el('connect').querySelector('.chat-name').textContent = name
   el('connect').querySelector('.chat-sub').textContent = sub
 }
-async function openConnect(keyText, named) {
+function openConnect() {
   leaveChat()
-  connectHead('Connect a computer', 'From the link its ManyClaws plugin showed in Claude Code.')
+  connectHead('Connect a computer', 'With the code its ManyClaws plugin shows in Claude Code.')
   const body = el('connect-body')
   const u = app.account?.user
-  let key = null
-  try {
-    key = sealing.fromB64(keyText)
-  } catch {}
-  const name = String(named || 'this computer').trim().slice(0, 60) || 'this computer'
-  if (!u || !sealing || !vault || key?.length !== 32) return void fill(body, h('p', { 'data-part': 'connect-not' }, 'This is not a link a computer’s ManyClaws plugin makes. Start Claude Code on the computer again: it shows the link that connects it.'))
+  if (!u || !sealing || !vault) return
   if (!app.key?.root)
-    return void fill(body, h('p', { 'data-part': 'connect-cannot' }, app.key ? 'This browser keeps your key without a passkey, so it cannot connect a computer. Open the link on one of your devices that keeps it under one.' : 'This browser does not have your key, so it cannot connect a computer. Open the link on one of your devices that has it, or read its code with your phone.'))
+    return void fill(body, h('p', { 'data-part': 'connect-cannot' }, app.key ? 'This browser keeps your key without a passkey, so it cannot connect a computer. Do it on one of your devices that keeps it under one.' : 'This browser does not have your key yet, so it cannot connect a computer. Approve it from one of your devices first, or connect the computer from one of them.'))
+  const typed = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off', maxlength: '11', placeholder: '000 000 000', 'data-part': 'connect-typed', class: 'pair-typed' })
+  const note = h('span', { class: 'form-note', 'data-part': 'connect-note' })
+  const go = h('button', { type: 'submit', class: 'primary', 'data-part': 'connect-go' }, 'Continue')
+  const failed = (why) => ((note.textContent = sentence(why)), (note.className = 'form-note error'), (go.disabled = false))
+  const form = h(
+    'form',
+    { class: 'guide-form', 'data-part': 'connect-form' },
+    h('p', { 'data-part': 'connect-asks' }, 'Start Claude Code on the computer. Its ManyClaws plugin shows a code of nine digits there: enter it here.'),
+    typed,
+    h('div', null, go, ' ', note),
+  )
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    const code = typed.value.replace(/\D/g, '')
+    if (code.length !== 9) return failed('the code is nine digits')
+    go.disabled = true
+    note.textContent = 'Checking…'
+    note.className = 'form-note'
+    const found = await fetch('/api/pairings?slot=' + code.slice(0, 3)).catch(() => null)
+    if (!found?.ok) return failed(await errorFrom(found))
+    const { id, point } = await found.json()
+    let went
+    try {
+      went = await pairAnswer(id, point, code.slice(3), COMPUTER_PAIRING)
+    } catch (err) {
+      return failed(err.message)
+    }
+    if (went.wrong) {
+      typed.select()
+      return failed(went.left ? `that is not the code it shows: ${went.left} ${went.left === 1 ? 'try' : 'tries'} left` : 'that is not the code it shows, and it has had its three tries: type /manyclaws connect there for another')
+    }
+    connectAsk(body, id, went.paired, String(went.said?.name || 'this computer').slice(0, 60))
+  })
+  fill(body, form)
+  typed.focus()
+}
+// Asked, once its code was the one typed: is it to be connected? Approved with the passkey, it is given a token of its
+// own and the account's key
+function connectAsk(body, id, paired, name) {
+  const u = app.account.user
   const note = h('span', { class: 'form-note', 'data-part': 'connect-note' })
   const go = h('button', { type: 'submit', class: 'primary', 'data-part': 'connect-go' }, 'Connect')
   const failed = (why) => ((note.textContent = sentence(why)), (note.className = 'form-note error'), (go.disabled = false))
@@ -3443,7 +3478,7 @@ async function openConnect(keyText, named) {
     'form',
     { class: 'guide-form', 'data-part': 'connect-form' },
     h('p', { 'data-part': 'connect-asks' }, 'Connect ', h('b', null, name), ' to your account?'),
-    h('p', { 'data-part': 'connect-warns' }, 'This gives an API token of its own and your encryption key to the Claude Code session that showed you this link. If you did not just open one there, close this page.'),
+    h('p', { 'data-part': 'connect-warns' }, 'It is given an API token of its own and your encryption key. Connect it only if it is a computer you are at yourself, showing you that code.'),
     h('div', null, go, ' ', note),
   )
   form.addEventListener('submit', async (ev) => {
@@ -3461,11 +3496,11 @@ async function openConnect(keyText, named) {
     vault.forget({ ...opened.made, root: opened.root })
     const t = await sendJson('/api/account/tokens', { name, days: 0 })
     if (!t.ok) return failed('no API token could be made for it: ' + t.error)
-    const why = await handTo(key, { token: t.data.token, key: written, account: String(u.email ?? ''), name })
+    const why = await pairGive(id, paired, { token: t.data.token, key: written, account: String(u.email ?? ''), name })
     if (why) {
       // (the token made for it goes again: nothing has it)
       await fetch('/api/account/tokens/' + t.data.id, { method: 'DELETE' }).catch(() => {})
-      return failed(why === 'that link has been answered already' ? 'that link has been answered already: start a new one on the computer (/manyclaws connect)' : 'it could not be handed over: ' + why)
+      return failed('it could not be handed over: ' + why)
     }
     await loadAccount().catch(() => {})
     fill(
@@ -3861,7 +3896,7 @@ function looseNodes(c) {
 
 // A machine's past sessions, newest first; `more` adds the next page
 // What is said under a computer whose answer this browser's key does not open
-const OTHER_KEY = 'This computer answered with something this browser cannot open: it has another key than this browser’s. Connect it again, from the link its plugin shows.'
+const OTHER_KEY = 'This computer answered with something this browser cannot open: it has another key than this browser’s. Connect it again, with the code its plugin shows.'
 const catalogWaits = new Map() // mid -> the timer a computer's sessions are read again by
 function catalogSoon(mid) {
   const wait = 3000 - (Date.now() - (app.catalog.get(mid)?.at ?? 0))
@@ -6588,7 +6623,7 @@ async function fetchFile(m, what, { still = () => true, says = () => {} } = {}) 
   if (!still()) return null
   if (!r.ok) return { error: sentence(r.error) }
   const info = r.data.file
-  if (!info || typeof info !== 'object') return { error: `What ${machineName(m)} sent could not be opened with the key this device has: the two have different keys. Connect it again, from the link its plugin shows.` }
+  if (!info || typeof info !== 'object') return { error: `What ${machineName(m)} sent could not be opened with the key this device has: the two have different keys. Connect it again, with the code its plugin shows.` }
   const pieces = [unb64(r.data.data ?? '')]
   for (let part = 1; part < r.data.parts; part++) {
     says(`Fetching from ${machineName(m)}… ${fileSize(pieces.reduce((n, p) => n + p.length, 0))} of ${fileSize(r.data.size)}`)
@@ -8192,7 +8227,7 @@ function connectedLine() {
 }
 
 // ---- What a computer is given: an API token to sign in with, and the account's key. Both
-// are handed to it sealed, as it is connected from its link (openConnect): the token is made
+// are handed to it sealed, as it is connected with its code (openConnect): the token is made
 // for it, named for it, and is what is taken back to disconnect it. Drawn on Account.
 
 const dayOf = (ts) => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
@@ -8265,6 +8300,8 @@ function tokensPart(redraw) {
 // holds it only while the page is open would lose it that way, and one that has just let
 // go of it has something to say: there the page reads everything again as it stands.
 async function startOver() {
+  // (a key had here another way, as by the recovery key: the account's devices are no longer asked for this one)
+  await withdrawAsking()
   const held = app.account && vault ? await vault.heldKey(app.account.user.id).catch(() => null) : null
   if (held?.own) return location.reload()
   app.views.clear()
@@ -8386,39 +8423,104 @@ async function resealMarks(key, all = true, was = app.key) {
 // written out. Nothing typed makes a key, so nothing the server holds is anything to guess
 // at, and nothing of the root or the passkey is sent to it.
 //
-// The links, each with a key made for the once after the #, which a browser sends nowhere:
-//   #/b/<key>/<name>   a browser or a phone that has no key, asking: opened where the key is, and approved there
-//   #/a/<key>          the other way round: a device that has the key, offering it (Account, Devices, Add a phone or
-//                      browser); opened on one that has none, which says back to it, sealed, the key it is to be given
-//                      it by, and its name. So a phone can be added from a desk's browser, which has no camera to read
-//                      the phone's code with.
-//   #/c/<key>/<name>   a computer's plugin, asking (openConnect)
-// Each answer is put on the server under a name drawn from the key it is sealed to (its SHA-256), and asked for there
-// by that name, by whatever has the other half.
-
-const ASK_EVERY_MS = 3000
-const WAIT_MS = 10 * 60_000
-const linkOf = (kind, pub, name) => `${location.origin}/app#/${kind}/${sealing.toB64(pub)}${name === undefined ? '' : '/' + encodeURIComponent(String(name).slice(0, 24))}`
-const handedAt = (pub) => '/api/connect/' + sealing.toB64(sealing.sha256(pub)).slice(0, 22)
+// A new phone or browser, and a computer, are given it by pairing (seal.js, "Pairing"; the server's pairAsk): what is
+// new shows a code, and it is typed on a device that has the key, under a passkey. The two make a key from the code by
+// way of the server, which can make nothing of it, and what the new one is given is sealed with that key.
+//   A browser or a phone with no key, signed in: shows six digits, and each of the account's devices that has the key
+//   is told of it and asks for them (lookForPairings), then whether it is the person's own or borrowed.
+//   A computer: its plugin shows nine digits in Claude Code, typed under Connect a computer (#/connect): the first
+//   three are the server's, by which it is found.
+const PAIR_EVERY_MS = 1000
+const DEVICE_PAIRING = 'manyclaws device'
+const COMPUTER_PAIRING = 'manyclaws computer'
 const noPasskeys = () => !globalThis.PublicKeyCredential || !navigator.credentials?.create
 // (the person said no to the passkey, or let it be: nothing was done)
 const refused = (err) => err?.name === 'NotAllowedError' || err?.name === 'AbortError'
+const pause = (ms) => new Promise((done) => setTimeout(done, ms))
+const errorFrom = async (r) => (await r?.json().catch(() => null))?.error ?? 'the server could not be reached'
+const spacedCode = (code) => String(code).replace(/(\d{3})(?=\d)/g, '$1 ')
 
-// What is sealed to a key, put on the server where the one that has its other half asks for it: '' when it is there,
-// or why not
-async function handTo(pub, value) {
-  const r = await fetch(handedAt(pub), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sealed: sealing.sealTo(pub, value) }) }).catch(() => null)
-  if (r?.ok) return ''
-  return r?.status === 409 ? 'that link has been answered already' : ((await r?.json().catch(() => null))?.error ?? 'the server could not be reached')
+// The code typed here, for what asked (`id`, whose half of the exchange is `point`): this side's half and its confirm
+// go to it by way of the server, and its reply is waited for. { paired, said } where the code was the one it shows
+// (`said`: what it sent, opened); { wrong, left } where it was not; throws why not otherwise.
+async function pairAnswer(id, point, code, context) {
+  const start = sealing.pairStart(false, code, context)
+  let paired = null
+  try {
+    paired = sealing.pairFinish(start, sealing.fromB64(point))
+  } catch {}
+  if (!paired) throw new Error('what asked is not something ManyClaws makes')
+  const r = await fetch(`/api/pairings/${id}/answer`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ point: sealing.toB64(start.mine), confirm: sealing.toB64(paired.confirm) }) }).catch(() => null)
+  if (!r?.ok) throw new Error(await errorFrom(r))
+  const until = Date.now() + 60_000
+  while (Date.now() < until) {
+    await pause(PAIR_EVERY_MS)
+    const got = await fetch(`/api/pairings/${id}`).catch(() => null)
+    if (got?.status === 404) throw new Error('it is no longer asking: its code ran out, or was used up')
+    const seen = got?.ok ? await got.json().catch(() => null) : null
+    if (seen?.declined) throw new Error('it was turned down on another of your devices')
+    if (seen?.wrong) return { wrong: true, left: seen.left }
+    if (seen?.reply) {
+      let confirm = null
+      try {
+        confirm = sealing.fromB64(seen.reply.confirm)
+      } catch {}
+      // (a reply with the code's confirm and not this one's is something else answering: it is given nothing)
+      if (!sealing.pairConfirmed(paired, confirm)) throw new Error('what answered did not make the same key from the code, so it was given nothing')
+      return { paired, said: sealing.openPaired(paired, seen.reply.sealed) ?? {} }
+    }
+  }
+  throw new Error('it did not answer within a minute: try again')
 }
-// What was sealed to a key made here for the once (`pair`), when it comes: asked for every few seconds until `until`,
-// or until `still()` says it is no longer waited for. Null where it did not come; { broken: true } where what came does
-// not open with it.
-async function handedTo(pair, { until = Date.now() + WAIT_MS, still = () => true } = {}) {
-  while (Date.now() < until && still()) {
-    const r = await fetch(handedAt(pair.public)).catch(() => null)
-    if (r?.status === 200) return sealing.openFrom(pair.secret, (await r.json().catch(() => null))?.sealed) ?? { broken: true }
-    await new Promise((done) => setTimeout(done, ASK_EVERY_MS))
+// What it is given, sealed with the key the two made: '' when it is there, or why not
+async function pairGive(id, paired, value) {
+  const r = await fetch(`/api/pairings/${id}/done`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sealed: sealing.sealPaired(paired, value) }) }).catch(() => null)
+  return r?.ok ? '' : await errorFrom(r)
+}
+
+// This browser asking to join the account: a code made here, and the asking the server tells the account's devices of
+async function askToJoin() {
+  const code = sealing.pairCode(6)
+  const start = sealing.pairStart(true, code, DEVICE_PAIRING)
+  const r = await fetch('/api/pairings', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ kind: 'device', point: sealing.toB64(start.mine) }) }).catch(() => null)
+  if (!r?.ok) throw new Error(await errorFrom(r))
+  const got = await r.json()
+  return { code, start, id: got.id, token: got.token, until: Math.min(got.until, Date.now() + 10 * 60_000), paired: null }
+}
+// This browser no longer asking (signed out, or left for later): the account's devices are told, and stop asking for it
+async function withdrawAsking() {
+  const w = app.waiting
+  app.waiting = null
+  if (w) await fetch(`/api/pairings/${w.id}`, { method: 'DELETE', headers: { 'x-pairing': w.token } }).catch(() => {})
+}
+// (and so where the page goes away, closed or left, as it is asking: the account's devices are not left asking for it.
+// Sent as the page goes, which only a request kept alive past it is)
+window.addEventListener('pagehide', () => {
+  const w = app.waiting
+  if (w) fetch(`/api/pairings/${w.id}`, { method: 'DELETE', headers: { 'x-pairing': w.token }, keepalive: true }).catch(() => {})
+})
+// And what comes of it: what it was given (for takeGiven), { declined } where it was turned down, or null where it ran
+// out or `still()` says it is no longer waited for. A code typed that is not this one is answered as that.
+async function joined(w, still) {
+  const headers = { 'x-pairing': w.token, 'content-type': 'application/json' }
+  while (still() && Date.now() < w.until) {
+    const r = await fetch(`/api/pairings/${w.id}`, { headers }).catch(() => null)
+    if (r?.status === 404) return null
+    const seen = r?.ok ? await r.json().catch(() => null) : null
+    if (seen?.declined) return { declined: true }
+    if (seen?.answer && !w.paired) {
+      let paired = null
+      let right = false
+      try {
+        paired = sealing.pairFinish(w.start, sealing.fromB64(seen.answer.point))
+        right = sealing.pairConfirmed(paired, sealing.fromB64(seen.answer.confirm))
+      } catch {}
+      const reply = right ? { confirm: sealing.toB64(paired.confirm), sealed: sealing.sealPaired(paired, { name: deviceLabel() }) } : { wrong: true }
+      const put = await fetch(`/api/pairings/${w.id}/reply`, { method: 'PUT', headers, body: JSON.stringify(reply) }).catch(() => null)
+      if (right && put?.ok) w.paired = paired
+    }
+    if (seen?.done && w.paired) return sealing.openPaired(w.paired, seen.done) ?? { broken: true }
+    await pause(PAIR_EVERY_MS)
   }
   return null
 }
@@ -8573,7 +8675,7 @@ async function takeGiven(got, failed = (why) => tell('Not taken', sentence(why))
   try {
     seed = typeof got?.seed === 'string' ? sealing.fromB64(got.seed) : null
   } catch {}
-  if (!u || got?.broken || seed?.length !== 32) return failed('what came back did not open with the key this browser made for it, so nothing of it was taken')
+  if (!u || got?.broken || seed?.length !== 32) return failed('what came back did not open with the key made with its code, so nothing of it was taken')
   let held = null
   if (typeof got.root === 'string') {
     const root = sealing.fromB64(got.root)
@@ -8601,17 +8703,17 @@ async function takeGiven(got, failed = (why) => tell('Not taken', sentence(why))
   await vault.dropBefore(u.id)
   await vault.forgetBefore(u.id)
   app.before = false
-  app.waiting = null
+  app.declined = false
   app.offList = false
   app.newKey = false
-  if (location.hash.startsWith('#/a/')) history.replaceState(null, '', location.pathname)
   startOver()
 }
 
 // A browser or a phone approved from this one: put on the list of the account's devices (with a signing key of its own,
 // made here for it and given to it with the rest), and given the root, where it is the person's own (`own`), or only
-// the key, for a day, where it is borrowed. `pub`: the key it made for the once. '' when it is done, or why not.
-async function approveDevice(pub, name, own) {
+// the key, for a day, where it is borrowed. `give`: what hands it what it is given (pairGive). '' when it is done, or
+// why not.
+async function approveDevice(give, name, own) {
   let opened
   try {
     opened = await unlocked()
@@ -8627,7 +8729,7 @@ async function approveDevice(pub, name, own) {
   let why = await putDevices(app.key, made.signer, (devices) => [...devices, { key, name, at, ...(until ? { until } : {}) }])
   if (!why) {
     const given = own ? { root: sealing.toB64(root) } : { key: sealing.keysText(made), until }
-    why = await handTo(pub, { ...given, seed: sealing.toB64(seed), v: app.devicesList?.v ?? 0, account: String(app.account?.user.email ?? '') })
+    why = await give({ ...given, seed: sealing.toB64(seed), v: app.devicesList?.v ?? 0, account: String(app.account?.user.email ?? '') })
     // (one that was not handed over is no device of the account's: off the list again)
     if (why) await putDevices(app.key, made.signer, (devices) => devices.filter((d) => d.key !== key))
   }
@@ -8636,9 +8738,9 @@ async function approveDevice(pub, name, own) {
   return why
 }
 
-// Asked, here: is this device to be given the key, and is it the person's own? Drawn into `box`. `how`: 'link' (it
-// showed this one a link) or 'code' (it read this one's code).
-function approveForm(box, pub, name, how) {
+// Asked, here: is this device to be given the key, and is it the person's own? Drawn into `box`, once the code it
+// showed was typed here; `give` hands it what it is given, `done` is what is shown after.
+function approveForm(box, give, name, done) {
   const note = h('span', { class: 'form-note', 'data-part': 'approve-note' })
   const go = h('button', { type: 'submit', class: 'primary', 'data-part': 'approve-go' }, 'Approve')
   const choice = (part, checked, ...says) => h('label', { class: 'guide-check' }, h('input', { type: 'radio', name: 'approve-whose', 'data-part': part, checked }), h('span', null, ...says))
@@ -8648,7 +8750,7 @@ function approveForm(box, pub, name, how) {
     'form',
     { class: 'guide-form', 'data-part': 'approve-form' },
     h('p', { 'data-part': 'approve-asks' }, 'Add ', h('b', null, name), ' to your devices?'),
-    h('p', { 'data-part': 'approve-warns' }, how === 'code' ? `Approve only if ${name} is the device you have just read this one’s code with: it is given your account’s key.` : 'Approve only a browser or phone you have just opened yourself, which is showing you this link: it is given your account’s key.'),
+    h('p', { 'data-part': 'approve-warns' }, `It is given your account’s key. Approve it only if ${name} is a phone or browser you have just signed in on yourself.`),
     h('fieldset', { class: 'device-whose' }, h('legend', null, 'Is it yours?'), mine, notMine),
     h('div', null, go, ' ', note),
   )
@@ -8657,58 +8759,123 @@ function approveForm(box, pub, name, how) {
     go.disabled = true
     note.textContent = 'Asking for your passkey…'
     note.className = 'form-note'
-    const why = await approveDevice(pub, name, mine.querySelector('input').checked)
+    const why = await approveDevice(give, name, mine.querySelector('input').checked)
     if (why) {
       note.textContent = sentence(why)
       note.className = 'form-note error'
       go.disabled = false
       return
     }
-    fill(box, h('p', { 'data-part': 'approve-done', class: 'guide-status connected' }, '✓ ', h('b', null, name), ' is one of your devices now: it opens your sessions in a moment.'), h('p', null, h('a', { href: '#' }, 'Back to your sessions')))
+    fill(box, h('p', { 'data-part': 'approve-done', class: 'guide-status connected' }, '✓ ', h('b', null, name), ' is one of your devices now: it opens your sessions in a moment.'), done)
   })
   fill(box, form)
+  go.focus()
 }
 
-// The link a browser or a phone with no key showed (#/b/<its key>/<its name>), opened here
-function openApprove(keyText, named) {
-  leaveChat()
-  connectHead('Add a phone or browser', 'From the link it showed.')
-  const body = el('connect-body')
-  let pub = null
-  try {
-    pub = sealing.fromB64(keyText)
-  } catch {}
-  const name = String(named || 'a browser').trim().slice(0, 60) || 'a browser'
-  if (!app.account || !sealing || !vault || pub?.length !== 32) return void fill(body, h('p', { 'data-part': 'approve-not' }, 'This is not a link ManyClaws makes.'))
-  if (!app.key?.root)
-    return void fill(body, h('p', { 'data-part': 'approve-cannot' }, app.key ? 'This browser keeps your key without a passkey, so it cannot approve another device. Open the link on one that keeps it under one.' : 'This browser does not have your key, so it cannot approve another device. Open the link on one that has it.'))
-  approveForm(body, pub, name, 'link')
+// ---- A phone or browser of the account's asking to join it (askToJoin, on that one): every page of the account's
+// that has the key under a passkey is told (the server's 'pairing'), and asks for the code it shows, in a box over
+// whatever is open. One at a time; Later leaves it until the page is next opened, Not me turns it away everywhere.
+app.pairSkipped = new Set()
+async function lookForPairings() {
+  if (!app.key?.root || !app.account) return
+  const r = await fetch('/api/pairings').catch(() => null)
+  const list = r?.ok ? ((await r.json().catch(() => null))?.pairings ?? []) : null
+  if (!list) return
+  const asking = list.filter((x) => !app.pairSkipped.has(x.id) && !x.answering)
+  // (drawn again where what is asking has changed, and it is not being answered here: one answered on another device,
+  // or that ran out, goes from here too)
+  if (app.pairing?.busy) return
+  const ids = asking.map((x) => x.id).join()
+  if (!asking.length) return closePairing()
+  if (app.pairing?.ids !== ids) openPairing(asking)
 }
-
-// This device offering the key the other way round: a code and a link with a key made for the once, which the device
-// to be added opens; it answers with the key it made for itself, and is asked about here (approveForm)
-async function offerKey(box) {
-  const pair = sealing.x25519Keys()
-  const link = linkOf('a', pair.public)
-  const code = h('div', { class: 'key-code', 'data-part': 'offer-code' })
-  import('./qr.js')
-    .then((q) => {
-      const c = q.qrOf(link)
-      if (c) code.replaceChildren(qrPicture(c))
-    })
-    .catch(() => {})
-  const status = h('p', { class: 'muted', 'data-part': 'offer-waiting' }, 'Waiting for the phone or browser to open it…')
-  fill(box, h('p', null, 'On the phone or browser to add, sign in to ManyClaws, then read this code with its camera, or open the link there. This page then asks you to approve it.'), code, codeBox(link), status)
-  const got = await handedTo(pair, { still: () => box.isConnected })
-  let pub = null
-  try {
-    pub = typeof got?.pub === 'string' ? sealing.fromB64(got.pub) : null
-  } catch {}
-  if (!box.isConnected) return
-  if (!got) return void (status.textContent = 'Nothing opened it within ten minutes.')
-  if (pub?.length !== 32) return void (status.textContent = 'What answered is not a device ManyClaws makes.')
-  approveForm(box, pub, String(got.name || 'a browser').slice(0, 60), 'code')
+function closePairing() {
+  app.pairing = null
+  if (el('pair-box').open) el('pair-box').close()
 }
+// Which one is asking, as the server saw it ask (the browser it asked from), and when
+const askedAgo = (at) => {
+  const min = Math.round((Date.now() - at) / 60_000)
+  return min < 1 ? 'just now' : min === 1 ? 'a minute ago' : `${min} minutes ago`
+}
+function openPairing(asking) {
+  const box = el('pair-body')
+  const pairing = (app.pairing = { ids: asking.map((x) => x.id).join(), busy: false })
+  let x = asking[0]
+  const typed = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '7', placeholder: '000 000', 'data-part': 'pair-typed', class: 'pair-typed' })
+  const note = h('p', { class: 'form-note', 'data-part': 'pair-note' })
+  const go = h('button', { type: 'submit', class: 'primary', 'data-part': 'pair-go' }, 'Continue')
+  const later = h('button', { type: 'button', class: 'ghost', 'data-part': 'pair-later', onclick: () => (asking.forEach((a) => app.pairSkipped.add(a.id)), closePairing()) }, 'Later')
+  const notMe = h(
+    'button',
+    {
+      type: 'button',
+      class: 'ghost',
+      'data-part': 'pair-decline',
+      onclick: async () => {
+        pairing.busy = true
+        await fetch(`/api/pairings/${x.id}`, { method: 'DELETE' }).catch(() => null)
+        pairing.busy = false
+        app.pairing = null
+        lookForPairings().catch(() => {})
+      },
+    },
+    'Not me',
+  )
+  const what = (a) => `${deviceLabel(a.agent || '', false) || 'A browser'}, asked ${askedAgo(a.at)}`
+  // (one asking: said which; more than one: which it is is picked, the newest first)
+  const which =
+    asking.length === 1
+      ? h('p', { class: 'muted', 'data-part': 'pair-which', 'data-pairing': x.id }, what(x))
+      : h(
+          'fieldset',
+          { class: 'device-whose', 'data-part': 'pair-which' },
+          h('legend', null, `${asking.length} are asking. Which one is it?`),
+          ...asking.map((a, i) =>
+            h('label', { class: 'guide-check' }, h('input', { type: 'radio', name: 'pair-which', 'data-pairing': a.id, checked: i === 0, onchange: () => (x = a) }), h('span', null, what(a))),
+          ),
+        )
+  const failed = (why) => ((note.textContent = sentence(why)), (note.className = 'form-note error'), (go.disabled = false), (pairing.busy = false))
+  const form = h(
+    'form',
+    { class: 'guide-form', 'data-part': 'pair-form' },
+    h('h2', { 'data-part': 'pair-title' }, asking.length === 1 ? 'A phone or browser is asking to join your account' : 'Phones or browsers are asking to join your account'),
+    which,
+    h('p', { 'data-part': 'pair-asks' }, 'If you have just signed in to ManyClaws on it, enter the code it shows:'),
+    typed,
+    note,
+    h('div', { class: 'pair-buttons' }, go, later, notMe),
+  )
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault()
+    const code = typed.value.replace(/\D/g, '')
+    if (code.length !== 6) return failed('the code is six digits')
+    go.disabled = true
+    pairing.busy = true
+    note.textContent = 'Checking…'
+    note.className = 'form-note'
+    let went
+    try {
+      went = await pairAnswer(x.id, x.point, code, DEVICE_PAIRING)
+    } catch (err) {
+      return failed(err.message)
+    }
+    if (went.wrong) {
+      typed.select()
+      return failed(went.left ? `that is not the code it shows: ${went.left} ${went.left === 1 ? 'try' : 'tries'} left` : 'that is not the code it shows, and it has had its three tries: it shows a new code to try again with')
+    }
+    const name = String(went.said?.name || 'A browser').slice(0, 60)
+    approveForm(box, (value) => pairGive(x.id, went.paired, value), name, h('div', { class: 'pair-buttons' }, h('button', { type: 'button', class: 'primary', onclick: closePairing }, 'Done')))
+  })
+  fill(box, form)
+  if (!el('pair-box').open) el('pair-box').showModal()
+  typed.focus()
+}
+el('pair-box').addEventListener('close', () => {
+  // (shut with Escape: as Later)
+  if (app.pairing && !app.pairing.busy) for (const id of app.pairing.ids.split(',')) app.pairSkipped.add(id)
+  app.pairing = null
+})
 
 // What a browser with no key is shown, as it comes in and under Account: how it gets the key. Drawn into `box`, and
 // again by `redraw`.
@@ -8744,33 +8911,28 @@ async function drawKeyless(box, redraw) {
       note,
     )
   }
-  // The account has a key. Offered from another device the other way round (#/a/…): it is asked for there.
-  const offer = /^#\/a\/([A-Za-z0-9_-]{43})$/.exec(location.hash)
-  if (offer) {
-    history.replaceState(null, '', location.pathname)
-    const status = h('p', { 'data-part': 'key-offered' }, 'Asking the device that showed you the code…')
-    fill(box, was, status, note)
-    const pair = sealing.x25519Keys()
-    const why = await handTo(sealing.fromB64(offer[1]), { pub: sealing.toB64(pair.public), name: deviceLabel() })
-    if (why) return failed(`it could not be asked: ${why}`)
-    status.textContent = `Now approve ${deviceLabel()} on the device that showed you the code.`
-    const got = await handedTo(pair, { still: () => !app.key })
-    return got ? takeGiven(got, failed) : failed('it was not approved within ten minutes')
+  // The account has a key: one of its devices that has it approves this one, with the code shown here
+  let w = app.waiting && app.waiting.until > Date.now() + 30_000 ? app.waiting : null
+  if (!w && !app.declined) {
+    try {
+      // (once, wherever it is drawn: the card and the account's page may both be drawing it at once)
+      w = await (app.joining ??= askToJoin()
+        .then((got) => (app.waiting = got))
+        .finally(() => (app.joining = null)))
+    } catch (err) {
+      return fill(box, was, h('p', { class: 'form-note error' }, sentence('your other devices could not be asked: ' + err.message)), h('button', { type: 'button', class: 'ghost', onclick: redraw }, 'Try again'))
+    }
   }
-  // Or from another device by this one's link or code
-  const w = (app.waiting = app.waiting && app.waiting.until > Date.now() + 30_000 ? app.waiting : { pair: sealing.x25519Keys(), until: Date.now() + WAIT_MS })
-  const link = linkOf('b', w.pair.public, deviceLabel())
-  const code = h('div', { class: 'key-code', 'data-part': 'approve-code' })
-  import('./qr.js')
-    .then((q) => {
-      const c = q.qrOf(link)
-      if (c) code.replaceChildren(qrPicture(c))
-    })
-    .catch(() => {})
-  if (!w.asking) {
+  const code = w ? h('p', { class: 'pair-code', 'data-part': 'key-code' }, spacedCode(w.code)) : null
+  if (w && !w.asking) {
     w.asking = true
-    handedTo(w.pair, { until: w.until, still: () => !app.key && app.waiting === w }).then((got) => {
+    joined(w, () => !app.key && app.waiting === w).then((got) => {
       w.asking = false
+      if (got?.declined) {
+        app.waiting = null
+        app.declined = true
+        return redraw()
+      }
       if (got) return takeGiven(got)
       if (app.waiting === w && !app.key) {
         app.waiting = null
@@ -8778,6 +8940,9 @@ async function drawKeyless(box, redraw) {
       }
     })
   }
+  // (turned down on one of them: asked again only when the person says)
+  const again = h('button', { type: 'button', class: 'ghost', 'data-part': 'key-ask-again', onclick: () => ((app.declined = false), redraw()) }, 'Ask again')
+  const waiting = app.declined ? h('p', { class: 'form-note error', 'data-part': 'key-declined' }, 'That was turned down on another of your devices. ', again) : h('p', { class: 'muted', 'data-part': 'key-waiting' }, 'Waiting for it to be approved… The code works for ten minutes, and another is shown after.')
   // Or from the recovery key
   const typed = h('input', { type: 'text', 'data-part': 'recovery-typed', placeholder: 'XXXX-XXXX-XXXX-…', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false' })
   const use = h('button', { type: 'submit', class: 'primary', 'data-part': 'recovery-go' }, 'Use it')
@@ -8807,25 +8972,22 @@ async function drawKeyless(box, redraw) {
         h('li', null, 'What the server kept of your sessions is removed. Your computers still have their sessions, and show them again once they are connected.'),
         h('li', null, 'Your favorites stay, and are named again as their sessions next report. The names, labels, colors and reminders you put on sessions were sealed with the old key, and are removed.'),
         h('li', null, 'Your other phones and browsers are approved again, from this one.'),
-        h('li', null, 'Each computer is connected again, from the link its plugin shows, once its plugin and agent are moved to this version: the page says which, and how.'),
+        h('li', null, 'Each computer is connected again, with the code its plugin shows, once its plugin and agent are moved to this version: the page says which, and how.'),
       ),
       noPasskeys() ? h('p', { class: 'form-note error', 'data-part': 'key-no-passkeys' }, 'This browser has no passkeys. Start afresh on your phone instead (sign in to ManyClaws there), then approve this browser from it.') : h('div', null, start),
       note,
-      h('p', { class: 'key-before-then', 'data-part': 'key-approve' }, h('b', null, 'Started afresh already, on another of your devices?'), ' Approve this browser from it: open this link there, or read the code with your phone’s camera.'),
+      h('p', { class: 'key-before-then', 'data-part': 'key-approve' }, h('b', null, 'Started afresh already, on another of your devices?'), ' It is asking you there to approve this browser: enter this code in it.'),
       code,
-      codeBox(link),
-      h('p', { class: 'muted', 'data-part': 'key-waiting' }, 'Waiting for it to be approved…'),
+      waiting,
       h('details', { 'data-part': 'recovery-ask' }, h('summary', null, 'I have my new recovery key'), form),
     )
   }
   fill(
     box,
     was,
-    h('p', { 'data-part': 'key-approve' }, 'Your account’s key is on your other devices. Open this link on one of them, or read the code with your phone’s camera, and approve this browser there.'),
+    h('p', { 'data-part': 'key-approve' }, 'Your account’s key is on your other devices. Each of them that keeps it under a passkey is asking you now to approve this browser (open ManyClaws on one, or tap its notification): enter this code there.'),
     code,
-    codeBox(link),
-    h('p', { class: 'muted', 'data-part': 'key-waiting' }, 'Waiting for it to be approved…'),
-    h('p', { class: 'muted' }, 'Or the other way round: on a device that has your key, open Account, Devices, Add a phone or browser, and read its code with this one.'),
+    waiting,
     h('details', { 'data-part': 'recovery-ask' }, h('summary', null, 'I have my recovery key'), form),
     h('details', { 'data-part': 'afresh-ask' }, h('summary', null, 'I have neither'), h('p', null, 'Without a device that has your key or your recovery key, nobody can open what your sessions said before. You can start afresh with a new key, and connect your computers again.'), afresh),
     note,
@@ -8839,7 +9001,7 @@ async function startAfresh(box, redraw) {
   const yes = await ask('Start afresh with a new key?', {
     says: [
       'Your account is given a new key, made on this browser and kept under a passkey here, and a new recovery key. What is kept sealed on the server can no longer be opened, so it is removed: your stored sessions (your computers still have them), and the names of your favorites and what you put on your sessions, where this browser cannot read them to seal them again.',
-      'Every other phone and browser lets go of the key it had and has to be approved again, and every computer is disconnected (its API token is taken back): connect each again from the link its plugin shows.',
+      'Every other phone and browser lets go of the key it had and has to be approved again, and every computer is disconnected (its API token is taken back): connect each again with the code its plugin shows.',
     ],
     yes: 'Start afresh',
     danger: true,
@@ -9008,9 +9170,8 @@ function devicesPart(redraw) {
   const u = app.account.user
   const says = h('p', null, 'The phones and browsers that have your key. Each asks things of your computers with a key of its own, which never leaves it, and your computers do what one of these asks and nobody else: not the server, and not a device you have removed. A lost phone is removed here, from any other device that keeps your key under a passkey, and your key stays as it is.')
   if (!app.key) return [says, h('p', { class: 'muted', 'data-part': 'devices-locked' }, 'They are listed here once this browser has your key.')]
-  // (another added from here: a code it reads, the other way round from the link a device with no key shows)
-  const adding = h('div', { 'data-part': 'device-adding' })
-  const add = app.key.root && h('div', null, h('button', { type: 'button', class: 'ghost', 'data-part': 'device-add', onclick: () => offerKey(adding) }, 'Add a phone or browser'))
+  // (another is added by signing in to ManyClaws on it: it shows a code, and this page asks for it)
+  const add = app.key.root && h('p', { class: 'muted', 'data-part': 'device-add' }, 'To add a phone or browser, sign in to ManyClaws on it. It shows a code, and this page asks you for it.')
   const box = h('div', { 'data-part': 'devices' }, h('p', { class: 'muted' }, 'Reading…'))
   const day = (ts) => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
   const hour = (ts) => new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
@@ -9075,7 +9236,7 @@ function devicesPart(redraw) {
     draw()
   }
   draw()
-  return [says, box, add, adding]
+  return [says, box, add]
 }
 
 // ---- The code this page is running. It is published (github.com/redimaker/manyclaws,
@@ -9196,7 +9357,7 @@ function keptPart(redraw) {
 
 // How a computer is set up is the same for everyone: the line to paste into Claude Code
 // on it, which installs the plugin from the guide (the server's /setup, which has nothing
-// of anyone's in it), and then the link the plugin shows there, opened here and approved
+// of anyone's in it), and then the code the plugin shows there, typed here and approved
 // with this browser's passkey. Nothing of the account's is typed into Claude Code. This
 // browser has to have the key, under a passkey, to approve it: where it has not, that is
 // what the page shows first.
@@ -9208,14 +9369,14 @@ function renderSetup() {
   const at = body.scrollTop
   fill(
     body,
-    accountHead('Set up a computer', 'Connect a computer', 'Each computer you run Claude Code on is connected from a link its ManyClaws plugin shows there: you open it here and approve it with your passkey. Nothing of yours is typed into Claude Code.'),
+    accountHead('Set up a computer', 'Connect a computer', 'Each computer you run Claude Code on is connected with a code its ManyClaws plugin shows there: you type it here and approve it with your passkey. Nothing of yours is typed into Claude Code.'),
     h('div', { id: 'setup-status' }, connectedLine()),
     // (this browser approves it, with the key under its passkey: where it has none, how it gets it, first)
     !app.key?.root &&
       accountPart(
         'Your key, on this browser',
         { id: 'setup-key' },
-        ...(app.key ? [h('p', { 'data-part': 'setup-key' }, 'This browser has your key, but not under a passkey, so it cannot approve a computer. Open the computer’s link on one of your devices that keeps it under one.')] : keyPart(renderSetup)),
+        ...(app.key ? [h('p', { 'data-part': 'setup-key' }, 'This browser has your key, but not under a passkey, so it cannot approve a computer. Type the computer’s code on one of your devices that keeps it under one.')] : keyPart(renderSetup)),
       ),
     accountPart(
       'Set up a computer',
@@ -9224,7 +9385,8 @@ function renderSetup() {
       h('p', { 'data-part': 'setup-say' }, 'On the computer, start Claude Code and paste this:'),
       codeBox(`Read ${guide}.md and set this computer up.`),
       // (what the person does themselves: the rest is Claude Code's, by the guide)
-      h('p', { 'data-part': 'setup-where' }, 'Claude Code installs the plugin from the guide. Then start a new Claude Code session there: it shows a link, and a code for your phone’s camera. Open it here, or on your phone, and approve the computer.'),
+      h('p', { 'data-part': 'setup-where' }, 'Claude Code installs the plugin from the guide. Then start a new Claude Code session there: it shows a code of nine digits. Enter it under Connect a computer, here or on your phone, and approve the computer.'),
+      h('p', { 'data-part': 'setup-connect' }, h('a', { href: '#/connect', class: 'primary button-link' }, 'Connect a computer')),
       // (and the guide itself, for whoever would rather do each step)
       h('p', null, h('a', { href: guide, target: '_blank', rel: 'noopener', id: 'setup-guide' }, 'Or set it up by hand')),
     ),
@@ -9389,7 +9551,7 @@ function renderUpgrade() {
             { id: 'upgrade-short' },
             h('p', null, `On ${these}, start Claude Code in a terminal, in VS Code or in the desktop app (not a session started from this page, which the agent itself is running) and paste this:`),
             codeBox(moveLine()),
-            h('p', null, 'Claude updates the plugin and hands the agent over to the copy the new plugin carries. Where it would end sessions this page started there, it asks you first. There is nothing to type, unless the computer is from before releases were signed: then its plugin shows a link that connects it again, which you open here.'),
+            h('p', null, 'Claude updates the plugin and hands the agent over to the copy the new plugin carries. Where it would end sessions this page started there, it asks you first. There is nothing to type, unless the computer is from before releases were signed: then its plugin shows a code that connects it again, which you type here.'),
             h('p', null, h('a', { href: guide, target: '_blank', rel: 'noopener', 'data-part': 'upgrade-guide' }, 'The guide'), ', which says what each step does, and how to do it by hand.'),
           ),
         ]
@@ -9446,7 +9608,7 @@ function renderPassword() {
 // ---- What does not open here: a page of its own, which the line across the top leads
 // to. It says which device seals with another key than this browser's (unopened), which
 // is the account's (a browser whose key does not open the list of the account's devices
-// lets go of it), and what to do on that device: connect it again, from its link. Nothing
+// lets go of it), and what to do on that device: connect it again, with its code. Nothing
 // on it is typed or pressed to find out: it is drawn again as what it says changes
 // (lookAgain), so a computer that has been seen to is seen to open.
 function renderUnopened() {
@@ -9458,14 +9620,14 @@ function renderUnopened() {
   const count = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`
   const body = el('account-body')
   const at = body.querySelector('[data-part=unopened]') ? body.scrollTop : 0
-  // What is done on a computer that has another key: it is connected again, from its link
+  // What is done on a computer that has another key: it is connected again, with its code
   const steps = (where) =>
     h(
       'ol',
       { class: 'shut-steps', 'data-part': 'unopened-steps' },
       h('li', null, 'On ', where, ', in Claude Code, type', codeBox('/manyclaws disconnect')),
-      h('li', null, 'Start a new Claude Code session there. It shows a link, and a code for your phone’s camera.'),
-      h('li', null, 'Open the link here, or on your phone, and approve the computer. Its sessions seal with your key from then on, and its agent takes the same key from the plugin within half a minute. A session that was already running goes on with the key it started with, until it is started again.'),
+      h('li', null, 'Start a new Claude Code session there. It shows a code of nine digits.'),
+      h('li', null, h('a', { href: '#/connect' }, 'Connect a computer'), ' with it here, or on your phone, and approve it. Its sessions seal with your key from then on, and its agent takes the same key from the plugin within half a minute. A session that was already running goes on with the key it started with, until it is started again.'),
     )
   // Sessions kept from before, which nobody who has this key can open: taken off the server, when asked
   const removal = (list) => {

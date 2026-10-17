@@ -94,7 +94,7 @@ function openFile(packed, key) {
 
 // Whether anything in what arrived is still sealed: this machine has no key for it, or not the right one
 const unopened = (value, depth = 0) => (typeof value === 'string' ? isSealed(value) || value === UNOPENED : !!value && typeof value === 'object' && depth < 8 && Object.values(value).some((v) => unopened(v, depth + 1)))
-const NO_KEY = 'what arrived is sealed, and this machine does not have the key that opens it: start a new Claude Code session on it, and connect it from the link its plugin shows'
+const NO_KEY = 'what arrived is sealed, and this machine does not have the key that opens it: start a new Claude Code session on it, and connect it with the code its plugin shows'
 
 // What the agent sends of this machine's sessions is sealed with the account's key
 // (seal.mjs), and sealed whole: nothing of a session's messages, or of how they are made

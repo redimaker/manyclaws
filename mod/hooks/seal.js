@@ -4,9 +4,9 @@
 //
 // The key is drawn from the account's root: 32 random bytes, made by its first phone or
 // browser. There is no passphrase. A device gets the key from one the account has
-// already, approved there (with Face ID, Touch ID or another passkey), sealed to a key the
-// new device made for that and showed in a link: so the server hands it over and cannot
-// open it. The root, written out, is the account's recovery key, for when every device is
+// already, approved there (with Face ID, Touch ID or another passkey), sealed with a key
+// the two made from a code the new device showed and the person typed (Pairing, below): so
+// the server hands it over and cannot open it. The root, written out, is the account's recovery key, for when every device is
 // lost: shown to the person once, kept by them, and never sent anywhere. The server is
 // given nothing of it, and has nothing to guess it from: it is not made from anything a
 // person chose.
@@ -14,7 +14,7 @@
 // This file is kept as three identical copies (a test compares them): mod/hooks/seal.js
 // (the plugin), web/seal.js (the page) and mod/agent/seal.mjs (the machine agent).
 // The plugin's runtime has no crypto library, so everything is implemented here in plain
-// JavaScript: SHA-256, SHA-512, HMAC, HKDF, AES-256-GCM, Ed25519, X25519, and the check of
+// JavaScript: SHA-256, SHA-512, HMAC, HKDF, AES-256-GCM, Ed25519, SPAKE2, and the check of
 // an SSH signature (a release's). The tests check each one against Node's own. (The page
 // keeps the key where a script cannot read it back, and the root wrapped under a passkey:
 // keys.js.)
@@ -57,8 +57,8 @@
 //                    names = HKDF-SHA256(key, salt "", info "manyclaws name v1"). The server tells one sealed row
 //                    from another by its name where it has to (a row sent twice is kept once). A name says nothing
 //                    of what it names, and only a device with the key can compute one
-//   handed over    = "k1." + base64url(public | iv | ciphertext | tag)          (sealTo: the key to a new device)
-//                    X25519 between a key made for the once and the new device's, HKDF, AES-256-GCM
+//   handed over    = "p1." + base64url(iv | ciphertext | tag)                   (sealPaired: the key to a new device)
+//                    AES-256-GCM with the key two devices made from the code one showed (Pairing, below)
 //
 // Another root makes another key, signer and checker. Nothing in a sealed value says which
 // key sealed it: a device with a different key fails to open it, and that failure is how
@@ -520,73 +520,89 @@ export function verify(message, signature, key) {
   return same(times(s, BASE), add(R, times(k, A)))
 }
 
-// ---- X25519 (RFC 7748), and sealing a value to a key: what a computer that has not yet
-// been given its token and key is handed them in. The plugin makes a pair once for the
-// asking, puts its public half in a link that goes from its own session to the person's
-// browser, and nothing but that pair's other half opens what the page seals to it. In the
-// same whole-number arithmetic as Ed25519, over the same field.
+// ---- Pairing: SPAKE2 (RFC 9382) over edwards25519, with a code a person carries from one
+// device to another. What is new to the account (a computer, a browser) shows the code;
+// a phone or browser that has the account's key is where it is typed. Each side makes a
+// point from the code and a number of its own, the server passes the two between them,
+// and each makes the same key from them only where both had the same code. The server,
+// which passes everything, has one guess at the code a try, and none it can check by
+// itself: what it sees of a try says nothing of any other code. So a code of six digits
+// is enough, with a try or three before it is made again. Each side shows the other it
+// has the key (confirm) before anything is sealed with it.
+//
+//   w      = SHA-512("manyclaws pairing v1" | context | code) mod L
+//   asker  (shows the code):  pA = x·G + w·M        approver (types it):  pB = y·G + w·N
+//   K      = 8·x·(pB - w·N)  =  8·y·(pA - w·M)
+//   TT     = each of "manyclaws asker", "manyclaws approver", pA, pB, K, w, led by its
+//            length (8 bytes, little-endian)
+//   Ke|Ka  = SHA-256(TT);  KcA|KcB = HKDF(Ka, "ConfirmationKeys" | context, 32)
+//   confirm: HMAC(KcA, TT) from the asker, HMAC(KcB, TT) from the approver
+//   key    = HKDF(Ke, "manyclaws paired v1"), sealing what goes between them with AES-256-GCM
+//
+// M and N are the RFC's for edwards25519: the first points with no known logarithm that the
+// hash of "edwards25519 point generation seed (M)" and "(N)" makes (a test makes them again).
 
-const NINE = new Uint8Array(32)
-NINE[0] = 9
-export function x25519(scalar, u) {
-  const k = Uint8Array.from(scalar)
-  k[0] &= 248
-  k[31] &= 127
-  k[31] |= 64
-  const n = little(k)
-  const x1 = mod(little(u) & ((1n << 255n) - 1n))
-  let [x2, z2, x3, z3, swap] = [1n, 0n, x1, 1n, 0n]
-  for (let t = 254n; t >= 0n; t--) {
-    const bit = (n >> t) & 1n
-    swap ^= bit
-    if (swap) [x2, x3, z2, z3] = [x3, x2, z3, z2]
-    swap = bit
-    const a = mod(x2 + z2)
-    const aa = mod(a * a)
-    const b = mod(x2 - z2)
-    const bb = mod(b * b)
-    const e = mod(aa - bb)
-    const da = mod(mod(x3 - z3) * a)
-    const cb = mod(mod(x3 + z3) * b)
-    x3 = mod((da + cb) * (da + cb))
-    z3 = mod(x1 * mod((da - cb) * (da - cb)))
-    x2 = mod(aa * bb)
-    z2 = mod(e * (aa + 121665n * e))
-  }
-  if (swap) [x2, x3, z2, z3] = [x3, x2, z3, z2]
-  return bytesOf(mod(x2 * inverse(z2)), 32)
+const fromHex = (hex) => Uint8Array.from(hex.match(/../g), (b) => parseInt(b, 16))
+const SPAKE_M = unpacked(fromHex('d048032c6ea0b6d697ddc2e86bda85a33adac920f1bf18e1b0c6d166a5cecdaf'))
+const SPAKE_N = unpacked(fromHex('d3bfb518f44f3430f29d0c92af503865a1ed3281dc69b35dd868ba85f886c4ab'))
+const NOTHING = [0n, 1n, 1n, 0n]
+const negated = (p) => [mod(-p[0]), p[1], p[2], mod(-p[3])]
+const ledByLength = (bytes) => concat(bytesOf(BigInt(bytes.length), 8), bytes)
+function pairWord(code, context) {
+  return mod(little(sha512(enc.encode('manyclaws pairing v1|' + context + '|' + code))), L)
 }
-// A pair: the half kept (`secret`) and the half handed out (`public`), 32 bytes each
-export function x25519Keys(secret = random(32)) {
-  return { secret, public: x25519(secret, NINE) }
+// One side's start: `asker` is the side that shows the code. `mine` goes to the other side
+export function pairStart(asker, code, context) {
+  const w = pairWord(String(code), String(context))
+  const x = mod(little(random(64)), L)
+  return { asker: !!asker, context: String(context), w, x, mine: packed(add(times(x, BASE), times(w, asker ? SPAKE_M : SPAKE_N))) }
 }
-const TO_PREFIX = 'k1.'
-const TO_INFO = 'manyclaws sealed to a key v1'
-const TO_AAD = enc.encode('manyclaws sealed to a key v1')
-// `value`, sealed so that only the holder of the other half of `publicKey` opens it
-export function sealTo(publicKey, value) {
-  const mine = x25519Keys()
-  const shared = x25519(mine.secret, publicKey)
-  if (shared.every((b) => b === 0)) throw new Error('that is not a key anything can be sealed to')
-  const key = hkdf(shared, TO_INFO, 32, concat(mine.public, publicKey))
+// From the other side's point: the key, the confirm to send and the one to expect; null
+// where theirs is no point, or no key comes of it
+export function pairFinish(start, theirs) {
+  const point = theirs?.length === 32 ? unpacked(theirs) : null
+  if (!point) return null
+  const K = times(8n, times(start.x, add(point, negated(times(start.w, start.asker ? SPAKE_N : SPAKE_M)))))
+  if (same(K, NOTHING)) return null
+  const [pA, pB] = start.asker ? [start.mine, theirs] : [theirs, start.mine]
+  const tt = concat(...[enc.encode('manyclaws asker'), enc.encode('manyclaws approver'), pA, pB, packed(K), bytesOf(start.w, 32)].map(ledByLength))
+  const keys = sha256(tt)
+  const kc = hkdf(keys.subarray(16), 'ConfirmationKeys' + start.context, 32)
+  const [cA, cB] = [hmac(kc.subarray(0, 16), tt), hmac(kc.subarray(16), tt)]
+  return { key: hkdf(keys.subarray(0, 16), 'manyclaws paired v1', 32), confirm: start.asker ? cA : cB, expect: start.asker ? cB : cA }
+}
+// Whether a confirm is the one expected (as long, and the same in every byte)
+export function pairConfirmed(paired, confirm) {
+  if (!paired || confirm?.length !== paired.expect.length) return false
+  let differ = 0
+  for (let i = 0; i < confirm.length; i++) differ |= confirm[i] ^ paired.expect[i]
+  return differ === 0
+}
+const PAIRED_PREFIX = 'p1.'
+const PAIRED_AAD = enc.encode('manyclaws paired v1')
+// What one side sends the other once both have confirmed, sealed with the key they made
+export function sealPaired(paired, value) {
   const iv = random(12)
-  return TO_PREFIX + toB64(concat(mine.public, iv, gcmEncrypt(key, iv, madeUp(enc.encode(JSON.stringify(value === undefined ? null : value))), TO_AAD)))
+  return PAIRED_PREFIX + toB64(concat(iv, gcmEncrypt(paired.key, iv, madeUp(enc.encode(JSON.stringify(value === undefined ? null : value))), PAIRED_AAD)))
 }
-// What was sealed to the pair whose kept half is `secret`, or null
-export function openFrom(secret, text) {
+export function openPaired(paired, text) {
   try {
-    if (typeof text !== 'string' || !text.startsWith(TO_PREFIX)) return null
-    const bytes = fromB64(text.slice(TO_PREFIX.length))
-    if (bytes.length < 32 + 12 + 16) return null
-    const theirs = bytes.subarray(0, 32)
-    const shared = x25519(secret, theirs)
-    if (shared.every((b) => b === 0)) return null
-    const key = hkdf(shared, TO_INFO, 32, concat(theirs, x25519(secret, NINE)))
-    const plain = gcmDecrypt(key, bytes.subarray(32, 44), bytes.subarray(44), TO_AAD)
+    if (!paired || typeof text !== 'string' || !text.startsWith(PAIRED_PREFIX)) return null
+    const bytes = fromB64(text.slice(PAIRED_PREFIX.length))
+    const plain = gcmDecrypt(paired.key, bytes.subarray(0, 12), bytes.subarray(12), PAIRED_AAD)
     return plain ? JSON.parse(dec.decode(plain)) : null
   } catch {
     return null
   }
+}
+// A code of `digits` digits, each as likely as any other
+export function pairCode(digits = 6) {
+  let code = ''
+  while (code.length < digits) {
+    const b = random(1)[0]
+    if (b < 250) code += String(b % 10)
+  }
+  return code
 }
 
 // ---- Releases. A release is a list of every file with its SHA-256 (release.json), signed
@@ -995,7 +1011,7 @@ export const readOrder = (text, key, devices, now = Date.now()) => orderIn(text,
 export class OrderRefused extends Error {}
 const REFUSED = {
   unsigned: 'it did not come signed by one of your devices',
-  key: 'it was not sealed with the key this computer was given: if your account was started afresh with a new key, connect this computer again, from the link its plugin shows',
+  key: 'it was not sealed with the key this computer was given: if your account was started afresh with a new key, connect this computer again, with the code its plugin shows',
   device: "the device it was asked from is not one of your account's devices as this computer knows them: approve that device again from one that has your key",
   over: "the device it was asked from was made one of your account's devices for a day, as one that is not your own, and the day is over: approve it again from one of your own",
   signature: 'it was not signed by the device it says it is from',

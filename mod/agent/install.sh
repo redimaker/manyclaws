@@ -27,7 +27,7 @@
 # The agent signs in with an API token of your account's and seals with your account's
 # key: the same two the ManyClaws plugin in Claude Code is given. It needs both: nothing
 # of this machine's sessions is sent unsealed. Nobody types either: the plugin is given
-# both as the computer is connected from the link it shows in a new session (opened
+# both as the computer is connected with the code it shows in a new session (typed
 # where you are signed in to ManyClaws, and approved there), and the agent takes them from
 # the plugin. So this asks for nothing: the agent is installed, and waits for them. For a
 # set-up with nobody there, both can be given (--token and --key, or MANYCLAWS_TOKEN and
@@ -212,7 +212,7 @@ by_claude=0
 # (what was given in this run is the newest there is, and the plugin is given it)
 [ -z "$token$key" ] || typed=1
 # (a key is the account's written out, and nothing else: there is no passphrase to make one from)
-case "$key" in "" | mcf_*) ;; *) echo "The key is not what a ManyClaws computer keeps (mcf_…). There is no passphrase: a computer is given its key as it is connected from the link the ManyClaws plugin shows in a new session. Give no key, and connect it so." >&2; exit 2 ;; esac
+case "$key" in "" | mcf_*) ;; *) echo "The key is not what a ManyClaws computer keeps (mcf_…). There is no passphrase: a computer is given its key as it is connected with the code the ManyClaws plugin shows in a new session. Give no key, and connect it so." >&2; exit 2 ;; esac
 # With either of the two neither in hand nor kept, the agent waits for the plugin's
 waiting=0
 { [ -n "$token" ] || [ "$had_token" = 1 ]; } && { [ -n "$key" ] || [ "$had_key" = 1 ]; } || waiting=1
@@ -407,7 +407,7 @@ fi
 if [ "$reinstall" = 1 ]; then
   echo "The old ManyClaws agent is removed, with its API token and its key and everything else it kept. Agent $(sed -n "s/^export const VERSION = '\(.*\)'\$/\1/p" "$HOME_DIR/agent/service.mjs") is installed in its place, as $from has it (a signed release, checked), and running, set up as the old one was. Its log: $HOME_DIR/agent.log"
   echo "It has no API token or encryption key, and asked for none: it takes both from the ManyClaws plugin."
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a link, to open where you are signed in to ManyClaws and approve."
+  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a code, to type under Connect a computer where you are signed in to ManyClaws, and approve."
   exit 0
 fi
 if [ "$update" = 1 ]; then
@@ -438,11 +438,11 @@ else echo "The page puts no files on this machine."; fi
 
 # The plugin beside it, in Claude Code, and this agent are given the same token and key.
 # Given here (a set-up with nobody there), they are given to the plugin now. Otherwise the
-# computer is connected from the link the plugin shows, and the agent takes them from the
+# computer is connected with the code the plugin shows, and the agent takes them from the
 # plugin. What is said says which, and what is left for the person to do.
 if [ "$typed" = 1 ] && [ "$waiting" = 0 ]; then
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin || echo "The ManyClaws plugin was NOT given its API token and key. Start a new Claude Code session on this computer: the plugin shows a link that connects it."
+  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin || echo "The ManyClaws plugin was NOT given its API token and key. Start a new Claude Code session on this computer: the plugin shows a code that connects it."
 elif [ "$by_claude" = 1 ] || [ "$waiting" = 1 ]; then
   if [ "$waiting" = 1 ]; then echo "It has no API token or encryption key yet, and asked for none: it takes both from the ManyClaws plugin."; fi
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a link, to open where you are signed in to ManyClaws and approve."
+  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a code, to type under Connect a computer where you are signed in to ManyClaws, and approve."
 fi

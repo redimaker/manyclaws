@@ -1,7 +1,7 @@
 // The hooks, with every Claude Code and network answer stubbed
 import { expect, mock, test } from 'claude-code/testing'
 import { PLUGIN_VERSION } from '../hooks/lib.js'
-import { keysText, toB64, fromB64, sha256, sha512, sign, verifyKey, contentKey, seal, open, isSealed, nameOf, makeOrder, makeDevices, readOrder, askedOf, sealedLength, gcmDecrypt, ORDER_MS, hexSha256, pluginDigest, sealTo } from '../hooks/seal.js'
+import { keysText, toB64, fromB64, sha256, sha512, sign, verifyKey, contentKey, seal, open, isSealed, nameOf, makeOrder, makeDevices, readOrder, askedOf, sealedLength, gcmDecrypt, ORDER_MS, hexSha256, pluginDigest, pairStart, pairFinish, pairConfirmed, sealPaired, openPaired } from '../hooks/seal.js'
 
 // Every session here is its account's, sealed with its key: there is no other kind (a
 // mod with no key sends nothing and asks for nothing, which is the second test). The mod
@@ -39,7 +39,7 @@ const polled = (sent: Sent[]) => sent.filter((s) => s.url.includes('/api/agent/p
 // `refused`: the server refuses the mod's token (taken back), whatever it asks with it.
 // `tools: false`: nothing answers tool.register, or the test answers it itself.
 // `run`: what answers any other command the mod runs (its argv and how it was run), where it answers anything
-function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, refused = false, surfaces = ['terminal'], swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>), connected = null as null | ((url: string) => string | null) } = {}) {
+function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, refused = false, surfaces = ['terminal'], swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>), page = null as null | Page } = {}) {
   const clock = mock.clock(on)
   // (The test says what the key is first, `await made()`: where it has not, what the environment holds is as it is.)
   const known = env.MANYCLAWS_KEY ? makes.get('u_test|' + env.MANYCLAWS_KEY) : null
@@ -102,9 +102,8 @@ function setup(on: any, { run = null as null | ((argv: string[], init: any) => a
     }
     const body = e.init?.body ? JSON.parse(e.init.body) : null
     sent.push({ url: e.url, body })
-    // (what the page sealed to a computer being connected, where a test has it there: `connected`)
-    const sealed = e.url.includes('/api/connect/') ? connected?.(e.url) : null
-    if (sealed) return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ sealed }) } }
+    // A computer being connected: the server's pairings, and the page where its code is typed (`page`)
+    if (e.url.includes('/api/pairings')) return { value: pairings(e, body) }
     if (e.url.includes('/api/agent/poll')) {
       // (an answer to a poll, or what gives one once it has waited as long as it means to)
       let next = polls.shift()
@@ -119,13 +118,51 @@ function setup(on: any, { run = null as null | ((argv: string[], init: any) => a
     }
     return { value: { status: 200, ok: true, headers: {}, text: '{"ok":true}' } }
   })
+  // The server's side of a pairing, with the page's where a test has one (`page`): the code it types is the one the
+  // plugin said, unless the page says another (`page.code`), and it gives what `page.give` makes once the plugin has
+  // shown it made the same key
+  const asks: any[] = []
+  const answered = (status: number, value: any) => ({ status, ok: status === 200, headers: {}, text: JSON.stringify(value) })
+  function pairings(e: any, body: any) {
+    if (e.url.endsWith('/api/pairings') && e.init?.method === 'POST') {
+      const p = { id: String(asks.length).padStart(22, 'p'), slot: '482', token: 'pairing-token-' + asks.length, point: body.point, answer: null as any, done: null as any, paired: null as any, tries: 0, name: null as any }
+      asks.push(p)
+      return answered(200, { id: p.id, slot: p.slot, token: p.token, until: Date.now() + 600_000 })
+    }
+    const [, id, reply] = /\/api\/pairings\/([^/]+)(\/reply)?$/.exec(e.url) ?? []
+    const p = asks.find((x) => x.id === id)
+    if (!p || e.init?.headers?.['x-pairing'] !== p.token || p.tries >= 3) return answered(404, { error: 'that has run out' })
+    if (reply) {
+      if (body.wrong) {
+        p.answer = null
+        p.tries++
+      } else if (pairConfirmed(p.paired, fromB64(body.confirm))) {
+        p.name = openPaired(p.paired, body.sealed)?.name
+        p.done = sealPaired(p.paired, page!.give(p))
+      }
+      return answered(200, { ok: true })
+    }
+    if (page && !p.answer && !p.done) {
+      const shown = said.map((l) => String(JSON.parse(l).text ?? JSON.parse(l))).filter((l) => / enter \d{3} \d{3} \d{3}\./.test(l)).at(-1)
+      const code = shown && (page.code?.(p.tries) ?? / enter (\d{3}) (\d{3}) (\d{3})\./.exec(shown)!.slice(1).join(''))
+      if (code) {
+        const start = pairStart(false, code.slice(3), 'manyclaws computer')
+        p.paired = pairFinish(start, fromB64(p.point))
+        p.answer = { point: toB64(start.mine), confirm: toB64(p.paired.confirm) }
+      }
+    }
+    return answered(200, { answer: p.answer, done: p.done, tries: p.tries })
+  }
   // (what was sent of the session, with what the batches said of themselves beside: `meta`)
   const events = () => {
     const batches = sent.filter((s) => s.url.endsWith('/api/agent/events'))
     return Object.assign(batches.flatMap((s) => s.body.events), { meta: batches[0]?.body.meta, batches: batches.map((s) => s.body) })
   }
-  return { clock, sent, events, said, kept, lists, configured }
+  return { clock, sent, events, said, kept, lists, configured, asks }
 }
+// The page a computer's code is typed into, in a test: what it gives the computer (once the two have made the same key),
+// and, where it types another code than the one shown, which (by how many tries it has had)
+type Page = { give: (p: any) => any; code?: (tries: number) => string | undefined }
 
 const start = ($: any) => $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
 // A session started by a mod that has its key to make first: that is done beside the session, in pieces, with the clock
@@ -134,60 +171,86 @@ async function starting($: any, clock: any, there: () => boolean = () => true) {
   await start($)
   await until(clock, there)
 }
-async function until(clock: any, there: () => boolean) {
+async function until(clock: any, there: () => boolean, step = 1) {
   const at = Date.now()
   while (!there() && Date.now() - at < 100_000) {
-    await clock.advance(1)
+    await clock.advance(step)
     await new Promise((r) => setTimeout(r, 1))
   }
 }
+// (a pairing asks how it is going every two seconds: waited on a second at a time)
+const paired = (clock: any, there: () => boolean) => until(clock, there, 1000)
 
 // ---- A session is told of sealed, or not at all
 
-test('without a token the mod sends nothing of the session: it offers the link that connects this computer, with a key of its own after the #, and asks the server for what the page sealed to it by a name drawn from that key, for ten minutes', async ($, on) => {
+test('without a token the mod sends nothing of the session: it shows a code that connects this computer, of which only the first three digits, which the server gave, go anywhere; and asks the server how it is going, for ten minutes', async ($, on) => {
   const { clock, sent, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: WORDS } })
   await start($)
   await clock.advance(30_000)
-  const offered = said.map((l) => JSON.parse(l).text ?? JSON.parse(l)).find((l) => String(l).includes('/app#/c/'))
-  const [, key] = /https:\/\/mc\.test\/app#\/c\/([A-Za-z0-9_-]{43})\/this%20computer/.exec(String(offered)) ?? []
-  expect(key).toBeTruthy()
-  const name = toB64(sha256(fromB64(key))).slice(0, 22)
-  // (what it asks for: that name, and nothing of the session; the key itself is said to nobody)
+  const told = said.map((l) => String(JSON.parse(l).text ?? JSON.parse(l)))
+  // (one line: a line in the transcript is drawn as one)
+  expect(told[0]).toMatch(/^ManyClaws: this computer is not connected yet\. To connect it, open https:\/\/mc\.test\/app#\/connect on a phone or browser where you use ManyClaws and enter 482 \d{3} \d{3}\. The code works for ten minutes; \/manyclaws connect makes another\.$/)
+  const secret = / enter 482 (\d{3}) (\d{3})\./.exec(told[0])!.slice(1).join('')
+  // (what it asks with: its half of the exchange, then the pairing by its id, and nothing of the session; the six digits
+  // it made are said to nobody)
+  expect(sent[0]).toEqual({ url: 'https://mc.test/api/pairings', body: { kind: 'computer', point: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) } })
   expect(sent.length).toBeGreaterThan(5)
-  expect(sent.every((s) => s.url === 'https://mc.test/api/connect/' + name && s.body === null)).toBe(true)
-  expect(sent.some((s) => s.url.includes(key))).toBe(false)
+  expect(sent.slice(1).every((x) => x.url === 'https://mc.test/api/pairings/' + 'p'.repeat(21) + '0' && x.body === null)).toBe(true)
+  expect(JSON.stringify(sent).includes(secret)).toBe(false)
   // (and once the ten minutes are over, it says so and asks no more)
   await clock.advance(600_000)
   const asked = sent.length
   await clock.advance(30_000)
   expect(sent.length).toBe(asked)
-  expect(said.some((l) => l.includes('the link to connect this computer has run out'))).toBe(true)
+  expect(said.some((l) => l.includes('the code to connect this computer has run out'))).toBe(true)
 })
 
-// Connected by its link: the page's answer, sealed to the key after the #, as the server hands it over
+// Connected with its code: the page's answer, sealed with the key the two made from it, as the server hands it over
 async function connectedBy($: any, on: any, { installed }: { installed: boolean }) {
   const m = await made()
   // (the plugin's own folder: the one these tests are in, which is where it is loaded from here)
   const root = decodeURIComponent(new URL('..', import.meta.url).pathname).replace(/\/+$/, '')
   const list = { version: 2, plugins: { 'manyclaws@manyclaws': [{ scope: 'user', installPath: installed ? root : '/home/me/.claude/plugins/cache/manyclaws/manyclaws/6.0.0', version: '6.0.0' }] } }
   folders(on, { own: released(9).files, files: { '/home/me/.claude/plugins/installed_plugins.json': JSON.stringify(list) } })
-  let link = ''
   const s = setup(on, {
     env: { MANYCLAWS_URL: 'https://mc.test', HOME: '/home/me' },
-    connected: () => (link ? sealTo(fromB64(/#\/c\/([A-Za-z0-9_-]{43})\//.exec(link)![1]), { token: 'mct_made-for-this-computer', key: keysText(m.keys), account: 'me@example.test' }) : null),
+    page: { give: () => ({ token: 'mct_made-for-this-computer', key: keysText(m.keys), account: 'me@example.test' }) },
   })
   await start($)
-  await s.clock.advance(1000)
-  link = String(s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l)).find((l) => String(l).includes('/app#/c/')))
-  await until(s.clock, () => s.said.some((l) => l.includes('connected to the account of me@example.test')))
+  await paired(s.clock, () => s.said.some((l) => l.includes('connected to the account of me@example.test')))
   return s
 }
 
-test('connected by its link, the plugin Claude Code installed keeps the token and the key among its own options, as typed ones are kept', async ($, on) => {
+test('connected with its code, the plugin Claude Code installed keeps the token and the key among its own options, as typed ones are kept', async ($, on) => {
   const { said, configured } = await connectedBy($, on, { installed: true })
   expect(configured.map((c) => c.argv.slice(1))).toEqual([['plugin', 'configure', 'manyclaws@manyclaws', '--values-stdin']])
   expect(JSON.parse(configured[0].stdin).token).toBe('mct_made-for-this-computer')
   expect(said.some((l) => l.includes('for this session only'))).toBe(false)
+})
+
+test('a code typed on the page that is not the one shown is answered as that, and the page given nothing: a try of three, after which the right one still connects it', async ($, on) => {
+  const m = await made()
+  const given: any[] = []
+  const s = setup(on, {
+    env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: '' },
+    page: { give: (p) => (given.push(p.name), { token: 'mct_at-the-second-try', key: keysText(m.keys), account: 'me@example.test' }), code: (tries) => (tries === 0 ? '482000000' : undefined) },
+  })
+  await start($)
+  await paired(s.clock, () => s.said.some((l) => l.includes('connected to the account of me@example.test')))
+  expect(s.asks[0].tries).toBe(1)
+  expect(s.sent.filter((x) => x.url.endsWith('/reply')).map((x) => Object.keys(x.body).sort())).toEqual([['wrong'], ['confirm', 'sealed']])
+  // (the page was told the computer's name only once the two had the same key)
+  expect(given).toEqual(['this computer'])
+})
+
+test('three codes typed that were not the one shown, and it is no longer good: the session says so, and /manyclaws connect makes another', async ($, on) => {
+  const s = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: '' }, page: { give: () => ({}), code: () => '482111111' } })
+  await start($)
+  await paired(s.clock, () => s.said.some((l) => l.includes('no longer good')))
+  expect(s.asks[0].tries).toBe(3)
+  const r = await $.command.run({ command: 'manyclaws', args: 'connect' })
+  expect(String(r?.text)).toMatch(/enter 482 \d{3} \d{3}\./)
+  expect(s.asks.length).toBe(2)
 })
 
 test("one loaded from a folder of its own (a checkout's, a test's) changes nothing of the installed plugin's: it keeps the two for its session, and says so; nor does it disconnect the installed one", async ($, on) => {
@@ -199,7 +262,7 @@ test("one loaded from a folder of its own (a checkout's, a test's) changes nothi
   expect(configured).toEqual([])
 })
 
-test('with a token and no key the mod sends nothing of the session, whatever happens in it: it offers the link that connects this computer, which gives it the key, and the code for a phone', async ($, on) => {
+test('with a token and no key the mod sends nothing of the session, whatever happens in it: it shows the code that connects this computer, which gives it the key', async ($, on) => {
   engine(on)
   on('tool.call', () => ({ result: { stdout: 'seven herons', stderr: '' } }))
   on('tool.check', () => ({ decision: 'ask' }))
@@ -217,32 +280,13 @@ test('with a token and no key the mod sends nothing of the session, whatever hap
   await s.clock.advance(120_000)
   await ($ as any).session.end({ sessionId: 'sess-1', reason: 'other' })
   await s.clock.advance(120_000)
-  // Not a batch, not a poll, not a first word to see whether it would be taken: only the asking for the link's answer
+  // Not a batch, not a poll, not a first word to see whether it would be taken: only the pairing that connects it
   expect(s.sent.length).toBeGreaterThan(0)
-  expect(s.sent.every((x) => /^https:\/\/mc\.test\/api\/connect\/[A-Za-z0-9_-]{22}$/.test(x.url) && x.body === null)).toBe(true)
+  expect(s.sent.every((x) => x.url.startsWith('https://mc.test/api/pairings'))).toBe(true)
   expect([agent.looked, agent.written]).toEqual([[], []])
   const told = s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l))
-  // (one line: a line in the transcript is drawn as one, its line breaks as marks)
-  expect(String(told[0])).toMatch(/^ManyClaws: this computer is not connected yet\. Open this link to connect it, in a browser where you are signed in to ManyClaws, or read the code above the prompt with your phone’s camera, and approve it there: https:\/\/mc\.test\/app#\/c\/[A-Za-z0-9_-]{43}\/this%20computer It works once, for ten minutes; \/manyclaws connect makes another\.$/)
+  expect(String(told[0])).toMatch(/^ManyClaws: this computer is not connected yet\. To connect it, open https:\/\/mc\.test\/app#\/connect /)
   expect(told.some((t: unknown) => String(t).includes('\n'))).toBe(false)
-  // The code is in the band above the prompt, drawn in blocks a line of them to a row, two rows of the code to a line:
-  // its modules and the band about them
-  const ui = await $.ui.mount({ plugin: 'manyclaws', component: 'AbovePrompt', requestId: 'band', surface: 'terminal', viewport: { columns: 120, rows: 60 }, props: { hasSurvey: false, isWorking: false, maxRows: 40, bodyColumns: 100, scroll: { offset: 0, bodyRows: 40 }, view: {} } } as any)
-  expect(await ui.find({ type: 'Text', text: /^ManyClaws: connect this computer$/ })).toBeDefined()
-  const code = (await ui.findAll({ type: 'Text', text: /^[█▀▄ ]+$/ })).map((t: any) => t.text)
-  const width = code[0].length
-  expect(width).toBeGreaterThanOrEqual(25)
-  expect(code.length).toBe(Math.ceil(width / 2))
-  expect(code.every((line: string) => line.length === width)).toBe(true)
-})
-
-test("in VS Code's panel, which draws no band above the prompt, the link alone is offered: no code for a phone, and nothing said of one", async ($, on) => {
-  const s = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_TOKEN: 'agent-token', CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' }, surfaces: [] })
-  await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
-  await s.clock.advance(10)
-  const told = s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l))
-  expect(told.length).toBe(1)
-  expect(String(told[0])).toMatch(/^ManyClaws: this computer is not connected yet\. Open this link to connect it, in a browser where you are signed in to ManyClaws and approve it there: https:\/\/mc\.test\/app#\/c\/[A-Za-z0-9_-]{43}\/this%20computer It works once/)
 })
 
 test('given no address, the mod reports to manyclaws.dev: it has no option for one, and MANYCLAWS_URL is what names another server', async ($, on) => {
@@ -506,30 +550,28 @@ const notAKey = async ($: any, on: any, given: (m: Made) => string) => {
   const { clock, sent, said } = setup(on, { env: { ...ENV, MANYCLAWS_KEY: given(m) } })
   await start($)
   await clock.advance(30_000)
-  expect(sent.every((x) => x.url.includes('/api/connect/'))).toBe(true)
+  expect(sent.every((x) => x.url.includes('/api/pairings'))).toBe(true)
   const told = said.map((l) => String(JSON.parse(l).text ?? JSON.parse(l)))
-  expect(told[0]).toMatch(/^ManyClaws: what this computer was given as its encryption key is not one\. ManyClaws has no passphrase: a computer is given the key as it is connected from the link this plugin shows\./)
-  expect(told.some((t) => /Open this link to connect it/.test(t))).toBe(true)
+  expect(told[0]).toMatch(/^ManyClaws: what this computer was given as its encryption key is not one\. ManyClaws has no passphrase: a computer is given the key as it is connected with the code this plugin shows\./)
+  expect(told.some((t) => /To connect it, open https:\/\/mc\.test\/app#\/connect /.test(t))).toBe(true)
   expect(told.join(' ').includes(given(m))).toBe(false)
 }
-test('words given as its key are no key: nothing is made of them, nothing of the session is sent, it says why, and it offers the link that connects this computer', ($, on) => notAKey($, on, () => 'four unrelated words here'))
+test('words given as its key are no key: nothing is made of them, nothing of the session is sent, it says why, and it shows the code that connects this computer', ($, on) => notAKey($, on, () => 'four unrelated words here'))
 test('nor is a key written out that is not whole', ($, on) => notAKey($, on, (m) => keysText(m.keys).slice(0, 47)))
 
-test('a token the server refuses (taken back, or run out), where someone is at the session: it offers the link that connects this computer again, once; and the session is taken up with what that gives', async ($, on) => {
+test('a token the server refuses (taken back, or run out), where someone is at the session: it shows the code that connects this computer again, once; and the session is taken up with what that gives', async ($, on) => {
   const m = await made()
-  let link = ''
   const s = setup(on, {
     refused: true,
     poll: [{ commands: [] }],
-    connected: () => (link ? sealTo(fromB64(/#\/c\/([A-Za-z0-9_-]{43})\//.exec(link)![1]), { token: 'mct_made-for-it-again', key: keysText(m.keys), account: 'me@example.test' }) : null),
+    page: { give: () => ({ token: 'mct_made-for-it-again', key: keysText(m.keys), account: 'me@example.test' }) },
   })
   await start($)
   // (its first asking, a moment in: refused)
   await s.clock.advance(5000)
   await until(s.clock, () => s.said.some((l) => l.includes('refused this computer')))
   const told = s.said.map((l) => String(JSON.parse(l).text ?? JSON.parse(l)))
-  link = told.find((t) => t.includes('/app#/c/'))!
-  expect(link).toMatch(/^ManyClaws: the server refused this computer’s API token \(it was taken back, or ran out\), so this session is not shown on your page\. Open this link to connect it again/)
+  expect(told.find((t) => t.includes('/app#/connect'))).toMatch(/^ManyClaws: the server refused this computer’s API token \(it was taken back, or ran out\), so this session is not shown on your page\. To connect it again, open https:\/\/mc\.test\/app#\/connect /)
   await until(s.clock, () => s.said.some((l) => l.includes('connected to the account of me@example.test')))
   // (once: asked again with the same token in the meantime, it says nothing more)
   expect(s.said.filter((l) => l.includes('refused this computer')).length).toBe(1)
@@ -1067,7 +1109,7 @@ test('a session puts its own two tools before Claude and no other, whatever a se
 
 // ---- The machine's agent beside the plugin: given what the plugin was given, once the
 // server has taken the plugin's token. A computer is given the token and the key as it is
-// connected from the link the plugin shows; the agent, installed with neither, takes them
+// connected with the code the plugin shows; the agent, installed with neither, takes them
 // from the note the plugin leaves in the agent's own folder.
 
 // The agent's folder as the plugin finds it: agent.json where there is an agent, and what the plugin wrote there
