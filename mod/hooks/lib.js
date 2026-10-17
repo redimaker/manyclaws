@@ -226,6 +226,15 @@ export function settingSaid(text) {
   return null
 }
 
+// A local command's answer without the colors it was drawn in for a terminal: they are dropped before it is cut to
+// what is sent, which they would otherwise fill (/context's colored grid is four times over the length of a field)
+export function colorless(content) {
+  // eslint-disable-next-line no-control-regex
+  const plain = (text) => String(text ?? '').replace(/\x1b\[[0-9;]*m/g, '')
+  if (typeof content === 'string') return plain(content)
+  return Array.isArray(content) ? content.map((b) => (b?.type === 'text' ? { ...b, text: plain(b.text) } : b)) : content
+}
+
 export function flattenText(content) {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return content === undefined ? '' : JSON.stringify(content)

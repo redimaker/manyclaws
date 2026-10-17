@@ -213,7 +213,8 @@ export function messageRows(ev) {
     case 'command': {
       if (!text) break
       const name = /<command-name>([^<]*)<\/command-name>/.exec(text)
-      const out = /<local-command-(?:stdout|stderr)>([\s\S]*?)<\/local-command-(?:stdout|stderr)>/.exec(text)
+      // (an answer cut short to what is sent has lost its closing tag: what there is of it is still its answer)
+      const out = /<local-command-(?:stdout|stderr)>([\s\S]*?)(?:<\/local-command-(?:stdout|stderr)>|$)/.exec(text)
       if (name) {
         const args = /<command-args>([^<]*)<\/command-args>/.exec(text)
         rows.push({ uuid: ev.uuid, role: 'user', text: (name[1] + ' ' + (args ? args[1] : '')).trim(), origin })

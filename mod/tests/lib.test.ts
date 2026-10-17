@@ -1,7 +1,7 @@
 // The mod's pure helpers
 import { expect, test } from 'claude-code/testing'
-import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, parseSlash, cap, normalizeBlocks, isAttended, settingSaid } from '../hooks/lib.js'
-import { summarizeInput } from '../hooks/rows.js'
+import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, colorless } from '../hooks/lib.js'
+import { summarizeInput, messageRows } from '../hooks/rows.js'
 
 test('capabilities: default, all, additions and exact lists', async () => {
   expect([...parseCapabilities('')].sort()).toEqual(['approve', 'chat', 'core', 'inspect', 'message', 'notify', 'upkeep'])
@@ -90,4 +90,21 @@ test('what /effort and /model answer is read off the transcript', async () => {
   expect(settingSaid(out('Kept model as Sonnet 5.5'))).toBe(null)
   expect(settingSaid(out('Set effort level to heroic'))).toBe(null)
   expect(settingSaid(out('Cancelled'))).toBe(null)
+})
+
+test("a local command's answer drawn in color for a terminal is its answer on the page, however much color: the colors go before it is cut to what is sent", async () => {
+  // As /context answers in 2.1.30x: a grid of colored cells, four times what a field holds with its colors
+  const cell = '\x1b[38;5;244m⛁\x1b[39m '
+  const said = '<local-command-stdout> \x1b[1mContext Usage\x1b[22m\n' + cell.repeat(2000) + '\n\x1b[38;5;246m└\x1b[39m init: ~20 tokens</local-command-stdout>'
+  expect(said.length > 8000 * 3).toBe(true)
+  // (as the plugin makes its rows: the colors dropped, then cut to a field)
+  const rows = messageRows({ uuid: 'c1', door: 'command', blocks: normalizeBlocks(colorless([{ type: 'text', text: said }]), 8000) })
+  expect(rows.map((r: any) => r.role)).toEqual(['output'])
+  expect(rows[0].text.trim().startsWith('Context Usage\n⛁ ⛁')).toBe(true)
+  expect(rows[0].text.trim().endsWith('init: ~20 tokens')).toBe(true)
+  expect(/\x1b\[/.test(rows[0].text)).toBe(false)
+  // (one cut short all the same, past its closing tag, is still output: what there is of it)
+  const cut = messageRows({ uuid: 'c2', door: 'command', blocks: [{ type: 'text', text: '<local-command-stdout>Context Usage\nlong' }] })
+  expect(cut.map((r: any) => [r.role, r.text])).toEqual([['output', 'Context Usage\nlong']])
+  expect(colorless('\x1b[1mbold\x1b[22m plain')).toBe('bold plain')
 })

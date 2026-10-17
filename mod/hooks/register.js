@@ -45,6 +45,7 @@ import {
   VALUE_COMMANDS,
   cap,
   normalizeBlocks,
+  colorless,
   flattenText,
   settingSaid,
   isAttended,
@@ -837,7 +838,7 @@ async function recordRow($, e) {
   if (door === 'attachment' || (door === 'tool-result' && !policy.toolResults)) return
   if (!agentId) {
     await noteSetting($, message.content)
-    await emitRows($, messageRows({ uuid, door, isMeta: !!message.isMeta, origin: cap(e.origin, 300), blocks: normalizeBlocks(message.content, policy.maxField) }))
+    await emitRows($, messageRows({ uuid, door, isMeta: !!message.isMeta, origin: cap(e.origin, 300), blocks: normalizeBlocks(door === 'command' ? colorless(message.content) : message.content, policy.maxField) }))
     // (the reply is in the chat now: what streamed of it is done with)
     if (door === 'response') partDone()
   }
@@ -1890,3 +1891,5 @@ async function answerLocally($, rid, answer) {
     // The wait notices the local answer when its poll returns
   }
 }
+
+// changed by 08-resilience at 1792222959603
