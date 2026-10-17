@@ -19,7 +19,10 @@
        them), and the browser runs none that is anything else: so this one file stands for all of the page's code,
        and holding it against the public repository's is holding all of it. The modules the script goes on to
        import are named too, each fetched and checked before the script asks for it (seal.js before keys.js, which
-       imports it). -->
+       imports it), and again in the import map, which is what a browser holds a module to wherever it is imported
+       from: a preload that fails its check is otherwise fetched again by the import, unchecked (the server names
+       the map by its own hash in the page's policy, since it is inline). -->
+  <script type="importmap">{"integrity":{"/seal.js":"sha384-wQtSoQAWNwwDAYJwxuIIPqr6TL1K8ebV0gRVOQI5yE0Dl16fXzUuAPtg3iKL3rwO","/keys.js":"sha384-GOAdfHj2KRKDuh4CCSdozP2kz8+gEJQezxFGrKLC5GTZ0VodozXf+2FVih0u4Vnw","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
   <link rel="stylesheet" href="app.css" integrity="sha384-SQLzRZUq/g3o2zSUiriWXeQ6qHVh5UEI6DphJkONIooRrEUkFKvp7y80+tGwnlA7">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">

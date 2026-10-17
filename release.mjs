@@ -65,6 +65,11 @@ const PAGE = 'web/index.html'
 function stamped(html) {
   // (a file the page names from its own folder or from the top of the site: where it is in web/)
   const fileOf = (href) => 'web/' + href.replace(/^\//, '')
+  // The import map holds every module the page preloads to the same hash, by its address from the top of the site: a
+  // browser holds a module to that wherever it is imported from (a failed preload alone is fetched again unchecked)
+  const modules = [...html.matchAll(/<link\b[^>]*\brel="modulepreload"[^>]*>/g)].map((m) => /\bhref="([^"]+)"/.exec(m[0])?.[1]).filter((href) => href && fs.existsSync(path.join(ROOT, fileOf(href))))
+  const map = JSON.stringify({ integrity: Object.fromEntries(modules.map((href) => ['/' + href.replace(/^\//, ''), `sha384-${digest(fileOf(href), 'sha384', 'base64')}`])) })
+  html = html.replace(/<script type="importmap">[\s\S]*?<\/script>/, () => `<script type="importmap">${map}</script>`)
   return html.replace(/<(script|link)\b[^>]*>/g, (tag) => {
     const href = /\b(?:src|href)="([^"]+)"/.exec(tag)?.[1]
     const loads = /^<script\b/.test(tag) || /\brel="(stylesheet|modulepreload)"/.test(tag)
