@@ -4,13 +4,13 @@
 
 Nothing private goes in it: no internal host names or addresses, no tokens or keys, no notes on how the server is run. Those are kept with the server, in its own repository.
 
-## Tests: ten minutes, always, under a watchdog
+## Tests: fifteen minutes, always, under a watchdog
 
-These are the owner's standing instructions (2026-10-08). They have no exceptions.
+These are the owner's standing instructions (2026-10-08; the limit raised from ten minutes to fifteen by him on 2026-10-16). They have no exceptions.
 
-- **Every test run of any kind is under a hard 10-minute watchdog that ends it.** No test command is ever started without it, and there are no circumstances in which the limit is raised, skipped, switched off or worked around.
-- The plugin's own tests are started so that they are killed at ten minutes:
-  `cd mod && perl -e 'alarm 600; exec @ARGV' -- claude plugin test .`
+- **Every test run of any kind is under a hard 15-minute watchdog that ends it.** No test command is ever started without it, and there are no circumstances in which the limit is raised, skipped, switched off or worked around.
+- The plugin's own tests are started so that they are killed at fifteen minutes:
+  `cd mod && perl -e 'alarm 900; exec @ARGV' -- claude plugin test .`
 - The end-to-end tests live with the server. Its repository reaches this one through two links (`mod` and `agent`, to `../manyclaws/mod` and `../manyclaws/agent`), so a change made here is tested there, with its runner, which carries the watchdog: `npm test` in its `e2e/` folder. A change to the plugin or the agent is not done until that suite has passed on it.
 - A run that reaches the limit has failed, and the slowness is the fault to fix. Do not run it again with more time.
 - When handing work to a subagent that may run tests, give it these rules in its brief.
