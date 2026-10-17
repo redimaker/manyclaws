@@ -222,22 +222,27 @@ test('with a token and no key the mod sends nothing of the session, whatever hap
   expect(s.sent.every((x) => /^https:\/\/mc\.test\/api\/connect\/[A-Za-z0-9_-]{22}$/.test(x.url) && x.body === null)).toBe(true)
   expect([agent.looked, agent.written]).toEqual([[], []])
   const told = s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l))
-  expect(String(told[0])).toMatch(/^ManyClaws: this computer is not connected yet\. Open this link to connect it, in a browser where you are signed in to ManyClaws, or read the code with your phone’s camera, and approve it there: https:\/\/mc\.test\/app#\/c\/[A-Za-z0-9_-]{43}\/this%20computer\nIt works once, for ten minutes; \/manyclaws connect makes another\.$/)
-  // (the code, drawn in blocks, two rows of it to a line: 41 modules and the band about them)
-  const code = String(told[1]).split('\n')
+  // (one line: a line in the transcript is drawn as one, its line breaks as marks)
+  expect(String(told[0])).toMatch(/^ManyClaws: this computer is not connected yet\. Open this link to connect it, in a browser where you are signed in to ManyClaws, or read the code above the prompt with your phone’s camera, and approve it there: https:\/\/mc\.test\/app#\/c\/[A-Za-z0-9_-]{43}\/this%20computer It works once, for ten minutes; \/manyclaws connect makes another\.$/)
+  expect(told.some((t: unknown) => String(t).includes('\n'))).toBe(false)
+  // The code is in the band above the prompt, drawn in blocks a line of them to a row, two rows of the code to a line:
+  // its modules and the band about them
+  const ui = await $.ui.mount({ plugin: 'manyclaws', component: 'AbovePrompt', requestId: 'band', surface: 'terminal', viewport: { columns: 120, rows: 60 }, props: { hasSurvey: false, isWorking: false, maxRows: 40, bodyColumns: 100, scroll: { offset: 0, bodyRows: 40 }, view: {} } } as any)
+  expect(await ui.find({ type: 'Text', text: /^ManyClaws: connect this computer$/ })).toBeDefined()
+  const code = (await ui.findAll({ type: 'Text', text: /^[█▀▄ ]+$/ })).map((t: any) => t.text)
   const width = code[0].length
   expect(width).toBeGreaterThanOrEqual(25)
   expect(code.length).toBe(Math.ceil(width / 2))
-  expect(code.every((line) => line.length === width && /^[█▀▄ ]+$/.test(line))).toBe(true)
+  expect(code.every((line: string) => line.length === width)).toBe(true)
 })
 
-test("in VS Code's panel, which runs a message's lines together, the link alone is offered: no code for a phone, and nothing said of one", async ($, on) => {
+test("in VS Code's panel, which draws no band above the prompt, the link alone is offered: no code for a phone, and nothing said of one", async ($, on) => {
   const s = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_TOKEN: 'agent-token', CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' }, surfaces: [] })
   await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
   await s.clock.advance(10)
   const told = s.said.map((l) => JSON.parse(l).text ?? JSON.parse(l))
   expect(told.length).toBe(1)
-  expect(String(told[0])).toMatch(/^ManyClaws: this computer is not connected yet\. Open this link to connect it, in a browser where you are signed in to ManyClaws and approve it there: https:\/\/mc\.test\/app#\/c\/[A-Za-z0-9_-]{43}\/this%20computer\n/)
+  expect(String(told[0])).toMatch(/^ManyClaws: this computer is not connected yet\. Open this link to connect it, in a browser where you are signed in to ManyClaws and approve it there: https:\/\/mc\.test\/app#\/c\/[A-Za-z0-9_-]{43}\/this%20computer It works once/)
 })
 
 test('given no address, the mod reports to manyclaws.dev: it has no option for one, and MANYCLAWS_URL is what names another server', async ($, on) => {

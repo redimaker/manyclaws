@@ -383,6 +383,18 @@ export function register(on, options) {
   // The band above the prompt: answer a routed request at the terminal too
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const current = pendingList[0]
+    // A computer being connected: the code for a phone, drawn here a line of blocks to a row, as a line in the
+    // transcript can't be (it is one line, whatever it holds), until it is connected or its link runs out
+    if (!current && connecting?.code) {
+      const { Box, Text } = $.ui.resolve(e)
+      const theirs = await next(e)
+      const rows = [
+        Text({ bold: true, color: 'yellow', children: ['ManyClaws: connect this computer'] }),
+        Text({ dimColor: true, children: ['Read this with your phone’s camera, or open the link above, and approve it there.'] }),
+        ...connecting.code.split('\n').map((line) => Text({ wrap: 'truncate-end', children: [line] })),
+      ]
+      return Box({ flexDirection: 'column', children: theirs ? [...rows, theirs] : rows })
+    }
     if (!config || !current) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
@@ -1027,9 +1039,10 @@ const CONNECT_MS = 10 * 60_000
 const CONNECT_EVERY_MS = 3000
 // The link as a code a phone's camera reads, drawn with blocks for a terminal whose ground is dark: a light module is a
 // block, a dark one is the ground, two rows to a line, with a light band about it
-async function inTerminal($) {
+// Whether the band above the prompt is drawn here: a terminal and the desktop app draw it, VS Code's panel doesn't
+async function drawsBand($) {
   try {
-    return (await $.session.surfaces()).includes('terminal')
+    return (await $.session.surfaces()).some((s) => s === 'terminal' || s === 'desktop')
   } catch {
     return false
   }
@@ -1052,7 +1065,7 @@ function codeLines(text) {
   }
   return lines.join('\n')
 }
-let connecting = null // { secret, id, url, until, e }
+let connecting = null // { secret, id, url, until, e, code }
 let startedWith = null // how this session started: what it is taken up with once it is connected
 async function offerConnect($, e, { asked = false, again = false } = {}) {
   if (!isAttended(e.isInteractive, (await $.env.get('CLAUDE_CODE_ENTRYPOINT')) || undefined)) return asked ? 'this session is one a program runs: connect this computer from a session started on it, in a terminal, an editor or the desktop app' : undefined
@@ -1060,13 +1073,13 @@ async function offerConnect($, e, { asked = false, again = false } = {}) {
   const pair = x25519Keys()
   const name = (await output($, ['hostname'])).trim().replace(/\.local$/, '').slice(0, 20) || 'this computer'
   const link = `${url}/app#/c/${toB64(pair.public)}/${encodeURIComponent(name)}`
-  connecting = { secret: pair.secret, id: toB64(sha256(pair.public)).slice(0, 22), url, until: (await $.clock.now()) + CONNECT_MS, e: startedWith ?? e }
-  // The code for a phone is rows of blocks, which a terminal shows as they are. VS Code's panel and the desktop app run
-  // a message's lines together, and what they would show is no code: there the link alone is offered
-  const drawn = (await inTerminal($)) ? codeLines(link) : ''
-  const said = `ManyClaws: ${again ? 'the server refused this computer’s API token (it was taken back, or ran out), so this session is not shown on your page. Open this link to connect it again' : 'this computer is not connected yet. Open this link to connect it'}, in a browser where you are signed in to ManyClaws${drawn ? ', or read the code with your phone’s camera,' : ''} and approve it there: ${link}\nIt works once, for ten minutes; /manyclaws connect makes another.`
+  // The code for a phone is rows of blocks, drawn in the band above the prompt: where there is none (VS Code's panel),
+  // the link alone is offered. (Not in the transcript: a line there is one line, its line breaks drawn as marks.)
+  const code = (await drawsBand($)) ? codeLines(link) : ''
+  connecting = { secret: pair.secret, id: toB64(sha256(pair.public)).slice(0, 22), url, until: (await $.clock.now()) + CONNECT_MS, e: startedWith ?? e, code }
+  $.ui.invalidate('ui.render')
+  const said = `ManyClaws: ${again ? 'the server refused this computer’s API token (it was taken back, or ran out), so this session is not shown on your page. Open this link to connect it again' : 'this computer is not connected yet. Open this link to connect it'}, in a browser where you are signed in to ManyClaws${code ? ', or read the code above the prompt with your phone’s camera,' : ''} and approve it there: ${link} It works once, for ten minutes; /manyclaws connect makes another.`
   $.ui.log(said)
-  if (drawn) $.ui.log(drawn)
   $.ui.status(`ManyClaws: connect this computer → ${link}`)
   $.clock.after(CONNECT_EVERY_MS, () => void askConnect($))
   return said
@@ -1076,6 +1089,7 @@ async function askConnect($) {
   if (!c) return
   if ((await $.clock.now()) > c.until) {
     connecting = null
+    $.ui.invalidate('ui.render')
     $.ui.status(undefined)
     return void $.ui.log('ManyClaws: the link to connect this computer has run out. /manyclaws connect makes another.')
   }
@@ -1086,6 +1100,7 @@ async function askConnect($) {
   } catch {}
   if (!sealed) return void $.clock.after(CONNECT_EVERY_MS, () => void askConnect($))
   connecting = null
+  $.ui.invalidate('ui.render')
   $.ui.status(undefined)
   const got = openFrom(c.secret, sealed)
   const keys = keysFromText(got?.key)
