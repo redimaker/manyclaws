@@ -1932,7 +1932,3 @@ async function answerLocally($, rid, answer) {
     // The wait notices the local answer when its poll returns
   }
 }
-
-// changed by 08-resilience at 1792222959603
-
-// changed by 08-resilience at 1792236960743
