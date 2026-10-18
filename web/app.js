@@ -8858,7 +8858,7 @@ async function drawKeyless(box, redraw) {
       was,
       // (an account of before whose list of devices is gone: what its passphrase made is not carried over here either)
       app.before && !was && h('p', { 'data-part': 'key-before' }, h('b', null, 'ManyClaws no longer uses a passphrase.'), ' The key made from yours is not carried over: your account’s key is made here, now.'),
-      h('p', { 'data-part': 'key-first' }, 'Your sessions are end-to-end encrypted. The key is made here and kept only on your devices, never on the server. This browser protects it with a passkey, like Face ID or Touch ID. You use the same passkey to add your other devices.'),
+      h('p', { 'data-part': 'key-first' }, 'Your sessions are end-to-end encrypted. The key is made here and kept only on your devices, never on the server. This browser protects it with a passkey, like Face ID or Touch ID. Every other device gets the key only when you approve it, one by one, from a device that already has it.'),
       noPasskeys() ? h('p', { class: 'form-note error', 'data-part': 'key-no-passkeys' }, 'This browser has no passkeys. Make your key on your phone instead (sign in to ManyClaws there), then approve this browser from it.') : h('div', null, make),
       note,
     )
