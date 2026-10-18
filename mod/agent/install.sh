@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Installs the ManyClaws agent on this machine and starts it as a service of your
-# own user (launchd on macOS, systemd --user on Linux).
+# own user (launchd on macOS, systemd --user on Linux, and on Windows a task of Task
+# Scheduler's that starts it as you sign in, run by Git Bash, which Claude Code has there).
 #
 #   curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/beta/mod/agent/install.sh | bash -s -- [options]
 #
@@ -100,6 +101,24 @@ HOME_DIR="${MANYCLAWS_HOME:-$HOME/.manyclaws}"
 LABEL="com.manyclaws.agent"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 UNIT="$HOME/.config/systemd/user/manyclaws-agent.service"
+TASK="ManyClaws agent"
+case "$(uname -s)" in
+  Darwin) os=mac ;;
+  MINGW* | MSYS* | CYGWIN*) os=windows ;;
+  *) os=linux ;;
+esac
+# (Git Bash started by its own path, as Claude Code starts it, keeps Windows' PATH as it is, with Windows' own find, sort
+# and the rest ahead of its own: its own first)
+[ "$os" != windows ] || export PATH="/usr/bin:/bin:/mingw64/bin:$PATH"
+# On Windows this runs in Git Bash, which writes /c/Users/…; node and Task Scheduler are Windows' own, and are given a
+# path as Windows writes it (C:\Users\…). Elsewhere a path is as it is.
+native() { if [ "$os" = windows ]; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
+# (and a Windows program is given its own options, /end and the like, as they are, not taken by Git Bash for paths)
+win() { MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$@"; }
+# (a folder named the way Windows writes it, as the agent's own update names its folder, is taken in Git Bash's way)
+[ "$os" != windows ] || HOME_DIR="$(cygpath -u "$HOME_DIR")"
+NHOME="$(native "$HOME_DIR")"
+AGENT_JS="$(native "$HOME_DIR/agent/agent.mjs")"
 
 REPO="redimaker/manyclaws"
 from="${MANYCLAWS_AGENT_FROM:-https://codeload.github.com/$REPO/tar.gz/refs/heads/beta}"
@@ -135,7 +154,18 @@ while [ $# -gt 0 ]; do
 done
 
 stop_service() {
-  if [ "$(uname)" = Darwin ]; then
+  if [ "$os" = windows ]; then
+    win schtasks.exe /end /tn "$TASK" >/dev/null 2>&1 || true
+    # (the task ended, what it ran may outlive it for a moment: agent-run.cmd, which would start the agent again, first,
+    # then the agent, by their pids; and an agent started by hand all the same)
+    for _ in $(seq 1 40); do
+      all="$(procs)"
+      pids="$({ printf '%s\n' "$all" | grep -F -- "$(native "$HOME_DIR/agent-run.cmd")" | grep -v -e grep -e Get-CimInstance; printf '%s\n' "$all" | agent_lines; } | awk '{ print $1 }' || true)"
+      [ -n "$pids" ] || break
+      for pid in $pids; do win taskkill.exe /pid "$pid" /f >/dev/null 2>&1 || true; done
+      sleep 0.25
+    done
+  elif [ "$os" = mac ]; then
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
     # bootout returns before the job is gone, and starting it again in that moment fails
     for _ in $(seq 1 40); do
@@ -147,9 +177,23 @@ stop_service() {
   fi
 }
 
-# This machine's agent where it is running (the one in $HOME_DIR): its pid, or nothing
+# Every process of this machine's, one to a line: its pid, its parent's, and its command line. On Windows, from
+# PowerShell: Git Bash's own ps sees only what Git Bash started, and not Windows' processes or their command lines.
+procs() {
+  if [ "$os" = windows ]; then
+    powershell.exe -NoProfile -NonInteractive -Command 'Get-CimInstance Win32_Process | ForEach-Object { "{0} {1} {2}" -f $_.ProcessId, $_.ParentProcessId, $_.CommandLine }' 2>/dev/null | tr -d '\r'
+  else
+    ps -axww -o pid=,ppid=,command= 2>/dev/null
+  fi
+}
+# The lines of procs that are this machine's agent running (the one in $HOME_DIR), however its command line quotes it
+# (Windows: "…\agent\agent.mjs" run)
+agent_lines() {
+  grep -F -- "$AGENT_JS" | grep -E -- 'agent\.mjs"? run( |$)' | grep -v -e grep -e Get-CimInstance
+}
+# Its pid, or nothing
 agent_pid() {
-  ps -axww -o pid=,command= 2>/dev/null | grep -F -- "$HOME_DIR/agent/agent.mjs run" | grep -v grep | awk '{ print $1 }' | head -1
+  procs | agent_lines | awk '{ print $1 }' | head -1
 }
 running="$(agent_pid || true)"
 # A search the agent runs itself (one started from the page) runs under the agent:
@@ -157,13 +201,18 @@ running="$(agent_pid || true)"
 # So from one of those nothing here is done, and it says so. (A session the agent started
 # for the page is in a terminal of its own, not under the agent.)
 if [ -n "$running" ]; then
+  # (on Windows this shell's pid as Windows knows it, which is not Git Bash's own)
   p=$$
+  [ "$os" != windows ] || p="$(cat "/proc/$$/winpid" 2>/dev/null || echo $$)"
+  all="$(procs)"
   while [ -n "$p" ] && [ "$p" -gt 1 ]; do
     if [ "$p" = "$running" ]; then
       echo "This was run from a search the ManyClaws agent itself runs (one started from your page). Stopping the agent ends it, and this run with it, before the agent is started again: nothing was changed. Run it in a terminal on this machine, or from a Claude Code session there." >&2
       exit 3
     fi
-    p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ' || true)"
+    # (awk reads to the end: one that stopped at the first line it wanted would cut printf off, which pipefail takes
+    # for this run failing)
+    p="$(printf '%s\n' "$all" | awk -v p="$p" '$1 == p && !found { print $2; found = 1 }')"
   done
 fi
 
@@ -171,8 +220,9 @@ if [ "$uninstall" = 1 ]; then
   stop_service
   # (what the keychain has of this machine's goes with it)
   node_bin="$(command -v node || true)"
-  [ -z "$node_bin" ] || [ ! -f "$HOME_DIR/agent/agent.mjs" ] || MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" forget 2>/dev/null || true
+  [ -z "$node_bin" ] || [ ! -f "$HOME_DIR/agent/agent.mjs" ] || MANYCLAWS_HOME="$NHOME" "$node_bin" "$(native "$HOME_DIR/agent/agent.mjs")" forget 2>/dev/null || true
   rm -f "$PLIST" "$UNIT"
+  [ "$os" != windows ] || win schtasks.exe /delete /tn "$TASK" /f >/dev/null 2>&1 || true
   rm -rf "$HOME_DIR"
   echo "The ManyClaws agent is stopped and removed. If the mod was set to go through it,"
   echo "point it back at the server: claude plugin configure manyclaws@manyclaws --values-stdin"
@@ -184,7 +234,7 @@ if [ "$update" = 1 ]; then
   # Starting it again ends the searches it is running: each a Claude Code the agent runs headless, under it (a session it
   # started for the page is in a terminal of its own, and is not)
   if [ -n "$running" ] && [ "$end_sessions" = 0 ]; then
-    hosted="$(ps -axww -o ppid=,command= 2>/dev/null | awk -v agent="$running" '$1 == agent' | grep -c -- '--input-format stream-json' || true)"
+    hosted="$(procs | awk -v agent="$running" '$2 == agent' | grep -c -- '--input-format stream-json' || true)"
     if [ "${hosted:-0}" -gt 0 ]; then
       echo "The ManyClaws agent is running $hosted search(es) started from your page, and starting it again ends them: nothing was changed. Run this again when they are done, or with --end-sessions to end them now." >&2
       exit 3
@@ -257,7 +307,7 @@ done
 # Every file of the agent as the signed list says, none missing and none besides; and no release older than the one here
 had_release=0
 [ ! -f "$HOME_DIR/agent/release.json" ] || had_release="$(sed -n 's/^[[:space:]]*"release"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*$/\1/p' "$HOME_DIR/agent/release.json" | head -1)"
-"$node_bin" - "$top" "${had_release:-0}" <<'CHECK' || { echo "Nothing was changed." >&2; exit 1; }
+"$node_bin" - "$(native "$top")" "${had_release:-0}" <<'CHECK' || { echo "Nothing was changed." >&2; exit 1; }
 const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
@@ -293,7 +343,7 @@ CHECK
 # set up is kept and written back, but for what it signed in and sealed with: the new agent is given those again.
 kept=""
 if [ "$reinstall" = 1 ]; then
-  kept="$("$node_bin" -e 'const c = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); for (const k of ["token", "key", "has"]) delete c[k]; process.stdout.write(JSON.stringify(c, null, 2) + "\n")' "$HOME_DIR/agent.json")" || { echo "$HOME_DIR/agent.json does not read: nothing was changed" >&2; exit 1; }
+  kept="$("$node_bin" -e 'const c = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); for (const k of ["token", "key", "has"]) delete c[k]; process.stdout.write(JSON.stringify(c, null, 2) + "\n")' "$(native "$HOME_DIR/agent.json")")" || { echo "$HOME_DIR/agent.json does not read: nothing was changed" >&2; exit 1; }
   stop_service
   rm -rf "$HOME_DIR"
 fi
@@ -324,23 +374,74 @@ if [ "$update" = 0 ]; then
   [ "$keychain" = 0 ] && configure+=(--no-keychain)
   [ "$waiting" = 1 ] && configure+=(--wait)
   # (the key goes in the environment, not on a command line others can see)
-  MANYCLAWS_HOME="$HOME_DIR" MANYCLAWS_TOKEN="$token" MANYCLAWS_KEY="$key" "$node_bin" "$HOME_DIR/agent/agent.mjs" configure "${configure[@]}" >/dev/null
+  MANYCLAWS_HOME="$NHOME" MANYCLAWS_TOKEN="$token" MANYCLAWS_KEY="$key" "$node_bin" "$(native "$HOME_DIR/agent/agent.mjs")" configure "${configure[@]}" >/dev/null
 else
   if [ "$reinstall" = 1 ]; then
     (umask 077; printf '%s' "$kept" > "$HOME_DIR/agent.json")
     # (and what the keychain had of the old one's goes too)
-    MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" forget 2>/dev/null || true
+    MANYCLAWS_HOME="$NHOME" "$node_bin" "$(native "$HOME_DIR/agent/agent.mjs")" forget 2>/dev/null || true
   fi
   # (an agent brought up to date keeps its token and key where a new one does: on a Mac, in the keychain, unless this
   # machine was set up not to)
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" keychain || true
+  MANYCLAWS_HOME="$NHOME" "$node_bin" "$(native "$HOME_DIR/agent/agent.mjs")" keychain || true
 fi
 
 stop_service
 # (from here, whatever the new agent writes of its own start is what is waited for)
 begun="$(date +%s)"
 start_service() {
-if [ "$(uname)" = Darwin ]; then
+if [ "$os" = windows ]; then
+  # A task of the user's own, in their own session (so that the console windows of the sessions it starts are on their
+  # screen), started as they sign in and now, and started again a minute after it stops of itself, with no window of its
+  # own: conhost --headless keeps the console the agent runs in off the screen, and cmd puts what it says in its log
+  # (Task Scheduler keeps nothing of it). No administrator is asked for: the task is the user's and runs as them.
+  who="$(win "$(cygpath -W)/System32/whoami.exe" | tr -d '\r')"
+  esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'; }
+  # What the task runs is a file of its own, agent-run.cmd: conhost takes what follows it apart and puts it together
+  # again without the quotes inside it, so a command line with a quoted path in it (node's, in Program Files) arrives
+  # broken, and one file's name is all it can be given whole. (Where the agent's folder is not the usual one, it says
+  # where it is: a task sets no environment of its own.)
+  runner="$HOME_DIR/agent-run.cmd"
+  # It keeps the agent running itself: what the task ran ends as conhost does, and conhost ends well whatever ended what
+  # it ran, so Task Scheduler never takes it for one that failed, and never starts it again. The agent goes and is
+  # started again as launchd and systemd do it (it goes of itself to start again with a token the plugin gave it), five
+  # seconds after; stopping the service ends this as well as the agent.
+  {
+    printf '@echo off\r\n'
+    [ "$HOME_DIR" = "$(cygpath -u "$USERPROFILE")/.manyclaws" ] || printf 'set "MANYCLAWS_HOME=%s"\r\n' "$NHOME"
+    printf ':run\r\n'
+    printf '"%s" "%s" run >> "%s" 2>&1\r\n' "$(native "$node_bin")" "$(native "$HOME_DIR/agent/agent.mjs")" "$(native "$HOME_DIR/agent.log")"
+    printf 'ping -n 6 127.0.0.1 >nul\r\n'
+    printf 'goto run\r\n'
+  } > "$runner"
+  xml="$HOME_DIR/agent-task.xml"
+  cat > "$xml.utf8" <<EOF
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>ManyClaws agent: this computer's Claude Code sessions, for the ManyClaws server</Description></RegistrationInfo>
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>$(printf '%s' "$who" | esc)</UserId></LogonTrigger></Triggers>
+  <Principals><Principal id="Author"><UserId>$(printf '%s' "$who" | esc)</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <Hidden>true</Hidden>
+    <Enabled>true</Enabled>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>$(native "$(cygpath -W)/System32/conhost.exe" | esc)</Command><Arguments>--headless "$(native "$runner" | esc)"</Arguments></Exec></Actions>
+</Task>
+EOF
+  # (Task Scheduler reads a task's XML as UTF-16; Git for Windows has no iconv, and node is here)
+  "$node_bin" -e 'const fs = require("node:fs"); fs.writeFileSync(process.argv[2], Buffer.from("\ufeff" + fs.readFileSync(process.argv[1], "utf8"), "utf16le"))' "$(native "$xml.utf8")" "$(native "$xml")"
+  rm -f "$xml.utf8"
+  win schtasks.exe /create /tn "$TASK" /xml "$(native "$xml")" /f >/dev/null || { echo "Task Scheduler would not take the agent's task: nothing starts it. Its XML: $xml" >&2; exit 1; }
+  win schtasks.exe /run /tn "$TASK" >/dev/null || { echo "Task Scheduler would not start the agent's task. Start it with: schtasks /run /tn \"$TASK\"" >&2; exit 1; }
+elif [ "$os" = mac ]; then
   mkdir -p "$(dirname "$PLIST")"
   cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -407,7 +508,7 @@ fi
 if [ "$reinstall" = 1 ]; then
   echo "The old ManyClaws agent is removed, with its API token and its key and everything else it kept. Agent $(sed -n "s/^export const VERSION = '\(.*\)'\$/\1/p" "$HOME_DIR/agent/service.mjs") is installed in its place, as $from has it (a signed release, checked), and running, set up as the old one was. Its log: $HOME_DIR/agent.log"
   echo "It has no API token or encryption key, and asked for none: it takes both from the ManyClaws plugin."
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a code, to type under Connect a computer where you are signed in to ManyClaws, and approve."
+  MANYCLAWS_HOME="$NHOME" "$node_bin" "$(native "$HOME_DIR/agent/agent.mjs")" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a code, to type under Connect a computer where you are signed in to ManyClaws, and approve."
   exit 0
 fi
 if [ "$update" = 1 ]; then
@@ -423,8 +524,10 @@ else
   if [ ${#modes[@]} -eq 0 ]; then echo "Sessions may be started in any permission mode, bypassing permissions too (--mode names the only ones to allow)."
   else case " ${modes[*]} " in *" bypassPermissions "*) echo "Sessions may be started with their permissions bypassed, as you asked (--mode bypassPermissions)." ;; *) echo "Sessions are not started with their permissions bypassed (--mode bypassPermissions allows it)." ;; esac
   fi
-  # (each opens in a terminal of its own, which is not the agent's: on a Mac a Terminal window, elsewhere tmux)
-  if [ "$(uname)" = Darwin ]; then echo "Each session started from the page opens in a Terminal window here (\"terminal\" in \"spawn\" in agent.json names another app, or tmux)."
+  # (each opens in a terminal of its own, which is not the agent's: on a Mac a Terminal window, on Windows a console
+  # window, elsewhere tmux)
+  if [ "$os" = windows ]; then echo "Each session started from the page opens in a console window here, of its own, which you can carry on in."
+  elif [ "$os" = mac ]; then echo "Each session started from the page opens in a Terminal window here (\"terminal\" in \"spawn\" in agent.json names another app, or tmux)."
   elif command -v tmux >/dev/null 2>&1; then echo "Each session started from the page opens in a tmux session here, named manyclaws-…: tmux ls lists them, and tmux attach -t <name> opens one."
   else echo "Each session started from the page opens in tmux here, which is not installed: install it (apt install tmux, or dnf install tmux) before a session is started." >&2; fi
 fi
@@ -439,8 +542,8 @@ else echo "The page puts no files on this machine."; fi
 # computer is connected with the code the plugin shows, and the agent takes them from the
 # plugin. What is said says which, and what is left for the person to do.
 if [ "$typed" = 1 ] && [ "$waiting" = 0 ]; then
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin || echo "The ManyClaws plugin was NOT given its API token and key. Start a new Claude Code session on this computer: the plugin shows a code that connects it."
+  MANYCLAWS_HOME="$NHOME" "$node_bin" "$(native "$HOME_DIR/agent/agent.mjs")" plugin || echo "The ManyClaws plugin was NOT given its API token and key. Start a new Claude Code session on this computer: the plugin shows a code that connects it."
 elif [ "$by_claude" = 1 ] || [ "$waiting" = 1 ]; then
   if [ "$waiting" = 1 ]; then echo "It has no API token or encryption key yet, and asked for none: it takes both from the ManyClaws plugin."; fi
-  MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a code, to type under Connect a computer where you are signed in to ManyClaws, and approve."
+  MANYCLAWS_HOME="$NHOME" "$node_bin" "$(native "$HOME_DIR/agent/agent.mjs")" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a code, to type under Connect a computer where you are signed in to ManyClaws, and approve."
 fi

@@ -740,6 +740,51 @@ function alive(pid) {
 // The first claude on the PATH that isn't one npm left in a node_modules/.bin
 export const findClaude = (env = process.env) => findTool('claude', env, { npm: false })
 
+// Git Bash on Windows, which runs the agent's installer there, as Claude Code finds it: where CLAUDE_CODE_GIT_BASH_PATH
+// says, else beside git on the PATH, else where Git for Windows puts it. A bash found on the PATH may be WSL's, which is
+// another computer as far as this one is concerned, so none is taken by its name alone. null where there is none
+export function findGitBash(env = process.env) {
+  const git = findTool('git', env)
+  const near = git ? path.join(path.dirname(path.dirname(git)), 'bin', 'bash.exe') : ''
+  for (const candidate of [env.CLAUDE_CODE_GIT_BASH_PATH, near, 'C:\\Program Files\\Git\\bin\\bash.exe']) {
+    if (candidate && fs.existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+// What a one-time task of Task Scheduler's runs, on Windows: a .cmd file that runs `argv` with `env` set (a task sets
+// none of its own) and appends what it says to `log`. A file, because conhost, which keeps the task off the screen,
+// takes what follows it apart and puts it together again without the quotes inside it: one file's name is all it can be
+// given whole.
+export function taskCmd({ argv, env = {}, log }) {
+  const quote = (t) => '"' + String(t) + '"'
+  return ['@echo off', ...Object.entries(env).map(([k, v]) => `set ${quote(`${k}=${v}`)}`), argv.map(quote).join(' ') + ` >> ${quote(log)} 2>&1`, 'exit /b %ERRORLEVEL%', ''].join('\r\n')
+}
+// And the task, as XML: it runs the file `cmd` once, as `user`, in their own session and with no window of its own
+// (conhost --headless)
+export function taskXml({ user, cmd, description }) {
+  const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const windir = process.env.SystemRoot || 'C:\\Windows'
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo><Description>${esc(description)}</Description></RegistrationInfo>
+  <Principals><Principal id="Author"><UserId>${esc(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT1H</ExecutionTimeLimit>
+    <Hidden>true</Hidden>
+    <Enabled>true</Enabled>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>${esc(path.win32.join(windir, 'System32', 'conhost.exe'))}</Command><Arguments>--headless "${esc(cmd)}"</Arguments></Exec></Actions>
+</Task>
+`
+}
+// (written as Task Scheduler reads it: UTF-16, little-endian, with its mark)
+export const taskFile = (file, xml) => fs.writeFileSync(file, Buffer.from('\ufeff' + xml, 'utf16le'))
+
 // A program on the PATH, by name
 export function findTool(name, env = process.env, { npm = true } = {}) {
   // A copy of Windows' environment keeps the name as it was set: Path

@@ -73,7 +73,7 @@ The key reads what your sessions say. It cannot sign the list of your devices, s
 | `mod/agent/rows.mjs`, `mod/agent/seal.mjs` | Identical copies of the plugin's `rows.js` and `seal.js` |
 | `mod/agent/secrets.mjs` | Where the agent keeps its token and your key: the keychain on a Mac |
 | `mod/agent/verify.mjs` | Holds what is installed, the plugin Claude Code installed, and what a server hands a browser, against the signed release |
-| `mod/agent/install.sh` | Installs the agent as a service of your own user (launchd on macOS, systemd on Linux), from a signed release and nothing else |
+| `mod/agent/install.sh` | Installs the agent as a service of your own user (launchd on macOS, systemd on Linux, on Windows a task of Task Scheduler's at sign-in, run by Git Bash), from a signed release and nothing else |
 | `mod/release.json`, `mod/release.json.sig` | The release: every file of the plugin, the agent and the page with its SHA-256, and that list signed |
 | `web/` | The page: `index.html`, `app.js`, `keys.js`, `seal.js` and what they show; and the two guides Claude Code can follow, `setup.md` and `upgrade.md` |
 | `release.mjs` | Makes a release, writes the page's integrity values, and tags the commit a release is in |
@@ -94,7 +94,7 @@ Updates are offered on your page, for each computer, and you approve each one th
 
 **A computer whose plugin or agent is from before 6.0.0** is moved once, by <https://manyclaws.dev/upgrade> (`web/upgrade.md` here), which the page sends an account to; from then on it is kept up to date from the page. **To install from source**, so that what runs is what you read: the guide's "Installing from source" checks out a release by its tag (`release-N`), checks its signature and every file with `ssh-keygen` and `shasum`, and has Claude Code load the plugin from that folder as it is.
 
-The plugin needs Claude Code 2.1.287 or later. The agent needs Node.js 22.13 or later and `ssh-keygen` (which comes with OpenSSH), and nothing else; it is for macOS and Linux.
+The plugin needs Claude Code 2.1.287 or later. The agent needs Node.js 22.13 or later and `ssh-keygen` (which comes with OpenSSH), and nothing else; it is for macOS, Linux and Windows. On Windows it is installed by Git Bash, which Claude Code runs with there, and kept running by a task of Task Scheduler's that starts it as you sign in, with no window of its own (`ManyClaws agent`; what it runs is `~/.manyclaws/agent-run.cmd`, which starts the agent again five seconds after it stops). Its token and key are in `agent.json`, which only you can read, as on Linux.
 
 ### Releases are signed
 

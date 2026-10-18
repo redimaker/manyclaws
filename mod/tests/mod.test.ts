@@ -1807,7 +1807,8 @@ function folders(on: any, { own, at = {}, files = {} }: { own: Record<string, st
     const bytes = e.as === 'bytes' || e.options?.as === 'bytes' || e.init?.as === 'bytes'
     return { value: bytes ? { base64: std64(enc.encode(text)) } : text }
   })
-  on('fs.exists', ($: any, e: any) => ({ value: files[e.path] !== undefined || !!where(e.path) }))
+  // (a Windows path, which the engine running these on a Mac or Linux finds under its working folder, is the same file)
+  on('fs.exists', ($: any, e: any) => ({ value: files[e.path] !== undefined || Object.keys(files).some((f) => /^[A-Za-z]:\\/.test(f) && e.path.endsWith('/' + f)) || !!where(e.path) }))
   on('fs.write', ($: any, e: any) => {
     written.push({ path: e.path, text: e.text })
     return { value: undefined }
@@ -1894,6 +1895,36 @@ test('the agent set up from the plugin\'s own folder, where it is carried: its i
   expect(ran.find((a) => a[0] === 'bash')).toEqual(['bash', root + '/agent/install.sh', '--from', root, '--auto-folders'])
   const done = s.results().find((r) => r.id === 'u1')
   expect([done.ok, done.value.said]).toEqual([true, ['The ManyClaws agent is installed']])
+})
+
+// (Windows, as Claude Code's own Git Bash says it is, and where Claude Code says that Git Bash is)
+const WINDOWS = (argv: string[]) => (argv[0] === 'uname' ? { exitCode: 0, stdout: 'MSYS_NT-10.0-26200 x86_64\n', stderr: '' } : null)
+const GIT_BASH = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe'
+
+test('on Windows the agent is set up the same way, by the Git Bash Claude Code runs (CLAUDE_CODE_GIT_BASH_PATH) and not a bash found on the PATH, which may be WSL\'s', async ($, on) => {
+  const m = await made()
+  const ran: string[][] = []
+  // (Git Bash is there, where Claude Code says)
+  const fsNow = folders(on, { own: released(9).files, files: { [GIT_BASH]: '' } })
+  const s = session(on, m, { env: { ...AT_HOME, CLAUDE_CODE_GIT_BASH_PATH: GIT_BASH }, poll: [upkeep(m, 'manyclaws.agent')], run: (argv: string[]) => (ran.push(argv), WINDOWS(argv) ?? (argv[0] === GIT_BASH ? { exitCode: 0, stdout: 'The ManyClaws agent is installed\n', stderr: '' } : null)) })
+  await starting($, s.clock)
+  await s.clock.advance(3000)
+  const installer = ran.find((a) => a[0] === GIT_BASH)
+  const root = fsNow.root() || installer?.[3]
+  expect(installer).toEqual([GIT_BASH, root + '/agent/install.sh', '--from', root, '--auto-folders'])
+  expect(ran.some((a) => a[0] === 'bash')).toBe(false)
+  expect(s.results().find((r) => r.id === 'u1')).toMatchObject({ ok: true, value: { said: ['The ManyClaws agent is installed'] } })
+})
+
+test('on Windows with no Git Bash to be found, the agent is not set up, and it is said why', async ($, on) => {
+  const m = await made()
+  const ran: string[][] = []
+  folders(on, { own: released(9).files })
+  const s = session(on, m, { env: AT_HOME, poll: [upkeep(m, 'manyclaws.agent')], run: (argv: string[]) => (ran.push(argv), WINDOWS(argv)) })
+  await starting($, s.clock)
+  await s.clock.advance(3000)
+  expect(s.results().find((r) => r.id === 'u1')).toMatchObject({ ok: false, error: expect.stringContaining('Git Bash was not found on this computer') })
+  expect(ran.some((a) => /bash/i.test(a[0]))).toBe(false)
 })
 
 test('neither is done for a device that may not start sessions, nor the agent set up from a session a program runs', async ($, on) => {

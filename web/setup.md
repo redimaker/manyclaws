@@ -47,13 +47,13 @@ Claude Code then shows which account the computer joined. If it isn't yours, typ
 
 ## 4. The agent
 
-The agent is a small background service. It lets you start a session on the computer from your phone, pick up one that has ended, and search everything Claude Code has done there. It needs Node.js 22.13 or later, on macOS or Linux. On Windows the plugin works, but the agent cannot be installed yet.
+The agent is a small background service. It lets you start a session on the computer from your phone, pick up one that has ended, and search everything Claude Code has done there. It needs Node.js 22.13 or later, on macOS, Linux or Windows (where Git Bash, which Claude Code uses there, installs it, and Task Scheduler starts it as you sign in).
 
 **From your page:** open the computer's gear and press **Let my phone start sessions on** it. Your phone can then start sessions only in folders you've used Claude Code in on that computer in the last 90 days, and never in your home folder or above it, a temporary folder, or one inside a folder whose name starts with a dot. The computer's page lists them.
 
-A session started from your phone opens in a Terminal window on a Mac, or in tmux on Linux (`tmux ls`), and runs until you close it there.
+A session started from your phone opens in a Terminal window on a Mac, a console window on Windows, or tmux on Linux (`tmux ls`), and runs until you close it there.
 
-**By hand**, on macOS or Linux, from the plugin's folder (Claude Code's default; with `CLAUDE_CONFIG_DIR` set it is under that folder instead, and `claude plugin list --json` gives it as `installPath`):
+**By hand** (on Windows, in Git Bash), from the plugin's folder (Claude Code's default; with `CLAUDE_CONFIG_DIR` set it is under that folder instead, and `claude plugin list --json` gives it as `installPath`):
 
 ```
 p=~/.claude/plugins/cache/manyclaws/manyclaws/{{plugin-version}}
