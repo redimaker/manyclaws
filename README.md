@@ -47,7 +47,7 @@ What is known, and not hidden: a sealed value is not tied to the session or the 
 
 ### Where your key is kept
 
-- **In the plugin**: you type the code it shows on a device that has your key, and approve it there with the passkey; the page seals the key and an API token made for the computer with the key the two made from the code. The plugin keeps the two among its options, where Claude Code keeps what is secret (the system keychain on a Mac): the key written out, `mcf_…`. `MANYCLAWS_KEY` in the environment takes the key written out, for a set-up with nobody there, and nothing else is a key.
+- **In the plugin**: you type the code it shows on a device that has your key, and approve it there with the passkey; the page seals the key and an API token made for the computer with the key the two made from the code. The plugin keeps the two itself, and declares no options, so installing it asks for nothing: on a Mac in the login keychain, elsewhere (and where the keychain cannot be used) in `manyclaws.json` in Claude Code's configuration folder, which only you can read; the key written out, `mcf_…`. `MANYCLAWS_KEY` in the environment takes the key written out, for a set-up with nobody there, and nothing else is a key.
 - **In the agent**: on a Mac, its API token and your key are in your login keychain, and `~/.manyclaws/agent.json` has only a fingerprint of the two. Elsewhere they are in that file, which only you can read (`--no-keychain` keeps them there on a Mac too).
 - **In a browser**: as keys the browser will use and not hand back, and the root wrapped under a passkey of that device's own; on a borrowed device, the key alone, while the page is open.
 
@@ -57,7 +57,7 @@ The key reads what your sessions say. It cannot sign the list of your devices, s
 
 | Path | What it is |
 |---|---|
-| `mod/.claude-plugin/plugin.json` | The plugin's manifest: its version and its options (API token and key, filled in as the computer is connected; label; capabilities) |
+| `mod/.claude-plugin/plugin.json` | The plugin's manifest: its name, version and description. It declares no options |
 | `mod/hooks/register.js` | The plugin: reports the session, polls for what is asked of it, answers permission prompts routed to the page |
 | `mod/hooks/lib.js` | Helpers with no side effects, including the plugin's version and which capability each request needs |
 | `mod/hooks/rows.js` | Turns what Claude Code reports into the rows of a chat, before they are sealed |

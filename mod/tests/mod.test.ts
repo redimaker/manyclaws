@@ -206,26 +206,110 @@ test('without a token the mod sends nothing of the session: it shows a code that
 })
 
 // Connected with its code: the page's answer, sealed with the key the two made from it, as the server hands it over
-async function connectedBy($: any, on: any, { installed }: { installed: boolean }) {
+// (the plugin's own folder: the one these tests are in, which is where it is loaded from here; installed there by Claude
+// Code, or not, as its list of what it installed says)
+const ownFolder = () => decodeURIComponent(new URL('..', import.meta.url).pathname).replace(/\/+$/, '')
+const installedList = (installed: boolean) => JSON.stringify({ version: 2, plugins: { 'manyclaws@manyclaws': [{ scope: 'user', installPath: installed ? ownFolder() : '/home/me/.claude/plugins/cache/manyclaws/manyclaws/6.0.0', version: '6.0.0' }] } })
+async function connectedBy($: any, on: any, { installed, run = null, env = {}, files = {} }: { installed: boolean; run?: any; env?: Record<string, string>; files?: Record<string, string> }) {
   const m = await made()
-  // (the plugin's own folder: the one these tests are in, which is where it is loaded from here)
-  const root = decodeURIComponent(new URL('..', import.meta.url).pathname).replace(/\/+$/, '')
-  const list = { version: 2, plugins: { 'manyclaws@manyclaws': [{ scope: 'user', installPath: installed ? root : '/home/me/.claude/plugins/cache/manyclaws/manyclaws/6.0.0', version: '6.0.0' }] } }
-  folders(on, { own: released(9).files, files: { '/home/me/.claude/plugins/installed_plugins.json': JSON.stringify(list) } })
+  const fsys = folders(on, { own: released(9).files, files: { [(env.CLAUDE_CONFIG_DIR ?? '/home/me/.claude') + '/plugins/installed_plugins.json']: installedList(installed), ...files } })
   const s = setup(on, {
-    env: { MANYCLAWS_URL: 'https://mc.test', HOME: '/home/me' },
+    env: { MANYCLAWS_URL: 'https://mc.test', HOME: '/home/me', ...env },
+    run,
     page: { give: () => ({ token: 'mct_made-for-this-computer', key: keysText(m.keys), account: 'me@example.test' }) },
   })
   await start($)
   await paired(s.clock, () => s.said.some((l) => l.includes('connected to the account of me@example.test')))
-  return s
+  return { ...s, written: fsys.written, key: keysText(m.keys) }
 }
+// A keychain as macOS's tool answers it: what `security -i` is given on its standard input, and what find-generic-password
+// hands back, by service and account, in whichever keychain file is named last (none: the login keychain)
+function keychainOn(ran: any[] = []) {
+  const items = new Map<string, string>()
+  const run = (argv: string[], init: any) => {
+    ran.push({ argv, stdin: init?.stdin })
+    if (argv[0] === 'uname') return { exitCode: 0, stdout: 'Darwin\n', stderr: '' }
+    if (argv[0] !== '/usr/bin/security') return null
+    if (argv[1] === '-i') {
+      const add = /^add-generic-password -U -s "ManyClaws plugin" -a "([^"]+)" -l "ManyClaws plugin" -w "([0-9a-f]+)" ?(.*)$/.exec(String(init?.stdin).trim())
+      if (add) items.set(add[1] + '|' + add[3], add[2])
+      const gone = /^delete-generic-password -s "ManyClaws plugin" -a "([^"]+)" ?(.*)$/.exec(String(init?.stdin).trim())
+      if (gone) items.delete(gone[1] + '|' + gone[2])
+      return { exitCode: 0, stdout: '', stderr: '' }
+    }
+    if (argv[1] === 'find-generic-password') {
+      const account = argv[argv.indexOf('-a') + 1]
+      const file = argv.slice(argv.indexOf('-w') + 1).map((f) => `"${f}"`).join(' ')
+      const v = items.get(account + '|' + file)
+      return v ? { exitCode: 0, stdout: v + '\n', stderr: '' } : { exitCode: 44, stdout: '', stderr: 'The specified item could not be found in the keychain.' }
+    }
+    return null
+  }
+  return { items, run }
+}
+const unhex = (hex: string) => JSON.parse(new TextDecoder().decode(Uint8Array.from(hex.match(/../g)!, (h) => parseInt(h, 16))))
 
-test('connected with its code, the plugin Claude Code installed keeps the token and the key among its own options, as typed ones are kept', async ($, on) => {
-  const { said, configured } = await connectedBy($, on, { installed: true })
-  expect(configured.map((c) => c.argv.slice(1))).toEqual([['plugin', 'configure', 'manyclaws@manyclaws', '--values-stdin']])
-  expect(JSON.parse(configured[0].stdin).token).toBe('mct_made-for-this-computer')
-  expect(said.some((l) => l.includes('for this session only'))).toBe(false)
+test('connected with its code, the plugin Claude Code installed keeps the token and the key itself, where there is no keychain in a file of Claude Code\'s folder that only its owner reads; nothing goes through Claude Code, and installing it asks for nothing', async ($, on) => {
+  const ran: any[] = []
+  const { said, configured, written, key } = await connectedBy($, on, { installed: true, run: (argv: string[], init: any) => (ran.push({ argv, stdin: init?.stdin }), null) })
+  expect(configured).toEqual([])
+  // (made by the shell with nothing let to the group or others, and put in place; where it has no shell, as the plugin
+  // writes any file)
+  const sh = ran.find((r) => r.argv[0] === 'sh')
+  expect(sh.argv[2]).toMatch(/^umask 077 && mkdir -p "\$1" && cat > "\$2\.new" && mv -f "\$2\.new" "\$2"$/)
+  expect(sh.argv.slice(3)).toEqual(['sh', '/home/me/.claude', '/home/me/.claude/manyclaws.json'])
+  expect(JSON.parse(sh.stdin)).toEqual({ token: 'mct_made-for-this-computer', key })
+  expect(written.map((w) => [w.path, JSON.parse(w.text)])).toEqual([['/home/me/.claude/manyclaws.json', { token: 'mct_made-for-this-computer', key }]])
+  // (on no command line)
+  expect(ran.some((r) => r.argv.join(' ').includes('mct_made-for-this-computer'))).toBe(false)
+  expect(said.some((l) => l.includes('for this session only') || l.includes('could not be kept'))).toBe(false)
+  // Disconnected: forgotten
+  const r = await $.command.run({ command: 'manyclaws', args: 'disconnect' })
+  expect(String(r?.text)).toMatch(/^Disconnected: from the next session on/)
+  expect(JSON.parse(written.at(-1)!.text)).toEqual({})
+})
+
+test("on a Mac, in the login keychain: given to its tool on its standard input, never among its arguments, by Claude Code's configuration folder, in a keychain file of a test's own where MANYCLAWS_KEYCHAIN names one; read back, and not in the file as well; and forgotten from it", async ($, on) => {
+  const ran: any[] = []
+  const { items, run } = keychainOn(ran)
+  const { said, written, key } = await connectedBy($, on, { installed: true, run, env: { CLAUDE_CONFIG_DIR: '/home/me/.claude-work', MANYCLAWS_KEYCHAIN: '/tmp/a test\'s.keychain-db' }, files: { "/tmp/a test's.keychain-db": 'a keychain' } })
+  expect([...items.keys()]).toEqual(['/home/me/.claude-work|"/tmp/a test\'s.keychain-db"'])
+  expect(unhex([...items.values()][0])).toEqual({ token: 'mct_made-for-this-computer', key })
+  expect(ran.filter((r) => r.argv[1] === '-i').map((r) => r.argv)).toEqual([['/usr/bin/security', '-i']])
+  expect(ran.some((r) => r.argv.join(' ').includes('mct_made-for-this-computer') || r.argv.join(' ').includes(key))).toBe(false)
+  expect(written.filter((w) => w.path.endsWith('/manyclaws.json'))).toEqual([])
+  expect(said.some((l) => l.includes('could not be kept'))).toBe(false)
+  await $.command.run({ command: 'manyclaws', args: 'disconnect' })
+  expect(items.size).toBe(0)
+})
+
+test('a keychain file named for a test that is not there is no keychain: the keychain\'s tool is not asked (given one that is not there, it writes to the login keychain), and the two go to the file', async ($, on) => {
+  const ran: any[] = []
+  const { run } = keychainOn(ran)
+  const { written, key } = await connectedBy($, on, { installed: true, run, env: { MANYCLAWS_KEYCHAIN: '/tmp/no.keychain-db' } })
+  expect(ran.some((r) => r.argv[0] === '/usr/bin/security')).toBe(false)
+  expect(written.map((w) => [w.path, JSON.parse(w.text)])).toEqual([['/home/me/.claude/manyclaws.json', { token: 'mct_made-for-this-computer', key }]])
+})
+
+test('what the installed plugin keeps is what the next session starts with: connected at once, with nothing to show', async ($, on) => {
+  const m = await made()
+  folders(on, { own: released(9).files, files: { '/home/me/.claude/plugins/installed_plugins.json': installedList(true), '/home/me/.claude/manyclaws.json': JSON.stringify({ token: 'agent-token', key: keysText(m.keys) }) } })
+  const { clock, sent, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', HOME: '/home/me' } })
+  await start($)
+  await clock.advance(1000)
+  expect(sent.some((x) => x.url === 'https://mc.test/api/agent/events')).toBe(true)
+  expect(sent.some((x) => x.url.endsWith('/api/pairings'))).toBe(false)
+  expect(said.some((l) => l.includes('not connected'))).toBe(false)
+})
+
+test('a copy loaded from a folder of its own does not read what the installed one keeps: it shows the code', async ($, on) => {
+  const m = await made()
+  folders(on, { own: released(9).files, files: { '/home/me/.claude/plugins/installed_plugins.json': installedList(false), '/home/me/.claude/manyclaws.json': JSON.stringify({ token: 'agent-token', key: keysText(m.keys) }) } })
+  const { clock, sent } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', HOME: '/home/me' } })
+  await start($)
+  await clock.advance(1000)
+  expect(sent[0]?.url).toBe('https://mc.test/api/pairings')
+  expect(sent.some((x) => x.url.includes('/api/agent/'))).toBe(false)
 })
 
 test('a code typed on the page that is not the one shown is answered as that, and the page given nothing: a try of three, after which the right one still connects it', async ($, on) => {
@@ -254,8 +338,11 @@ test('three codes typed that were not the one shown, and it is no longer good: t
 })
 
 test("one loaded from a folder of its own (a checkout's, a test's) changes nothing of the installed plugin's: it keeps the two for its session, and says so; nor does it disconnect the installed one", async ($, on) => {
-  const { said, configured } = await connectedBy($, on, { installed: false })
+  const ran: any[] = []
+  const { said, configured, written } = await connectedBy($, on, { installed: false, run: (argv: string[]) => (ran.push(argv), null) })
   expect(configured).toEqual([])
+  expect(written).toEqual([])
+  expect(ran.some((a) => a[0] === 'sh' || a[0] === '/usr/bin/security')).toBe(false)
   expect(said.some((l) => l.includes('connected to the account of me@example.test. This session is on your page. (This plugin was loaded from a folder of its own, not installed by Claude Code, so the two are kept for this session only.)'))).toBe(true)
   const r = await $.command.run({ command: 'manyclaws', args: 'disconnect' })
   expect(String(r?.text)).toMatch(/^This plugin was loaded from a folder of its own/)
@@ -521,7 +608,7 @@ test('told once on this computer that the settings hook events pass the plugin o
 
 // ---- The key: given to this computer written out (mcf_…) as it is connected, and taken as it is. There is no passphrase.
 
-test('the key written out among its options is used as it is: the session starts at once, sealed, saying nothing of which key, and the server is asked nothing of whose computer this is', { options: { key: '' } }, async ($, on) => {
+test('the key written out, as the environment names it, is used as it is: the session starts at once, sealed, saying nothing of which key, and the server is asked nothing of whose computer this is', { options: { key: '' } }, async ($, on) => {
   const m = await made()
   const { clock, events, sent, said, configured } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_TOKEN: 'agent-token', MANYCLAWS_KEY: keysText(m.keys) } })
   const before = Date.now()
@@ -1775,6 +1862,8 @@ function folders(on: any, { own, at = {}, files = {} }: { own: Record<string, st
   on('fs.exists', ($: any, e: any) => ({ value: files[e.path] !== undefined || !!where(e.path) }))
   on('fs.write', ($: any, e: any) => {
     written.push({ path: e.path, text: e.text })
+    // (and read back as it was written)
+    files[e.path] = e.text
     return { value: undefined }
   })
   return { written, root: () => root }

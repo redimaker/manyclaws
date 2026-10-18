@@ -33,8 +33,6 @@ Claude Code can do this part, or you can paste the commands yourself. It needs C
    claude plugin install manyclaws@manyclaws
    ```
 
-   The install reports options that are "not yet set". That is expected: step 3 sets them, without your typing either.
-
 ## 3. Connect the computer
 
 This step is yours, and it is the one that matters: until it is done, nothing of this computer shows.
@@ -67,7 +65,6 @@ bash <the plugin's folder>/agent/install.sh --from <the plugin's folder> --auto-
 
 - The new session appears at {{origin}}/app within a few seconds, under the computer's name, with "encrypted" under its title.
 - With the agent, the computer is listed there by its name with every session Claude Code has had on it, running or not, and its page says which release it is, as its agent checked it.
-- `claude plugin configure manyclaws@manyclaws` lists the plugin's options and says which are set. It never shows their values.
 - If the session does not appear, the plugin says why in Claude Code itself: a token that has run out or been taken back (it then shows the code that connects the computer again), no key yet, or a server it cannot reach. A computer sends nothing unsealed, and the server takes nothing that is not sealed. Nothing checks your key for you: if the page says some sessions were sealed with another key and cannot be opened, a computer of yours has another one, from before your account was started afresh. **What to do**, beside it, says which, and how it is connected again.
 
 ## 6. Your phone

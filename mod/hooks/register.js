@@ -7,20 +7,16 @@
 // given and reads none of it. What it does say is the account's policy: where permission
 // prompts and questions are answered, and whether replies stream.
 //
-// Configuration comes from the plugin's options (userConfig) or the environment:
-//                  MANYCLAWS_URL           the server, where it is not https://manyclaws.dev (SERVER, in
-//                                            lib.js): the plugin has no option for it, so its dialog
-//                                            asks for no address
-//   token        / MANYCLAWS_TOKEN         an API token of the account's, made on its Account page
-//   label        / MANYCLAWS_LABEL         optional name for this machine or account
-//   capabilities / MANYCLAWS_CAPABILITIES  "default", "all", or a list such as "+files,+exec"
-//   key          / MANYCLAWS_KEY           the account's key written out (mcf_…), as a computer
-//                                            keeps it: the key everything the session says is
-//                                            sealed with, and the half that checks the list of the
-//                                            account's devices. Put among the plugin's options by
-//                                            the plugin itself, as this computer is connected from
-//                                            the code it shows (below), typed into the page. There is no
-//                                            passphrase: anything that is not a key is no key.
+// The plugin declares no options, so installing it asks for nothing. What it signs in with and seals with it keeps
+// itself, as this computer is connected from the code it shows (below), typed into the page: the account's API token,
+// and the account's key written out (mcf_…), the key everything the session says is sealed with and the half that
+// checks the list of the account's devices (keptRead, keptWrite). There is no passphrase: anything that is not a key is
+// no key. The environment names any of them in their place (a test's, or someone who sets them so):
+//   MANYCLAWS_URL           the server, where it is not https://manyclaws.dev (SERVER, in lib.js)
+//   MANYCLAWS_TOKEN         an API token of the account's
+//   MANYCLAWS_KEY           the account's key written out (mcf_…)
+//   MANYCLAWS_LABEL         optional name for this machine or account
+//   MANYCLAWS_CAPABILITIES  "default", "all", or a list such as "+files,+exec"
 // Without a token, or with no key, the mod sends nothing and asks for nothing: in a session
 // someone is at, it shows the code that connects this computer from the page. So it does
 // where the server refuses its token (taken back, or run out).
@@ -132,11 +128,11 @@ const answeredBy = new Map() // rid -> who answered one of those first, when it 
 const deltas = new Map() // streamed reply text not yet sent, by turn, step and block
 const added = new Set() // the names of its own tools that are before Claude (OWN_TOOLS)
 
-export function register(on, options) {
+export function register(on) {
   on('session.start', async ($, e, next) => {
     void $.command.register({ name: 'manyclaws', description: 'Connect this computer to ManyClaws, or disconnect it', argumentHint: 'connect | disconnect' }).catch(() => {})
     startedWith = e
-    const given = await readGiven($, options)
+    const given = await readGiven($)
     const here = given && keysHere($, given)
     if (here) await begin($, e, given, here)
     // (with no token, or no key, where someone is at the session: the code that connects this computer from the page)
@@ -489,22 +485,20 @@ async function begin($, e, given, keys) {
 // What the plugin was given: where it reports, what it signs in with, and the key it seals
 // with. null where it has no token: a session is told of sealed or not at all, so with null
 // nothing is sent and nothing is asked for.
-// The token this plugin signs in with, or '' (one it was disconnected from is none: NO_TOKEN)
-async function tokenOf($, options) {
-  const token = options?.token || (await $.env.get('MANYCLAWS_TOKEN')) || ''
-  return token === NO_TOKEN ? '' : String(token)
-}
-async function readGiven($, options) {
-  const token = await tokenOf($, options)
+// The token and the key: from the environment (a test's, or someone who sets them so), else what this plugin keeps, where
+// Claude Code installed it (keptRead)
+async function readGiven($) {
+  const kept = (await installedHere($)) ? await keptRead($) : null
+  const token = String((await $.env.get('MANYCLAWS_TOKEN')) || kept?.token || '')
   if (!token) return null
-  const key = String(options?.key || (await $.env.get('MANYCLAWS_KEY')) || '').trim()
-  const url = (await $.env.get('MANYCLAWS_URL')) || (await relayOf($, String(token))) || SERVER
+  const key = String((await $.env.get('MANYCLAWS_KEY')) || kept?.key || '').trim()
+  const url = (await $.env.get('MANYCLAWS_URL')) || (await relayOf($, token)) || SERVER
   return {
     url: String(url).replace(/\/+$/, ''),
-    token: String(token),
-    key: key === NO_TOKEN ? '' : key,
-    label: options?.label || (await $.env.get('MANYCLAWS_LABEL')) || '',
-    capabilities: options?.capabilities || (await $.env.get('MANYCLAWS_CAPABILITIES')) || 'default',
+    token,
+    key,
+    label: (await $.env.get('MANYCLAWS_LABEL')) || '',
+    capabilities: (await $.env.get('MANYCLAWS_CAPABILITIES')) || 'default',
   }
 }
 
@@ -520,7 +514,7 @@ function notShown($, text) {
 
 const PLUGIN = 'manyclaws@manyclaws' // what Claude Code knows this plugin by, where it was installed from its marketplace
 
-// The account's key, as this computer was given it: written out (mcf_…), among the plugin's options or in the
+// The account's key, as this computer was given it: written out (mcf_…), kept by the plugin (keptRead) or in the
 // environment. null where there is none, or what is there is not one (from before there was a key to be given: there
 // was a passphrase), which is said: the code that connects this computer is offered in its place.
 function keysHere($, { key }) {
@@ -1021,9 +1015,8 @@ async function tellAgent($) {
 // plugin sending this computer's name sealed with it; then the page makes a token for this computer and seals it and
 // the account's key (written out, mcf_…) with that key. The plugin asks the server how it is going every two seconds
 // for ten minutes. A code typed that is not this one is a try of three, after which it is made again. The two are then
-// kept among the plugin's options (`claude plugin configure`), and the session is taken up at once. So with a token the
+// kept where this plugin keeps them (keptWrite), and the session is taken up at once. So with a token the
 // server refuses: a code connects this computer again, and the session goes on with what it gave.
-const NO_TOKEN = 'none' // what is kept in the token's place once this computer is disconnected: no token
 const CONNECT_MS = 10 * 60_000
 const CONNECT_EVERY_MS = 2000
 const PAIRING = 'manyclaws computer' // what the exchange is for: a code for one thing is no code for another
@@ -1099,17 +1092,13 @@ async function askConnect($) {
   const got = openPaired(c.paired, seen.done)
   const keys = keysFromText(got?.key)
   if (!got || typeof got.token !== 'string' || !got.token || !keys) return void $.ui.log('ManyClaws: what came back to connect this computer did not open with the key made with its code, so nothing of it was taken. /manyclaws connect makes another code.')
-  // (kept among the plugin's options, where Claude Code keeps what is secret of them. Only where this plugin is the one
-  // Claude Code installed: one loaded from a folder of its own, a checkout's, keeps them for this
-  // session alone, and leaves the installed plugin's as they are)
+  // (kept where this plugin keeps them, keptWrite. Only where this plugin is the one Claude Code installed: one loaded
+  // from a folder of its own, a checkout's or a test's, keeps them for this session alone, and leaves the installed
+  // plugin's as they are)
   const installed = await installedHere($)
-  let kept = false
-  try {
-    const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
-    if (installed) kept = (await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ token: got.token, key: got.key }), timeoutMs: 60_000 })).exitCode === 0
-  } catch {}
+  const why = installed ? await keptWrite($, { token: got.token, key: got.key }).catch((err) => String(err?.message ?? err)) : ''
   const account = typeof got.account === 'string' && got.account ? `the account of ${got.account}` : 'your ManyClaws account'
-  const unkept = !installed ? ' (This plugin was loaded from a folder of its own, not installed by Claude Code, so the two are kept for this session only.)' : kept ? '' : ' (Claude Code would not keep the two among the plugin\'s options here, so the next session asks again.)'
+  const unkept = !installed ? ' (This plugin was loaded from a folder of its own, not installed by Claude Code, so the two are kept for this session only.)' : why ? ` (They could not be kept on this computer (${why}), so the next session asks again.)` : ''
   $.ui.log(`ManyClaws: connected to ${account}. This session is on your page.${unkept} Not your account? Type /manyclaws disconnect.`)
   // (taken up with what it was given: a session that had a token the server refused is taken up again, its loops of
   // before let go of)
@@ -1118,8 +1107,98 @@ async function askConnect($) {
   await begin($, c.e, { url: c.url, token: got.token, key: got.key, label: was?.label ?? '', capabilities: was?.capabilities ?? 'default' }, keys)
   refusedSaid = false
 }
+// ---- What this plugin keeps: the API token it signs in with and the account's key (written out, mcf_…), as this
+// computer was given them when it was connected with its code. Claude Code's own options would keep them where it keeps
+// secrets, but every option a plugin declares is offered to be typed at its install, and these two are never typed: so
+// the plugin keeps them itself, as the agent beside it keeps its own (agent/secrets.mjs). On a Mac in the login
+// keychain, under KEPT_SERVICE, given to the keychain's own tool on its standard input and never among its arguments,
+// which every user of the computer can see, and written in hex, so that nothing in them means anything to what reads
+// the line; elsewhere, or where the keychain will not keep them (a computer reached over SSH has no keychain open), in
+// manyclaws.json in Claude Code's configuration folder, made so that only its owner reads it. Either is kept by that
+// folder (CLAUDE_CONFIG_DIR, or ~/.claude), as Claude Code kept a plugin's options: so a folder of a test's own, or of
+// another Claude account on the same computer, has its own, and none is another's. MANYCLAWS_KEYCHAIN names a keychain
+// file of a test's own, as it does for the agent. Not the agent's folder (~/.manyclaws): its installer removes that
+// whole on --uninstall and --reinstall. The agent writes and reads the same two places (agent.mjs, givePlugin and
+// pluginHas): the two are kept in step, and a test holds each to the other.
+const KEPT_SERVICE = 'ManyClaws plugin'
+const KEPT_FILE = 'manyclaws.json'
+const SECURITY = '/usr/bin/security'
+async function configDirOf($) {
+  const dir = (await $.env.get('CLAUDE_CONFIG_DIR')) || ((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '') + '/.claude'
+  return dir.replace(/[\\/]+$/, '')
+}
+const keptPair = (v) => (v && typeof v.token === 'string' && v.token && typeof v.key === 'string' && v.key ? { token: v.token, key: v.key } : null)
+const toHex = (text) => [...new TextEncoder().encode(text)].map((b) => b.toString(16).padStart(2, '0')).join('')
+const fromHex = (hex) => new TextDecoder().decode(Uint8Array.from(String(hex).match(/[0-9a-f]{2}/gi) ?? [], (h) => parseInt(h, 16)))
+// (a value as the keychain's tool reads it on its standard input: in quotes, with a quote or a backslash in it escaped)
+const quoted = (v) => '"' + String(v).replace(/(["\\])/g, '\\$1') + '"'
+// (a keychain file named that is not there is no keychain: the keychain's tool, given one that is not there, writes to the
+// login keychain instead, which a test's must never reach)
+async function keychainOf($) {
+  if ((await output($, ['uname', '-s'])).trim() !== 'Darwin') return null
+  const own = await $.env.get('MANYCLAWS_KEYCHAIN')
+  if (own && !(await $.fs.exists(own))) return null
+  return { account: await configDirOf($), files: own ? [own] : [] }
+}
+async function fromKeychain($, kc) {
+  const r = await $.process.run([SECURITY, 'find-generic-password', '-s', KEPT_SERVICE, '-a', kc.account, '-w', ...kc.files], { timeoutMs: 15_000 }).catch(() => null)
+  if (r?.exitCode !== 0) return null
+  try {
+    return keptPair(JSON.parse(fromHex(String(r.stdout).trim())))
+  } catch {
+    return null
+  }
+}
+async function fromFile($) {
+  try {
+    return keptPair(JSON.parse(await $.fs.read((await configDirOf($)) + '/' + KEPT_FILE)))
+  } catch {
+    return null
+  }
+}
+// What is kept, or null
+async function keptRead($) {
+  const kc = await keychainOf($)
+  return (kc && (await fromKeychain($, kc))) || (await fromFile($))
+}
+// Written where only its owner reads it: made by the shell with nothing let to the group or others, then put in place.
+// Where there is no shell to make it so (Windows has none of its own), written as the plugin writes any file, and the
+// folder's own permissions are what keep it.
+async function writePrivate($, file, text) {
+  const dir = file.replace(/[\\/][^\\/]*$/, '')
+  const r = await $.process.run(['sh', '-c', 'umask 077 && mkdir -p "$1" && cat > "$2.new" && mv -f "$2.new" "$2"', 'sh', dir, file], { stdin: text, timeoutMs: 15_000 }).catch(() => null)
+  if (r?.exitCode !== 0) await $.fs.write(file, text)
+}
+// The two kept (null: forgotten, in both places): '' once they are, or why not. Put in the keychain where there is one and
+// read back from it, and then not left in the file as well; else in the file.
+async function keptWrite($, pair) {
+  const kc = await keychainOf($)
+  const file = (await configDirOf($)) + '/' + KEPT_FILE
+  if (kc) {
+    const where = kc.files.map(quoted).join(' ')
+    const line = pair
+      ? `add-generic-password -U -s ${quoted(KEPT_SERVICE)} -a ${quoted(kc.account)} -l ${quoted(KEPT_SERVICE)} -w ${quoted(toHex(JSON.stringify(pair)))} ${where}\n`
+      : `delete-generic-password -s ${quoted(KEPT_SERVICE)} -a ${quoted(kc.account)} ${where}\n`
+    await $.process.run([SECURITY, '-i'], { stdin: line, timeoutMs: 15_000 }).catch(() => null)
+    if (pair) {
+      const back = await fromKeychain($, kc)
+      if (back?.token === pair.token && back?.key === pair.key) {
+        if (await fromFile($)) await writePrivate($, file, '{}\n')
+        return ''
+      }
+    }
+  }
+  if (!pair) {
+    if (await fromFile($)) await writePrivate($, file, '{}\n')
+    return (kc && (await fromKeychain($, kc))) || (await fromFile($)) ? 'they are still there after being removed' : ''
+  }
+  await writePrivate($, file, JSON.stringify(pair) + '\n')
+  const back = await fromFile($)
+  return back?.token === pair.token && back?.key === pair.key ? '' : 'what was written could not be read back'
+}
 // Whether this plugin is a copy Claude Code installed from the marketplace (manyclaws@manyclaws), by its folder: the only
-// one whose options `claude plugin configure` changes. One loaded from elsewhere (--plugin-dir) is not, and changes none.
+// one that reads or writes what is kept (keptRead, keptWrite). One loaded from elsewhere (--plugin-dir, as every test's
+// session is) is not, and touches none of it.
 async function installedHere($) {
   const root = ownRoot($).replace(/[\\/]+$/, '')
   if (!root) return false
@@ -1131,8 +1210,7 @@ async function installedHere($) {
     return false
   }
 }
-// /manyclaws: connect (another code), disconnect (no token from here on: Claude Code cannot clear an option, so `none`
-// is kept in its place)
+// /manyclaws: connect (another code), disconnect (what is kept is forgotten: no token from the next session on)
 async function manyclawsCommand($, e) {
   const what = String(e.args ?? '').trim().split(/\s+/)[0]
   if (what === 'connect') {
@@ -1141,9 +1219,8 @@ async function manyclawsCommand($, e) {
   }
   if (what === 'disconnect') {
     if (!(await installedHere($))) return { text: 'This plugin was loaded from a folder of its own, not installed by Claude Code: its token is the one it was started with, and there is nothing of the installed plugin\'s to change from here.' }
-    const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
-    const r = await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ token: NO_TOKEN, key: NO_TOKEN }), timeoutMs: 60_000 }).catch((err) => ({ exitCode: 1, stderr: String(err?.message ?? err) }))
-    if (r.exitCode !== 0) return { text: 'Claude Code would not change the plugin\'s options: ' + lastLine(r) }
+    const why = await keptWrite($, null).catch((err) => String(err?.message ?? err))
+    if (why) return { text: 'The API token and the key could not be forgotten on this computer: ' + why }
     return { text: 'Disconnected: from the next session on, this computer reports to no account, and offers a code that connects it again. This session goes on as it is until it ends. Take its API token back on your page (Account, API tokens).' }
   }
   return { text: '/manyclaws connect: a link that connects this computer to your account, from your page. /manyclaws disconnect: this computer reports to no account from the next session on.' }

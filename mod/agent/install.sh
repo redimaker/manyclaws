@@ -174,8 +174,8 @@ if [ "$uninstall" = 1 ]; then
   [ -z "$node_bin" ] || [ ! -f "$HOME_DIR/agent/agent.mjs" ] || MANYCLAWS_HOME="$HOME_DIR" "$node_bin" "$HOME_DIR/agent/agent.mjs" forget 2>/dev/null || true
   rm -f "$PLIST" "$UNIT"
   rm -rf "$HOME_DIR"
-  echo "The ManyClaws agent is stopped and removed. If the mod was set to go through it,"
-  echo "point it back at the server: claude plugin configure manyclaws@manyclaws --values-stdin"
+  echo "The ManyClaws agent is stopped and removed. If the plugin went through it, its next"
+  echo "session shows a code that connects this computer again, to type on your page."
   exit 0
 fi
 

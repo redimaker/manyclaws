@@ -37,7 +37,6 @@
 //                                         With --look nothing is given: it says whether the plugin
 //                                         has its token and key, and what is left for the person
 //                                         to do
-import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -48,7 +47,7 @@ import { Indexer } from './indexer.mjs'
 import { Transcript } from './transcript.mjs'
 import { findClaude, expandHome } from './host.mjs'
 import { keysFromText } from './seal.mjs'
-import { secretsOf, settle, forgetKept, fingerprint } from './secrets.mjs'
+import { secretsOf, settle, forgetKept, fingerprint, pluginGets, pluginKeeps, claudeDir } from './secrets.mjs'
 
 const HOME = process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws')
 const RELAY_PORT = 8798
@@ -193,27 +192,30 @@ export function takeFromPlugin({ home = HOME, env = process.env, tokenStands = f
 // Code, so that what an agent was set up with by hand (--token and --key, an unattended
 // set-up's) reaches the plugin too: what it signs in with, and the account's key as it is kept
 // here (mcf_…), which the plugin takes as it is. Where it reports is not among them: the
-// plugin has no option for an address. It reports to its own server, or through this
+// plugin has no setting for an address. It reports to its own server, or through this
 // agent's relay where what it is given to sign in with is the relay's word, which it
-// tells by what this agent keeps. They go in on Claude Code's own standard input
-// (`claude plugin configure --values-stdin`), never on a command line, and Claude Code
-// keeps what is secret of them where it keeps secrets. Answers { given, relay }, or
-// { given: false, why }. Nothing that was handed over is in the answer, or in what is
-// said of it.
-export function givePlugin(config, { run = spawnSync } = {}) {
+// tells by what this agent keeps. They are put where the plugin keeps them itself
+// (secrets.mjs, pluginGets): it declares no options in Claude Code, so nothing of them is
+// typed or passes through Claude Code. Only for a plugin Claude Code has installed here.
+// Answers { given, relay }, or { given: false, why }. Nothing that was handed over is in the
+// answer, or in what is said of it.
+export function givePlugin(config, { env = process.env } = {}) {
   if (config?.locked) return { given: false, why: `this machine keeps its token and key in the keychain, which would not hand them over here (${config.locked})` }
   if (!config?.server || !config?.token || !config?.key) return { given: false, why: 'this machine has not been set up yet' }
-  if (!config.claude) return { given: false, why: 'Claude Code was not found on this machine' }
+  if (!pluginInstalled(env)) return { given: false, why: 'the plugin is not installed in Claude Code on this machine' }
   const relay = config.relay?.port && config.relay?.secret ? config.relay : null
-  const values = { token: relay ? relay.secret : config.token, key: config.key }
-  let r
-  try {
-    r = run(config.claude, ['plugin', 'configure', 'manyclaws@manyclaws', '--values-stdin'], { input: JSON.stringify(values), encoding: 'utf8', timeout: 60_000 })
-  } catch (err) {
-    r = { error: err }
-  }
-  if (r.error || r.status !== 0) return { given: false, why: 'the plugin is not installed in Claude Code on this machine, or Claude Code would not take them' }
+  const why = pluginGets({ token: relay ? relay.secret : config.token, key: config.key }, { env })
+  if (why) return { given: false, why: `the two could not be kept where the plugin keeps them (${why})` }
   return { given: true, relay: relay ? relay.port : 0 }
+}
+// Whether Claude Code has installed the plugin from its marketplace, as its own list of what it installed says
+function pluginInstalled(env) {
+  try {
+    const copies = JSON.parse(fs.readFileSync(path.join(claudeDir(env), 'plugins', 'installed_plugins.json'), 'utf8')).plugins?.['manyclaws@manyclaws']
+    return Array.isArray(copies) && copies.length > 0
+  } catch {
+    return false
+  }
 }
 
 // What is said of that, for whoever ran the installer to read (a person, or Claude Code
@@ -230,25 +232,13 @@ export function pluginSays(r) {
   return [`The ManyClaws plugin in Claude Code ${how}, and this computer's encryption key: it is configured, and there is nothing to type into it.`, next]
 }
 
-// Whether the plugin has been given its token and key. Claude Code says which of a
-// plugin's options are set, and never what they are. { installed: true, token, key };
-// installed false where the plugin is not there, null where there is no telling.
-export function pluginHas(config, { run = spawnSync } = {}) {
-  if (!config?.claude) return { installed: null }
-  let r
-  try {
-    r = run(config.claude, ['plugin', 'configure', 'manyclaws@manyclaws', '--json'], { encoding: 'utf8', timeout: 60_000 })
-  } catch {
-    return { installed: null }
-  }
-  if (r.error) return { installed: null }
-  if (r.status !== 0) return { installed: false }
-  try {
-    const set = JSON.parse(r.stdout).configured ?? []
-    return { installed: true, token: set.includes('token'), key: set.includes('key') }
-  } catch {
-    return { installed: null }
-  }
+// Whether the plugin has been given its token and key: whether Claude Code has installed it,
+// and whether what it keeps for itself has both (secrets.mjs, pluginKeeps), said without either.
+// { installed: true, token, key }, or installed false where the plugin is not there.
+export function pluginHas(config, { env = process.env } = {}) {
+  if (!pluginInstalled(env)) return { installed: false }
+  const kept = pluginKeeps({ env })
+  return { installed: true, token: !!kept?.token, key: !!kept?.key }
 }
 
 // What is left for the person to do, where the agent was installed with nothing given to

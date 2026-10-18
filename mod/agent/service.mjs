@@ -1110,7 +1110,7 @@ export async function run(config, flags = {}) {
     log(`this machine's API token and key are in the keychain, which did not hand them over (${config.locked}): starting again in a moment to ask again`)
     setTimeout(() => process.exit(1), 15_000)
   } else {
-    const how = '(in Claude Code: /plugin, the gear beside manyclaws, then a new session). Indexing meanwhile'
+    const how = '(a new Claude Code session shows a code that connects this computer, to type on your page). Indexing meanwhile'
     log(!server ? 'no server in agent.json: indexing only' : !config.token ? `no API token yet: waiting for the ManyClaws plugin to give this machine its token and key ${how}` : `no encryption key yet: waiting for the ManyClaws plugin to give this machine its key ${how}`)
   }
 
