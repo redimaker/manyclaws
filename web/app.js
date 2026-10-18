@@ -8234,35 +8234,13 @@ function connectedLine() {
 // Computers: a connected computer is its token.
 
 const dayOf = (ts) => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-const TOKEN_LIVES = [['30', '30 days'], ['90', '90 days'], ['365', 'A year'], ['0', 'Never runs out']]
 
 // The account's computers, by their tokens: each with when it was connected and last heard
-// from, and Disconnect, which takes its token back. Below them, out of the way, the form that
-// makes a token by hand, for a computer set up with nobody at it (the installer's --token and
-// --key): one is shown once, as it is made.
+// from, and Disconnect, which takes its token back. A token is made only as a computer is
+// connected with its code: nothing else could give a computer the key that goes with it.
 function computersPart(redraw) {
   const a = app.account
   const note = h('span', { class: 'form-note error' })
-  const nameBox = h('input', { 'data-part': 'token-name', placeholder: 'A name for it (optional)', maxlength: '60', autocomplete: 'off' })
-  const life = h('select', { 'data-part': 'token-days' }, ...TOKEN_LIVES.map(([days, text]) => h('option', { value: days, ...(days === '90' ? { selected: '' } : {}) }, text)))
-  const make = h(
-    'button',
-    {
-      type: 'button',
-      class: 'primary',
-      'data-part': 'token-make',
-      onclick: async () => {
-        make.disabled = true
-        const r = await sendJson('/api/account/tokens', { name: nameBox.value, days: Number(life.value) })
-        make.disabled = false
-        if (!r.ok) return (note.textContent = r.error)
-        app.madeToken = r.data
-        await loadAccount()
-        redraw()
-      },
-    },
-    'Make a token',
-  )
   const rows = (a.tokens ?? []).map((t) =>
     h(
       'div',
@@ -8280,7 +8258,6 @@ function computersPart(redraw) {
               if (!(await ask(`Disconnect ${t.name}?`, { says: 'The API token it signs in with is taken back: from then on it is refused, and its plugin offers a code that connects it again.', yes: 'Disconnect', danger: true }))) return
               const r = await fetch('/api/account/tokens/' + t.id, { method: 'DELETE' }).catch(() => null)
               if (!r?.ok) return (note.textContent = (await r?.json().catch(() => null))?.error ?? 'The server could not be reached.')
-              if (app.madeToken?.id === t.id) app.madeToken = null
               await loadAccount()
               redraw()
             },
@@ -8290,20 +8267,11 @@ function computersPart(redraw) {
       ),
     ),
   )
-  const made = app.madeToken && (a.tokens ?? []).some((t) => t.id === app.madeToken.id) ? app.madeToken : null
   return [
     h('p', { class: 'muted', 'data-part': 'computers-says' }, 'Each computer is given an API token of its own as it is connected, named for it, and signs in with that. A token only reports sessions here; it cannot sign in to this page. Disconnect a computer to take its token back.'),
     ...rows,
     !rows.length && h('p', { class: 'muted', 'data-part': 'tokens-none' }, 'No computer is connected yet.'),
-    // (open while a token made here is still to be copied)
-    h(
-      'details',
-      { 'data-part': 'token-own', ...(made ? { open: '' } : {}) },
-      h('summary', null, 'A token for a computer nobody is at'),
-      h('p', { class: 'muted' }, 'A computer is connected with the code its plugin shows. One set up with nobody at it is given a token made here, and your key, by its installer instead. ', h('a', { href: a.server + '/setup', target: '_blank', rel: 'noopener', 'data-part': 'tokens-guide' }, 'How to set up a device')),
-      made && h('div', { class: 'token-made' }, h('p', null, h('b', null, 'Your new API token.'), ' Copy it now, or leave this open until the computer has it: it is not shown again.'), h('div', { 'data-part': 'token-made' }, codeBox(made.token))),
-      h('div', { class: 'token-new' }, nameBox, life, make, ' ', note),
-    ),
+    note,
   ]
 }
 
