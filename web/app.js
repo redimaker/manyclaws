@@ -3763,8 +3763,12 @@ function releaseOn(c) {
 // session's plugin says of itself, or what it found Claude Code had fetched for it. The first that is, or null
 function noReleaseOn(c) {
   if (c.m?.checks) {
-    const p = c.m.plugins.find((x) => x.checked && !x.as && x.digest && !allowedHere(c, x.digest))
+    // (a copy Claude Code only keeps, beside the installed one, is no matter until a session runs it: below)
+    const p = c.m.plugins.find((x) => x.where !== 'cached' && x.checked && !x.as && x.digest && !allowedHere(c, x.digest))
     if (p) return { digest: p.digest, by: 'agent', release: p.release, signed: !!p.signed }
+    // (a session still running a copy from before an update: its agent measured that copy too, and holds it to its list)
+    const kept = c.live.map((s) => c.m.plugins.find((x) => x.where === 'cached' && x.digest && x.digest === s.release?.digest)).find((x) => x && !x.as && !allowedHere(c, x.digest))
+    if (kept) return { digest: kept.digest, by: 'agent', release: kept.release, signed: !!kept.signed }
     // (and a session's plugin that says it is another than any its agent measured: one of the two is not as it says)
     const known = new Set(c.m.plugins.map((x) => x.digest))
     const other = c.live.find((s) => s.release?.digest && c.m.plugins.length && !known.has(s.release.digest) && !allowedHere(c, s.release.digest))
