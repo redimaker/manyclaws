@@ -379,9 +379,18 @@ export function register(on, options) {
     return next(e)
   })
 
-  // The band above the prompt: answer a routed request at the terminal too
+  // The band above the prompt: answer a routed request at the terminal too; and while this computer waits to be
+  // connected, where its code is typed, as a link a click opens (the line in the transcript is plain text, which a
+  // terminal may or may not take for a link), and the code
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const current = pendingList[0]
+    if (!current && connecting) {
+      const { Box, Text, Link } = $.ui.resolve(e)
+      const theirs = await next(e)
+      const at = connecting.url + '/app#/connect'
+      const row = Text({ key: 'mc-connect', children: ['ManyClaws: to connect this computer, open ', Link({ href: at }), ' and enter ', connecting.code] })
+      return Box({ flexDirection: 'column', children: theirs ? [row, theirs] : [row] })
+    }
     if (!config || !current) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
@@ -1051,6 +1060,7 @@ async function offerConnect($, e, { asked = false, again = false } = {}) {
   }
   const code = `${got.slot} ${secret.slice(0, 3)} ${secret.slice(3)}`
   connecting = { id: got.id, token: got.token, url, until: (await $.clock.now()) + CONNECT_MS, e: startedWith ?? e, start, code, name, paired: null }
+  $.ui.invalidate('ui.render')
   const said = `ManyClaws: ${again ? 'the server refused this computer’s API token (it was taken back, or ran out), so this session is not shown on your page. To connect it again' : 'this computer is not connected yet. To connect it'}, open ${url}/app#/connect on a phone or browser where you use ManyClaws and enter ${code}. The code works for ten minutes; /manyclaws connect makes another.`
   $.ui.log(said)
   $.ui.status(`ManyClaws: connect this computer with ${code}`)
@@ -1067,6 +1077,7 @@ const errorOf = (text) => {
 }
 function connectOver($, said) {
   connecting = null
+  $.ui.invalidate('ui.render')
   $.ui.status(undefined)
   if (said) $.ui.log(said)
 }

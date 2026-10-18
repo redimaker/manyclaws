@@ -183,6 +183,32 @@ const paired = (clock: any, there: () => boolean) => until(clock, there, 1000)
 
 // ---- A session is told of sealed, or not at all
 
+test('while the computer waits to be connected, the band above the prompt has where its code is typed as a link a click opens, and the code; and not once it is over', async ($, on) => {
+  const { clock, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: WORDS } })
+  await start($)
+  await clock.advance(1000)
+  const code = / enter (482 \d{3} \d{3})\./.exec(said.map((l) => String(JSON.parse(l).text ?? JSON.parse(l)))[0])![1]
+  const band = () =>
+    $.ui.mount({
+      plugin: 'manyclaws',
+      component: 'AbovePrompt',
+      requestId: 'band',
+      surface: 'terminal',
+      viewport: { columns: 120, rows: 40 },
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+    } as any)
+  const ui = await band()
+  const link: any = await ui.find({ type: 'Link' })
+  expect(link?.props?.href).toBe('https://mc.test/app#/connect')
+  expect((await ui.find({ type: 'Text', text: /to connect this computer/ }))?.text).toBe(`ManyClaws: to connect this computer, open https://mc.test/app#/connect and enter ${code}`)
+  await ui.unmount()
+  // (ten minutes on, the code has run out, and the band has nothing of it)
+  await clock.advance(11 * 60_000)
+  const after = await band()
+  expect(await after.find({ type: 'Link' })).toBeUndefined()
+  await after.unmount()
+})
+
 test('without a token the mod sends nothing of the session: it shows a code that connects this computer, of which only the first three digits, which the server gave, go anywhere; and asks the server how it is going, for ten minutes', async ($, on) => {
   const { clock, sent, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: WORDS } })
   await start($)
