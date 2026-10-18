@@ -1,5 +1,5 @@
 {
-  "release": 46,
+  "release": 47,
   "made": "2026-10-18",
   "plugin": "6.1.0",
   "agent": "6.1.0",
@@ -43,7 +43,7 @@
     "web/qr.js": "9725a3a4b8381a28b3bbcaf881050c06a88121ab0d6977d626540a8b44dc8180",
     "web/seal.js": "9780fdb0f2c59a704041de1ddcd961597354c1109618dd607d952e6cda70d0f8",
     "web/setup.html": "355786cd0c341df9bfca6839be3957421d7b1b93b42e8597edd48be95b4ba62a",
-    "web/setup.md": "fd62b839255a03c794aabdb4d60dcd97594fe05cbeb522ce5ecbd1c6cb09ac38",
+    "web/setup.md": "dc92878f9ab1025798193ca9043d9c589dfabd1f872f3334b50c80a6588310a1",
     "web/site/account.css": "35bca5bb01e311ec181daf3ac8bac312fb3aa45f86e0c27b1a76c041eeba8329",
     "web/site/audio/real.mp3": "c5b8d6981cac3fe17c2e7174ab2464735fef0f0d9a3ac6d3128771c74a0bb347",
     "web/site/fonts.css": "7c7666b6e2613e4afd9480deb9a54a29005f3d234715005524e1b4ca6540b27f",
