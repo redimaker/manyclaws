@@ -385,11 +385,14 @@ export function register(on, options) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const current = pendingList[0]
     if (!current && connecting) {
-      const { Box, Text, Link } = $.ui.resolve(e)
+      const { Box, Text, Link, Button } = $.ui.resolve(e)
       const theirs = await next(e)
       const at = connecting.url + '/app#/connect'
       const row = Text({ key: 'mc-connect', children: ['ManyClaws: to connect this computer, open ', Link({ href: at }), ' and enter ', connecting.code] })
-      return Box({ flexDirection: 'column', children: theirs ? [row, theirs] : [row] })
+      // (a terminal that draws no links, as macOS's own, has the button: a click, or 1 in an empty prompt, opens the page
+      // in this computer's browser)
+      const open = Button({ key: 'mc-open', hotkey: '1', label: 'Open it in this computer’s browser', plain: true, onPress: () => void openPage($, at) })
+      return Box({ flexDirection: 'column', children: theirs ? [row, open, theirs] : [row, open] })
     }
     if (!config || !current) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
@@ -1128,6 +1131,13 @@ async function askConnect($) {
   config = null
   await begin($, c.e, { url: c.url, token: got.token, key: got.key, label: was?.label ?? '', capabilities: was?.capabilities ?? 'default' }, keys)
   refusedSaid = false
+}
+// The page opened in this computer's own browser, as its system opens a link: said in the transcript where it could not be
+async function openPage($, url) {
+  const system = (await output($, ['uname', '-s'])).trim()
+  const argv = system === 'Darwin' ? ['open', url] : /^Linux/.test(system) ? ['xdg-open', url] : ['cmd', '/c', 'start', '""', url]
+  const r = await $.process.run(argv, { timeoutMs: 15_000 }).catch((err) => ({ exitCode: 1, stderr: String(err?.message ?? err) }))
+  if (r.exitCode !== 0) $.ui.log(`ManyClaws: this computer's browser could not be opened (${lastLine(r) || 'it said nothing'}): open ${url} on your phone or in a browser instead.`)
 }
 // Whether this plugin is a copy Claude Code installed from the marketplace (manyclaws@manyclaws), by its folder: the only
 // one whose options `claude plugin configure` changes. One loaded from elsewhere (--plugin-dir) is not, and changes none.
