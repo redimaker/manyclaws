@@ -111,14 +111,10 @@ main > section { max-width: calc(var(--page) + 2 * var(--gutter)); margin: 0 aut
 .manifest b { font-family: var(--s-serif); font-size: 20px; font-weight: 500; line-height: 1.25; }
 .manifest span { color: var(--s-muted); line-height: 1.6; }
 
-/* ---- Sealed: the picture, the words, and what we can and can't see, in a ledger */
+/* ---- Sealed: the picture, and the words */
 .sealed { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 64px; align-items: center; max-width: calc(var(--inner) + 2 * var(--gutter)); padding-top: var(--band); }
 .sealed .plate, .sealed .words { grid-area: auto; }
 .sealed .plate { aspect-ratio: 1; }
-.ledger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 32px; margin-top: 32px; }
-.ledger div { padding: 16px 0; border-top: 1px solid var(--s-line); }
-.ledger dt { font-weight: 600; }
-.ledger dd { margin-top: 4px; color: var(--s-muted); line-height: 1.6; }
 
 /* ---- Setting up: what to say to Claude Code, as its terminal shows it */
 .setup, .price, .asked, .last { display: grid; justify-items: center; text-align: center; }
@@ -232,7 +228,7 @@ main.guide > section { max-width: none; padding: 0; }
   .top nav a:not(.go) { padding: 8px; }
   .top nav a[href="#price"], .top nav a[href="/setup.md"] { display: none; }
   .lede, .aside, .setup-say { font-size: 18px; }
-  .manifest, .ledger, .tags, .way { grid-template-columns: minmax(0, 1fr); }
+  .manifest, .tags, .way { grid-template-columns: minmax(0, 1fr); }
   .plate, .wide, .phone, .bench img, .last img, .ticket { border-radius: 16px; }
   .ticket { padding: 24px; }
   .asked summary { padding: 20px 0; font-size: 18px; }
