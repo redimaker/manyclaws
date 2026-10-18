@@ -1258,15 +1258,30 @@ async function updatePlugin($) {
 // folders sessions may be started in are the ones a person has used Claude Code in, within the installer's limits. It
 // asks for nothing: it takes the token and the key from this plugin, which leaves them for it.
 async function installAgent($, args) {
-  if (!/^(Darwin|Linux)\b/.test(meta.platform ?? '')) throw new Error('the ManyClaws agent runs on macOS and Linux, and this computer is neither')
+  const windows = /^(MSYS|MINGW|CYGWIN)/.test(meta.platform ?? '')
+  if (!windows && !/^(Darwin|Linux)\b/.test(meta.platform ?? '')) throw new Error('the ManyClaws agent runs on macOS, Linux and Windows, and this computer is none of them')
   if (!attended) throw new Error('this session is one a program runs: the agent is set up from a session started on the computer itself, in a terminal, an editor or the desktop app')
   const root = ownRoot($)
-  const r = await $.process.run(['bash', root + '/agent/install.sh', '--from', root, ...(args?.autoFolders === false ? [] : ['--auto-folders'])], { timeoutMs: 300_000 })
+  // (on Windows the installer is run by Git Bash, the one Claude Code itself runs, by its full path: a bash found on the
+  // PATH there may be WSL's, which is another computer as far as this one is concerned)
+  const bash = windows ? await gitBash($) : 'bash'
+  if (!bash) throw new Error('Git Bash was not found on this computer (Claude Code on Windows runs with it: CLAUDE_CODE_GIT_BASH_PATH names it), and the agent is installed by it')
+  const r = await $.process.run([bash, root + '/agent/install.sh', '--from', root, ...(args?.autoFolders === false ? [] : ['--auto-folders'])], { timeoutMs: 300_000 })
   if (r.exitCode !== 0) throw new Error('the agent was not set up: ' + lastLine(r))
   // (and given the token and the key now, not in half a minute)
   agentLookedAt = 0
   await tellAgent($)
   return { said: String(r.stdout ?? '').trim().split('\n').slice(-8) }
+}
+
+// Git Bash on Windows, as Claude Code finds it: where CLAUDE_CODE_GIT_BASH_PATH says, else beside git, else where Git for
+// Windows puts it. null where it is none of those
+async function gitBash($) {
+  const named = await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')
+  const git = String((await output($, ['where', 'git'])).split(/\r?\n/)[0] ?? '').trim()
+  const nearGit = git ? git.replace(/[\\/]cmd[\\/]git\.exe$/i, '\\bin\\bash.exe') : ''
+  for (const candidate of [named, nearGit, 'C:\\Program Files\\Git\\bin\\bash.exe']) if (candidate && (await $.fs.exists(candidate).catch(() => false))) return candidate
+  return null
 }
 
 // One line in the transcript the first time something goes wrong, not on every retry

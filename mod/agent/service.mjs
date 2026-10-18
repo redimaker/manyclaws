@@ -12,7 +12,7 @@ import path from 'node:path'
 import { Store } from './store.mjs'
 import { Indexer } from './indexer.mjs'
 import { Transcript } from './transcript.mjs'
-import { Host, HostError, CARRY_MAX, expandHome, findClaude, sessionEnv } from './host.mjs'
+import { Host, HostError, CARRY_MAX, expandHome, findClaude, findGitBash, sessionEnv, taskCmd, taskXml, taskFile } from './host.mjs'
 import { Cswap } from './cswap.mjs'
 import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused, WIRE, mayStart, allowedOn, pluginDigest } from './seal.mjs'
 import { pluginRelease, pluginFiles, installedPlugins } from './verify.mjs'
@@ -307,12 +307,27 @@ export async function run(config, flags = {}) {
       p.on('exit', (code) => (clearTimeout(timer), done({ code, out })))
     })
   const agentFilesOf = (list) => JSON.stringify(Object.entries(list?.files ?? {}).filter(([f]) => f.startsWith('mod/agent/')))
-  // A job of this user's own, apart from the agent's: launchd's on a Mac, systemd's elsewhere. (MANYCLAWS_JOB_RUNNER, a
-  // program that starts what it is given on its own: what the tests run in their place.)
+  // A job of this user's own, apart from the agent's: launchd's on a Mac, a task of Task Scheduler's on Windows, systemd's
+  // elsewhere. (MANYCLAWS_JOB_RUNNER, a program that starts what it is given on its own: what the tests run in their place.)
   const JOB = 'com.manyclaws.upgrade'
   const startJob = async (argv) => {
     const env = { MANYCLAWS_HOME: ownHome, HOME: os.homedir(), PATH: host.shellEnv().PATH ?? process.env.PATH ?? '/usr/bin:/bin', ...(process.env.MANYCLAWS_SIGNERS ? { MANYCLAWS_SIGNERS: process.env.MANYCLAWS_SIGNERS } : {}) }
     if (process.env.MANYCLAWS_JOB_RUNNER) return void spawn(process.env.MANYCLAWS_JOB_RUNNER, argv, { detached: true, stdio: 'ignore', env: { ...process.env, ...env } }).unref()
+    if (process.platform === 'win32') {
+      // (a task of its own, run once now: not a child of the agent's, which ending the agent's task would end with it)
+      const TASK = 'ManyClaws upgrade'
+      const file = path.join(ownHome, 'upgrade-task.xml')
+      const cmd = path.join(ownHome, 'upgrade-run.cmd')
+      const user = spawnSync('whoami', [], { encoding: 'utf8', windowsHide: true }).stdout.trim()
+      fs.writeFileSync(cmd, taskCmd({ argv, env, log: path.join(ownHome, 'upgrade.log') }))
+      taskFile(file, taskXml({ user, cmd, description: 'ManyClaws: the agent brought up to date, once' }))
+      spawnSync('schtasks', ['/delete', '/tn', TASK, '/f'], { stdio: 'ignore', windowsHide: true })
+      for (const args of [['/create', '/tn', TASK, '/xml', file, '/f'], ['/run', '/tn', TASK]]) {
+        const r = spawnSync('schtasks', args, { encoding: 'utf8', windowsHide: true })
+        if (r.status !== 0) throw new Error('Task Scheduler would not start it: ' + String(r.stderr || r.stdout || '').trim())
+      }
+      return
+    }
     if (process.platform === 'darwin') {
       const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       const plist = path.join(ownHome, 'upgrade.plist')
@@ -337,7 +352,10 @@ export async function run(config, flags = {}) {
   const replaceAgent = async (w, { endSessions }) => {
     w.tried = Date.now()
     log(`the agent is to be replaced by release ${w.release}'s, from ${w.dir}${endSessions ? ', ending the searches it runs' : ''}`)
-    await startJob(['/bin/bash', path.join(w.dir, 'agent', 'install.sh'), '--update', '--from', w.dir, '--wait-start', '60', ...(endSessions ? ['--end-sessions'] : [])])
+    // (on Windows by Git Bash, by its full path)
+    const bash = process.platform === 'win32' ? findGitBash(host.shellEnv()) : '/bin/bash'
+    if (!bash) throw new Error('Git Bash was not found on this computer, and the agent is brought up to date by it (CLAUDE_CODE_GIT_BASH_PATH names it)')
+    await startJob([bash, path.join(w.dir, 'agent', 'install.sh'), '--update', '--from', w.dir, '--wait-start', '60', ...(endSessions ? ['--end-sessions'] : [])])
   }
   // (waiting for its sessions to be done: tried once there are none, and again a while later where it is still here)
   setInterval(() => {
