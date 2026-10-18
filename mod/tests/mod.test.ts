@@ -183,8 +183,13 @@ const paired = (clock: any, there: () => boolean) => until(clock, there, 1000)
 
 // ---- A session is told of sealed, or not at all
 
-test('while the computer waits to be connected, the band above the prompt has where its code is typed as a link a click opens, and the code; and not once it is over', async ($, on) => {
-  const { clock, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: WORDS } })
+test('while the computer waits to be connected, the band above the prompt has where its code is typed as a link a click opens, and the code, and a button that opens it in this computer\'s browser; and not once it is over', async ($, on) => {
+  const ran: string[][] = []
+  const run = (argv: string[]) => {
+    ran.push(argv)
+    return argv[0] === 'uname' ? { exitCode: 0, stdout: 'Darwin\n', stderr: '' } : argv[0] === 'open' ? { exitCode: 0, stdout: '', stderr: '' } : null
+  }
+  const { clock, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: WORDS }, run })
   await start($)
   await clock.advance(1000)
   const code = / enter (482 \d{3} \d{3})\./.exec(said.map((l) => String(JSON.parse(l).text ?? JSON.parse(l)))[0])![1]
@@ -201,6 +206,10 @@ test('while the computer waits to be connected, the band above the prompt has wh
   const link: any = await ui.find({ type: 'Link' })
   expect(link?.props?.href).toBe('https://mc.test/app#/connect')
   expect((await ui.find({ type: 'Text', text: /to connect this computer/ }))?.text).toBe(`ManyClaws: to connect this computer, open https://mc.test/app#/connect and enter ${code}`)
+  // (a terminal that draws no links, as macOS's own: the button opens the page in this computer's browser)
+  await ui.press({ key: 'mc-open' })
+  await clock.advance(10)
+  expect(ran).toContainEqual(['open', 'https://mc.test/app#/connect'])
   await ui.unmount()
   // (ten minutes on, the code has run out, and the band has nothing of it)
   await clock.advance(11 * 60_000)
