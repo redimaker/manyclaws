@@ -2747,12 +2747,12 @@ function newFrom() {
   return s ? { id: s.id, machine: s.machine ?? '', title: s.title ?? '', cwd: s.cwd ?? '', past: false } : null
 }
 
-// A device can take one when its agent starts sessions
+// A computer can take one when its agent starts sessions
 const cantTake = (m) => (m.spawn ? '' : 'starting sessions is off there')
 
-// Every device that's online, the chat's own chosen at first (`keep`: the one chosen
-// since stays chosen, as devices come and go); one that can't take a session says why
-const NO_DEVICE = ['None of your devices is online.', 'None of the devices that are online can start a session from here.']
+// Every computer whose agent is online, the chat's own chosen at first (`keep`: the one chosen
+// since stays chosen, as computers come and go); one that can't take a session says why
+const NO_DEVICE = ['None of your computers can start a session: that takes the ManyClaws agent, running. To give a computer the agent, open its gear in your list and press Let my phone start sessions on it.', 'None of the computers that are online can start a session from here.']
 function drawNewDevices(keep = true) {
   const from = newFrom()
   const select = el('ns-device')
@@ -2761,7 +2761,7 @@ function drawNewDevices(keep = true) {
   const chosen = (keep && able.find((m) => m.id === select.value)) || able.find((m) => m.id === from?.machine) || able[0]
   select.replaceChildren(
     ...online.map((m) => h('option', { value: m.id, ...(cantTake(m) ? { disabled: '' } : {}) }, machineName(m) + (m.id === from?.machine ? ' (current)' : '') + (cantTake(m) ? ' — ' + cantTake(m) : ''))),
-    ...(online.length ? [] : [h('option', { value: '', disabled: '' }, 'No device is online')]),
+    ...(online.length ? [] : [h('option', { value: '', disabled: '' }, 'No computer has the agent running')]),
   )
   select.value = chosen?.id ?? ''
   const busy = el('ns-box').dataset.busy === '1'
@@ -8823,7 +8823,7 @@ async function drawKeyless(box, redraw) {
       was,
       // (an account of before whose list of devices is gone: what its passphrase made is not carried over here either)
       app.before && !was && h('p', { 'data-part': 'key-before' }, h('b', null, 'ManyClaws no longer uses a passphrase.'), ' The key made from yours is not carried over: your account’s key is made here, now.'),
-      h('p', { 'data-part': 'key-first' }, 'What your sessions say is end-to-end encrypted, with a key of your account’s own: made here, now, and kept on your own devices, never on the server. This browser keeps it under a passkey (Face ID, Touch ID, your device’s PIN or a security key), and you approve each of your other devices from here, or from one you approved, with that passkey. If you ever lose every one of them, you start afresh with a new key: your computers still have their sessions.'),
+      h('p', { 'data-part': 'key-first' }, 'Your sessions are end-to-end encrypted. The key is made here and kept only on your devices, never on the server. This browser protects it with a passkey, like Face ID or Touch ID. Every other device gets the key only when you approve it, one by one, from a device that already has it.'),
       noPasskeys() ? h('p', { class: 'form-note error', 'data-part': 'key-no-passkeys' }, 'This browser has no passkeys. Make your key on your phone instead (sign in to ManyClaws there), then approve this browser from it.') : h('div', null, make),
       note,
     )
@@ -9128,76 +9128,6 @@ function devicesPart(redraw) {
   return [says, box, add]
 }
 
-// ---- The code this page is running. It is published (github.com/redimaker/manyclaws,
-// under web/), and each release of it is a list of every file with its SHA-256, signed
-// with a key that is kept neither in that repository nor on this server: the server hands
-// the list over beside the files (/release.json). Here each file is read back as this
-// browser has it and held against the list.
-//
-// What that is worth is said with it. A page that had been changed to do harm would show
-// whatever it liked here, so this is a convenience and no proof. What does not depend on
-// the page's word: the browser's own check (each script and style sheet is named in the
-// page's HTML with the hash of the file, and is not run if it is anything else, so the
-// HTML is the one file to compare), and a check made from outside the page, which is
-// said how.
-const CODE_REPO = 'https://github.com/redimaker/manyclaws'
-function codePart() {
-  const hex = (bytes) => [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('')
-  // (the page itself, by the address it was opened at, and what it loads)
-  const files = [['web/index.html', location.pathname === '/app' ? '/app' : '/'], ...['app.js', 'keys.js', 'seal.js', 'qr.js', 'sw.js', 'app.css', 'site/fonts.css', 'site/join.css', 'site/account.css'].map((f) => ['web/' + f, '/' + f])]
-  // A file as this browser has kept it, which is the one it ran; where it kept none, as the server hands it over now
-  const kept = async (address) => {
-    const r = (await fetch(address, { cache: 'only-if-cached', mode: 'same-origin' }).catch(() => null)) ?? null
-    const got = r?.ok ? r : await fetch(address).catch(() => null)
-    return got?.ok ? hex(await crypto.subtle.digest('SHA-256', await got.arrayBuffer())) : ''
-  }
-  const box = h('div', { 'data-part': 'code' }, h('p', { class: 'muted' }, 'Reading…'))
-  const origin = location.origin
-  const draw = async () => {
-    const list = await fetch('/release.json').then((r) => (r.ok ? r.json() : null)).catch(() => null)
-    const read = await Promise.all(files.map(async ([name, address]) => ({ name, hash: await kept(address), listed: list?.files?.[name] ?? '' })))
-    const same = !!list && read.every((f) => f.hash && f.hash === f.listed)
-    // The page's HTML alone is not the listed file, and is when a script asks for it: it was changed on its way to this
-    // browser as a page, which is what a proxy in front of the server does that adds a script of its own to pages
-    const html = read[0]
-    const others = !!list && read.slice(1).every((f) => f.hash && f.hash === f.listed)
-    const onTheWay =
-      others && html.hash && html.hash !== html.listed
-        ? await fetch(files[0][1], { cache: 'no-store' })
-            .then(async (r) => r.ok && hex(await crypto.subtle.digest('SHA-256', await r.arrayBuffer())) === html.listed)
-            .catch(() => false)
-        : false
-    fill(
-      box,
-      !list
-        ? h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'unlisted' }, 'This server did not say which release its page is of, so there is nothing here to hold the files against. Their hashes as this browser has them:')
-        : same
-          ? h('p', { class: 'guide-status connected', 'data-part': 'code-says', 'data-same': 'yes' }, `✓ The ${read.length} files this page is made of are as release ${list.release} lists them (${list.made}).`)
-          : onTheWay
-            ? h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'html-changed' }, `The page’s HTML reached this browser changed: it is not the file release ${list.release} lists, though the server hands that file to a plain request. Something between the server and this browser adds to pages on their way, as a proxy’s own analytics script is added. This page lets no script from elsewhere run, and every script and style sheet it did run is as listed. It should not be so all the same: whoever runs this server can turn it off there.`)
-            : h('p', { class: 'guide-status', 'data-part': 'code-says', 'data-same': 'no' }, `Some of this page’s files are not as release ${list.release} lists them. That is so for a few moments while the server is being brought up to date: load the page again. If it stays so, do not approve anything here, and check from outside the page, as below.`),
-      ...read.map((f) =>
-        h(
-          'div',
-          { class: 'person', 'data-file': f.name, 'data-as': !f.hash ? 'unread' : !list ? 'unlisted' : f.hash === f.listed ? 'listed' : 'differs' },
-          h('div', null, h('b', null, f.name), h('div', { class: 'muted code-hash' }, f.hash || 'could not be read')),
-          h('span', { class: 'muted' }, !f.hash || !list ? '' : f.hash === f.listed ? '✓ as listed' : '✗ not as listed'),
-        ),
-      ),
-    )
-  }
-  draw()
-  return [
-    h('p', null, 'The code this page runs is published, at ', h('a', { href: CODE_REPO, target: '_blank', rel: 'noopener' }, 'github.com/redimaker/manyclaws'), ' under web/, with the plugin and the agent that run on your computers. Each release is a list of every file with its SHA-256, signed with a key that is kept neither there nor on this server. Your browser checks part of it itself: every script and style sheet this page loads is named in the page’s HTML with the hash of the file, and is not run if it is anything else. So the one file left to check is the HTML.'),
-    box,
-    h('p', { 'data-part': 'code-outside' }, 'What is shown above is this page’s own word, and a page that had been changed could say anything. To check from outside it, on a computer that has the ManyClaws agent:'),
-    codeBox('node ~/.manyclaws/agent/agent.mjs verify'),
-    h('p', null, 'That holds what this server hands out against the signed list, with the key the agent was installed with, and the agent and the plugin on that computer too. Or by hand, anywhere: compare the output of'),
-    codeBox(`curl -s -H 'Accept: text/html' ${origin}/app | shasum -a 256`),
-    h('p', null, 'with web/index.html in ', h('a', { href: origin + '/release.json', target: '_blank', rel: 'noopener' }, 'release.json'), ', and that file with the one in the repository. (Asked for as a browser asks for a page, which is what the header says: what is added to pages on their way to a browser is added to what is asked for so.)'),
-  ]
-}
-
 // What the server keeps of the account's sessions, why, and the way to clear all of it.
 // A session that is running is asked for its chat again and has it back in a moment; one
 // that is not is gone from here until it next runs. Nothing on a computer is touched.
@@ -9382,7 +9312,6 @@ function renderAccount() {
     // (the account's key, as this browser holds it, and the phones and browsers that have it)
     accountPart('Browsers', { id: 'browsers' }, ...keyPart(renderAccount), ...devicesPart(renderAccount)),
     accountPart('Stored sessions', { id: 'kept' }, ...keptPart(renderAccount)),
-    accountPart('This page’s code', { id: 'page-code' }, ...codePart()),
     a.agentToken && accountPart('This server', { id: 'server-token' }, secretRow('Server token', a.agentToken, 'This server’s own agent token, from its environment file. It works in the plugin as an API token does, and is changed there.')),
     accountPart('Sign out', { id: 'sign-out' }, ...signOutPart()),
     u.admin && accountPart('People', { id: 'admin' }, h('p', { class: 'muted' }, 'Reading…')),

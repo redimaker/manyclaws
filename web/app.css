@@ -36,8 +36,8 @@
   --code-inline-text: #3b3b3b;
   --link: #005fb8;
   --quote-border: #e5e5e5;
-  --button-bg: #005fb8;
-  --button-hover: #0258a8;
+  --button-bg: #d97757; /* Claude's orange, as --accent */
+  --button-hover: #c96442;
   --button-text: #ffffff;
   --button2-bg: #e5e5e5;
   --button2-text: #3b3b3b;
@@ -82,8 +82,8 @@
     --code-inline-text: #d0d0d0;
     --link: #4daafc;
     --quote-border: #616161;
-    --button-bg: #0078d4;
-    --button-hover: #026ec1;
+    --button-bg: #d97757;
+    --button-hover: #c96442;
     --button-text: #ffffff;
     --button2-bg: transparent;
     --button2-text: #cccccc;
