@@ -1,5 +1,5 @@
 {
-  "release": 39,
+  "release": 40,
   "made": "2026-10-18",
   "plugin": "6.1.0",
   "agent": "6.1.0",
@@ -38,7 +38,7 @@
     "web/icons/tab-64.png": "af273af0b387c9db6c071c1210afcf003e1ce641428a5c3a34d3e92202f43761",
     "web/index.html": "6c9d93b68d309d77035afd5f79bb024949ac0f83773ab39a646343faa606c678",
     "web/keys.js": "2298da2f6965ef8000f9c473c0969b245c2e2582093ae367c92a8655bb8ea3fb",
-    "web/legal.html": "8c7a303f3cfef211c3d935974091905fea3892beb1e3a8dcd30cf79ced89cdd6",
+    "web/legal.html": "730d0af3b2b38fc13528616a5ece49818e45285af7699ee77554ebec656bb722",
     "web/manifest.webmanifest": "2beffc6e8cb380634e3d25072b23fdfaf4794b559c2ba519d3427a14cd321c3a",
     "web/qr.js": "9725a3a4b8381a28b3bbcaf881050c06a88121ab0d6977d626540a8b44dc8180",
     "web/seal.js": "9780fdb0f2c59a704041de1ddcd961597354c1109618dd607d952e6cda70d0f8",
