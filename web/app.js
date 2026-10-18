@@ -8271,6 +8271,8 @@ function connectedLine() {
 // Computers: a connected computer is its token.
 
 const dayOf = (ts) => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+// (a day and the time of it, the year only where it is not this one)
+const whenOf = (ts) => new Date(ts).toLocaleString(undefined, { ...(new Date(ts).getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }), month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
 // The account's computers, by their tokens: each with when it was connected and last heard
 // from, and Disconnect, which takes its token back. A token is made only as a computer is
@@ -8282,7 +8284,7 @@ function computersPart(redraw) {
     h(
       'div',
       { class: 'token-row api-token' + (t.expired ? ' off' : ''), 'data-token': t.id },
-      h('div', null, h('b', null, t.name), h('div', { class: 'muted' }, [`since ${dayOf(t.createdAt)}`, t.lastUsedAt ? `last heard from ${dayOf(t.lastUsedAt)}` : 'not heard from yet', t.expiresAt && (t.expired ? `its token ran out ${dayOf(t.expiresAt)}` : `its token is good until ${dayOf(t.expiresAt)}`), `token ends …${t.hint}`].filter(Boolean).join(' · '))),
+      h('div', null, h('b', null, t.name), h('div', { class: 'muted' }, [`since ${whenOf(t.createdAt)}`, t.lastUsedAt ? `last heard from ${whenOf(t.lastUsedAt)}` : 'not heard from yet', t.expiresAt && (t.expired ? `its token ran out ${dayOf(t.expiresAt)}` : `its token is good until ${dayOf(t.expiresAt)}`), `token ends …${t.hint}`].filter(Boolean).join(' · '))),
       h(
         'div',
         { class: 'token-actions' },
