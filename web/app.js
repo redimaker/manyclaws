@@ -2066,6 +2066,7 @@ function renderList() {
   const nothing = !app.sessions.size && !app.machines.size
   el('empty-pick').hidden = nothing
   el('empty-new').hidden = !nothing
+  if (!el('empty-connect').firstChild) fill(el('empty-connect'), connectBox('empty'))
   if (!el('setup').hidden && el('setup-status')) el('setup-status').replaceChildren(connectedLine())
   // (on a phone the list is all there is to see: it says so itself)
   if (nothing && !app.search.q) return redraw(list, [h('div', { class: 'empty list-empty' }, 'No computer is connected to your account yet.', h('br'), h('a', { href: '#/setup', class: 'primary button-link' }, 'Set up a computer'))])
@@ -3425,6 +3426,26 @@ function connectHead(name, sub) {
   el('connect').querySelector('.chat-name').textContent = name
   el('connect').querySelector('.chat-sub').textContent = sub
 }
+// A box to type a computer's code into, where the page offers one besides Connect a computer (Settings, Account, the
+// side where no session is open): the code is taken on to Connect a computer (#/connect), which checks it and asks for
+// the passkey, as when it is typed there
+function connectBox(where) {
+  const typed = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off', maxlength: '11', placeholder: '000 000 000', 'aria-label': 'The code the computer shows', class: 'pair-typed', 'data-part': 'connect-box-typed' })
+  const form = h(
+    'form',
+    { class: 'connect-box', 'data-part': 'connect-box', 'data-where': where },
+    h('p', { class: 'muted' }, 'Start Claude Code on the computer. Its ManyClaws plugin shows a code of nine digits: enter it here.'),
+    h('div', { class: 'connect-box-row' }, typed, h('button', { type: 'submit', class: 'primary', 'data-part': 'connect-box-go' }, 'Connect')),
+  )
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault()
+    app.connectCode = typed.value
+    typed.value = ''
+    if (location.hash === '#/connect') openConnect()
+    else location.hash = '#/connect'
+  })
+  return form
+}
 function openConnect() {
   leaveChat()
   connectHead('Connect a computer', 'With the code its ManyClaws plugin shows in Claude Code.')
@@ -3468,6 +3489,12 @@ function openConnect() {
   })
   fill(body, form)
   typed.focus()
+  // (a code typed into a box elsewhere on the page: taken up here as if typed here)
+  if (app.connectCode) {
+    typed.value = app.connectCode
+    app.connectCode = ''
+    form.requestSubmit()
+  }
 }
 // Asked, once its code was the one typed: is it to be connected? Approved with the passkey, it is given a token of its
 // own and the account's key
@@ -3518,6 +3545,7 @@ function connectAsk(body, id, paired, name) {
 
 function openSettings() {
   leaveChat()
+  fill(el('set-connect-body'), connectBox('settings'))
   markTile()
   markHaiku()
   renderAlertsButton()
@@ -9311,6 +9339,7 @@ function renderAccount() {
       { id: 'computers' },
       h('p', null, sessions || a.machines ? `${sessions} session${sessions === 1 ? '' : 's'} and ${a.machines} computer${a.machines === 1 ? '' : 's'} with the agent are yours here. ` : 'Nothing is connected to this account yet. ', h('a', { href: '#/setup' }, 'Set up a computer')),
       ...computersPart(renderAccount),
+      connectBox('account'),
     ),
     // (the account's key, as this browser holds it, and the phones and browsers that have it)
     accountPart('Browsers', { id: 'browsers' }, ...keyPart(renderAccount), ...devicesPart(renderAccount)),

@@ -23,14 +23,14 @@
        from: a preload that fails its check is otherwise fetched again by the import, unchecked (the server names
        the map by its own hash in the page's policy, since it is inline). -->
   <script type="importmap">{"integrity":{"/seal.js":"sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6","/keys.js":"sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
-  <link rel="stylesheet" href="app.css" integrity="sha384-SM4dt4/q5WeRHObH3/CtyEfmx3BKFLu0c/cq/8eyEbysP97sKmhEBeVuN6AWe4ln">
+  <link rel="stylesheet" href="app.css" integrity="sha384-xlw2jT5NIUX1VT41HA0Mk4etvEkQ25W0JvPYK+3rbgmsByyAAn4BSX7YVcUudTT9">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-xHFs1C1eTRqlAVrbhI7uCCxb9+IA6tQMHHnLZaCCtwOUIQzmFQR7Mdm7+rfeCZjd">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
-  <script src="app.js" defer integrity="sha384-gJ30WZOKF9WDVvi8EfMNy3AdgCMvhd9F0giRrZhPi1HHebfGkdBdFgH70eK/lY9p"></script>
+  <script src="app.js" defer integrity="sha384-pq3Y0LaU2GLJ6Mtc3K6oVWsxQGy9Iqbnk2mIQ/3bxrhzgXG4eOuvVuQd1kOY5qsW"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -156,7 +156,7 @@
     </aside>
 
     <main id="chat-pane">
-      <div id="empty" class="empty"><span id="empty-pick">Pick a session to see its chat.</span><span id="empty-new" hidden>No computer is connected to your account yet.<br><a href="#/setup" class="primary button-link">Set up a computer</a></span></div>
+      <div id="empty" class="empty"><span id="empty-pick">Pick a session to see its chat.</span><span id="empty-new" hidden>No computer is connected to your account yet.<br><a href="#/setup" class="primary button-link">Set up a computer</a></span><div id="empty-connect"></div></div>
       <section id="chat" hidden>
         <header class="bar chat-head">
           <a id="back" href="#" class="back" aria-label="Back to sessions">‹</a>
@@ -407,6 +407,10 @@
               <div><button type="button" id="set-alerts-go" class="primary">Turn on</button></div>
               <p id="set-alerts-note" class="muted" hidden></p>
             </div>
+          </section>
+          <section class="acct-part" id="set-connect">
+            <h2>Connect a computer</h2>
+            <div class="acct-body" id="set-connect-body"></div>
           </section>
           <section class="acct-part" id="set-account">
             <h2>Account</h2>
