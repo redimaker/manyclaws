@@ -3431,11 +3431,12 @@ function connectHead(name, sub) {
 // A box to type a computer's code into, where the page offers one besides Connect a computer (Settings, Account, the
 // side where no session is open): the code is taken on to Connect a computer (#/connect), which checks it and asks for
 // the passkey, as when it is typed there
-function connectBox(where) {
+function connectBox(where, { head = '' } = {}) {
   const typed = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'off', maxlength: '11', placeholder: '000 000 000', 'aria-label': 'The code the computer shows', class: 'pair-typed', 'data-part': 'connect-box-typed' })
   const form = h(
     'form',
     { class: 'connect-box', 'data-part': 'connect-box', 'data-where': where },
+    head && h('p', { class: 'connect-box-head', 'data-part': 'connect-box-head' }, h('b', null, head)),
     h('p', { class: 'muted' }, 'Start Claude Code on the computer. Its ManyClaws plugin shows a code of nine digits: enter it here.'),
     h('div', { class: 'connect-box-row' }, typed, h('button', { type: 'submit', class: 'primary', 'data-part': 'connect-box-go' }, 'Connect')),
   )
@@ -8992,7 +8993,6 @@ function keyPart(redraw) {
       'p',
       { 'data-part': 'key-here', class: 'guide-status connected' },
       k.root ? '✓ This browser has your account’s key, kept under a passkey of its own: it can approve your other devices. ' : k.own ? '✓ This browser has your key. It keeps it without a passkey, so it cannot approve your other devices: do that on one that keeps it under one. ' : '✓ This browser has your key while this page is open: it is borrowed, and one of your devices for a day. ',
-      h('a', { href: '#/account/unopened', 'data-part': 'key-check' }, 'See what each of your devices opens'),
     ),
     unopened().any && h('p', { 'data-part': 'key-other', class: 'guide-status' }, 'Some of what is kept here for your account was sealed with another key than this browser’s, so it cannot be opened here. ', h('a', { href: '#/account/unopened', 'data-part': 'key-other-link' }, 'See which, and what to do')),
     k.own && h('details', { 'data-part': 'afresh-ask' }, h('summary', null, 'Start afresh with a new key'), h('p', null, 'Only if every other device that has your key is lost, or may be in someone else’s hands. Your computers keep their sessions; what you put on sessions here is removed.'), h('button', { type: 'button', class: 'ghost', 'data-part': 'key-afresh', onclick: () => startAfresh() }, 'Start afresh')),
@@ -9347,7 +9347,7 @@ function renderAccount() {
       { id: 'computers' },
       h('p', null, sessions || a.machines ? `${sessions} session${sessions === 1 ? '' : 's'} and ${a.machines} computer${a.machines === 1 ? '' : 's'} with the agent are yours here. ` : 'Nothing is connected to this account yet. ', h('a', { href: '#/setup' }, 'Set up a computer')),
       ...computersPart(renderAccount),
-      connectBox('account'),
+      connectBox('account', { head: 'Add a computer' }),
     ),
     // (the account's key, as this browser holds it, and the phones and browsers that have it)
     accountPart('Browsers', { id: 'browsers' }, ...keyPart(renderAccount), ...devicesPart(renderAccount)),
