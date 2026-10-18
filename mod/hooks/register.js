@@ -1449,7 +1449,7 @@ async function execute($, command) {
       const d = devices.list?.devices?.find((x) => x.key === by)
       if (!mayStart(d)) {
         const who = d?.name ? `${d.name}, which asked,` : 'the device that asked'
-        const why = !d ? 'the device that asked is not on the list of your devices this computer has' : d.until !== undefined ? `${who} was added as not your own (one of your account's devices for a day)` : `starting sessions is turned off for ${d.name || 'the device that asked'} (Account, Browsers)`
+        const why = !d ? 'the device that asked is not on the list of your devices this computer has' : d.until !== undefined ? `${who} was added as not your own (one of your account's devices for a day)` : `starting sessions is turned off for ${d.name || 'the device that asked'} (Account, Devices)`
         throw new Error(`this computer's ManyClaws plugin and agent are kept up to date only when that is asked from one of your own devices that may start sessions, and ${why}`)
       }
     }
