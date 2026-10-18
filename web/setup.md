@@ -47,16 +47,17 @@ Claude Code then shows which account the computer joined. If it isn't yours, typ
 
 ## 4. The agent
 
-The agent is a small background service. It lets you start a session on the computer from your phone, pick up one that has ended, and search everything Claude Code has done there. It needs Node.js 22.13 or later, on macOS or Linux.
+The agent is a small background service. It lets you start a session on the computer from your phone, pick up one that has ended, and search everything Claude Code has done there. It needs Node.js 22.13 or later, on macOS or Linux. On Windows the plugin works, but the agent cannot be installed yet.
 
 **From your page:** open the computer's gear and press **Let my phone start sessions on** it. Your phone can then start sessions only in folders you've used Claude Code in on that computer in the last 90 days, and never in your home folder or above it, a temporary folder, or one inside a folder whose name starts with a dot. The computer's page lists them.
 
 A session started from your phone opens in a Terminal window on a Mac, or in tmux on Linux (`tmux ls`), and runs until you close it there.
 
-**By hand** (`claude plugin list --json` gives the plugin's folder as `installPath`):
+**By hand**, on macOS or Linux, from the plugin's folder (Claude Code's default; with `CLAUDE_CONFIG_DIR` set it is under that folder instead, and `claude plugin list --json` gives it as `installPath`):
 
 ```
-bash <the plugin's folder>/agent/install.sh --from <the plugin's folder> --auto-folders
+p=~/.claude/plugins/cache/manyclaws/manyclaws/{{plugin-version}}
+bash "$p/agent/install.sh" --from "$p" --auto-folders
 ```
 
 `--spawn DIR` adds a folder of your own choosing. The installer asks for nothing.
@@ -76,10 +77,11 @@ Each release is signed. When one is out, the computer's gear has a mark and its 
 By hand:
 
 - **The plugin.** `claude plugin marketplace update manyclaws`, then `claude plugin update manyclaws@manyclaws`. Sessions started after that have the new one.
-- **The agent**, from the copy the plugin carries:
+- **The agent**, from the copy the plugin carries, once the plugin is updated:
 
   ```
-  bash <the plugin's folder>/agent/install.sh --update --from <the plugin's folder>
+  p=~/.claude/plugins/cache/manyclaws/manyclaws/{{plugin-version}}
+  bash "$p/agent/install.sh" --update --from "$p"
   ```
 
   It keeps how the computer was set up and asks for nothing. While the agent is running a search for your page it does nothing and says so; `--end-sessions` ends the search.
