@@ -15,8 +15,9 @@ import path from 'node:path'
 import zlib from 'node:zlib'
 
 const MODES = ['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions']
-// The ones a machine allows where its owner named none
-export const DEFAULT_MODES = MODES.filter((m) => m !== 'bypassPermissions')
+// The ones a machine allows where its owner named none: every one, bypassing permissions too (deon, 2026-10-18, as on
+// 2026-10-08: "It should default to everything allowed if not specified"); a list in agent.json narrows them
+export const DEFAULT_MODES = MODES
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 // What a Claude Code session tells its children about itself, which a session the agent
 // starts must not take for its own. A service's environment is the account's, and the
@@ -51,11 +52,11 @@ export class Host {
     // .command file it is given (Terminal, the default; iTerm), or tmux; tmux elsewhere
     // (tmuxPrefix: what its tmux sessions' names start with). Windows has a console window.
     // modes: the permission modes a session may be started in or switched to. With no list
-    // of its own a machine allows every one but bypassPermissions: a session with its
-    // permissions bypassed does whatever it is prompted to, with nobody asked, so one is
-    // started from a phone or a browser only where the machine's owner said so, on the
-    // machine. A list in its agent.json ("spawn": { "modes": [...] }, or the installer's
-    // --mode) is how its owner names them.
+    // of its own a machine allows every one, bypassPermissions too: what a session is
+    // started in is what one of the account's own devices asked, signed. A list in its
+    // agent.json ("spawn": { "modes": [...] }, or the installer's --mode) is how its owner
+    // narrows them, and one without bypassPermissions has no session started so that it
+    // could be switched to it.
     // auto: the folders a person has used Claude Code in (autoFolders, below) are allowed too, and autoOff names the
     // ones of those that are not; folders: the ones the owner listed. A session may be started anywhere under either,
     // and a new folder made only under one the owner listed.

@@ -53,10 +53,10 @@
 #                       one used in the last 90 days. No new folder is made in them (--spawn names
 #                       where that may be), and the page lists them and may turn any of them off
 #   --mode MODE         a permission mode the page may start sessions in; repeat for several.
-#                       Given, only the ones named are allowed. With none: default, acceptEdits,
-#                       plan, auto and dontAsk, and not bypassPermissions, which lets a session
-#                       do anything it is prompted to with nobody asked: name it here to have
-#                       it. The list is "spawn": { "modes": [...] } in agent.json.
+#                       Given, only the ones named are allowed. With none, every one: default,
+#                       acceptEdits, plan, auto, dontAsk and bypassPermissions, which lets a session
+#                       do anything it is prompted to with nobody asked: leave it out of a list
+#                       here to have none. The list is "spawn": { "modes": [...] } in agent.json.
 #   --files DIR         a folder the page may open files from; repeat for several. With none,
 #                       the --spawn folders. A file anywhere else on the machine is not opened.
 #                       (Files are put only into the --spawn folders: "upload": true in
@@ -412,10 +412,6 @@ if [ "$reinstall" = 1 ]; then
 fi
 if [ "$update" = 1 ]; then
   echo "The ManyClaws agent is $(sed -n "s/^export const VERSION = '\(.*\)'\$/\1/p" "$HOME_DIR/agent/service.mjs") now, as $from has it (a signed release, checked), and running, set up as it was. Its log: $HOME_DIR/agent.log"
-  # (what a machine set up before bypassPermissions had to be named would no longer start)
-  if grep -q '"enabled": *true' "$HOME_DIR/agent.json" && ! grep -q '"modes"' "$HOME_DIR/agent.json"; then
-    echo "Sessions are no longer started here with their permissions bypassed unless this machine says so. To allow it: add \"modes\": [\"default\", \"acceptEdits\", \"plan\", \"auto\", \"dontAsk\", \"bypassPermissions\"] to \"spawn\" in $HOME_DIR/agent.json and run this again."
-  fi
   exit 0
 fi
 echo "The ManyClaws agent is installed in $HOME_DIR and running. Its log: $HOME_DIR/agent.log"
@@ -424,7 +420,9 @@ if [ ${#spawn[@]} -eq 0 ] && [ "$auto_folders" = 0 ]; then echo "Sessions on thi
 else
   [ ${#spawn[@]} -eq 0 ] || echo "The page may start and resume sessions in: ${spawn[*]}"
   [ "$auto_folders" = 0 ] || echo "The page may start and resume sessions in the folders you have used Claude Code in on this machine (not your home folder, a temporary one or one inside a folder whose name starts with a dot; used in the last 90 days). It lists them, and can turn any of them off."
-  case " ${modes[*]:-} " in *" bypassPermissions "*) echo "Sessions may be started with their permissions bypassed, as you asked (--mode bypassPermissions)." ;; *) echo "Sessions are not started with their permissions bypassed (--mode bypassPermissions allows it)." ;; esac
+  if [ ${#modes[@]} -eq 0 ]; then echo "Sessions may be started in any permission mode, bypassing permissions too (--mode names the only ones to allow)."
+  else case " ${modes[*]} " in *" bypassPermissions "*) echo "Sessions may be started with their permissions bypassed, as you asked (--mode bypassPermissions)." ;; *) echo "Sessions are not started with their permissions bypassed (--mode bypassPermissions allows it)." ;; esac
+  fi
   # (each opens in a terminal of its own, which is not the agent's: on a Mac a Terminal window, elsewhere tmux)
   if [ "$(uname)" = Darwin ]; then echo "Each session started from the page opens in a Terminal window here (\"terminal\" in \"spawn\" in agent.json names another app, or tmux)."
   elif command -v tmux >/dev/null 2>&1; then echo "Each session started from the page opens in a tmux session here, named manyclaws-…: tmux ls lists them, and tmux attach -t <name> opens one."
