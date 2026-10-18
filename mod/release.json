@@ -1,11 +1,11 @@
 {
-  "release": 50,
+  "release": 51,
   "made": "2026-10-18",
-  "plugin": "6.1.0",
+  "plugin": "6.1.51",
   "agent": "6.1.0",
   "files": {
     ".claude-plugin/marketplace.json": "7b64a511acba002d84d9f66516d8466a942bb451930eb42db9d94b51e5c76bbf",
-    "mod/.claude-plugin/plugin.json": "9637cdf2aac8ffb377384e84c6150286512be2c4d80345fe9521bc9951769dad",
+    "mod/.claude-plugin/plugin.json": "4bc24d41a419678167d059284863f3d3aa1a2e17f9d82db83354703336f74724",
     "mod/agent/agent.mjs": "dc5f056eb14d32dd373ce6ca54eb169a3f7fcd1fd5cde4b6530a16d502836fac",
     "mod/agent/cswap.mjs": "c92b960abcaf91422677e1f011867dff5be02f2644e9b0fefef8da5d2bd6baa0",
     "mod/agent/files.mjs": "534c4f6912ee91dff6cad707cb521c8be8ab50fbd0c85f901908548d056cc66e",
@@ -21,7 +21,7 @@
     "mod/agent/transcript.mjs": "3b80ad2d03a432d01ba59044b3016a43d968d0b1cf352a3d810a32390c908cfe",
     "mod/agent/verify.mjs": "4bf495f4407be4cd9ed859f9f129811be6d1415ab373dacf59cabbed90fb494f",
     "mod/hooks/hooks.json": "9c5d5d604490378aabf4b975872cb02885042cdef106d4687618380046475c03",
-    "mod/hooks/lib.js": "c5d155eb89f50518170afad0493e1941bd0dc9e91b11041787aaff5dfb4e0fe3",
+    "mod/hooks/lib.js": "ee0cd03b0376a5204619b18ae77e2191b3edeaf5bb3dd35fed8003018dc04729",
     "mod/hooks/register.js": "d97d83b5d933a5e50c97b7ba650740210261b02947a553703c5f3902bf4ad610",
     "mod/hooks/rows.js": "92cdeb63c94ca5778e69cdf7209bdddac07171fc41ee8716faf3af6dda8946ea",
     "mod/hooks/seal.js": "9780fdb0f2c59a704041de1ddcd961597354c1109618dd607d952e6cda70d0f8",
