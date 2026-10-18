@@ -69,7 +69,7 @@
 [data-site] .acct-body .form-note.error { color: var(--s-accent); }
 [data-site] .acct-body .guide-check { margin: 0; color: var(--s-text); }
 [data-site] .acct-body .guide-end { margin-bottom: 0; }
-[data-site] .acct-body .token-new, [data-site] .acct-body .recovery-form { gap: 8px; margin-bottom: 0; }
+[data-site] .acct-body .recovery-form { gap: 8px; margin-bottom: 0; }
 /* Whose device this is, asked as it is approved */
 [data-site] .acct-body .device-whose { margin: 4px 0 0; }
 [data-site] .acct-body .device-whose legend { margin-bottom: 8px; color: var(--s-text); }
@@ -142,8 +142,6 @@
 [data-site] #setup-status a { color: var(--s-text); text-decoration-color: var(--s-accent); text-underline-offset: 3px; }
 [data-site] .acct-body .guide-status { padding: 12px 16px; border: 1px solid var(--s-line); border-radius: 12px; background: var(--s-surface); color: var(--s-text-2); }
 [data-site] .acct-body .guide-status.connected { border-color: color-mix(in srgb, var(--s-ok) 50%, var(--s-line)); background: color-mix(in srgb, var(--s-ok) 10%, var(--s-bg)); color: var(--s-text); }
-[data-site] .acct-body .token-made { padding: 16px 20px; border: 1px solid color-mix(in srgb, var(--s-accent) 45%, var(--s-line)); border-radius: 16px; background: color-mix(in srgb, var(--s-accent) 10%, var(--s-bg)); color: var(--s-text); }
-[data-site] .acct-body .token-made p { margin-bottom: 12px; }
 /* (what a computer needs, on its own page: set off as the token just made is, with the accent down its side) */
 [data-site] .acct-body .needs { margin-bottom: 20px; padding: 16px 20px; border-radius: 16px; background: color-mix(in srgb, var(--s-accent) 12%, transparent); box-shadow: inset 4px 0 0 var(--s-accent); }
 [data-site] .acct-body .needs p { margin: 0; }
