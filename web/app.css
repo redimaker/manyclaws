@@ -273,6 +273,10 @@ pre, code { font-family: var(--mono); }
    as large as a glance across a desk needs */
 .pair-code { margin: 10px 0 6px; font-family: var(--mono, ui-monospace, monospace); font-size: 34px; letter-spacing: .1em; font-variant-numeric: tabular-nums; color: var(--strong); }
 .guide-form > input.pair-typed, .pair-typed { max-width: 12em; font-family: var(--mono, ui-monospace, monospace); font-size: 22px; letter-spacing: .12em; font-variant-numeric: tabular-nums; }
+/* the box to type a computer's code into, besides Connect a computer: Settings, Account, the side where no session is open */
+.connect-box p { margin: 0 0 8px; }
+.connect-box-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+#empty-connect { margin: 20px auto 0; max-width: 360px; text-align: left; }
 .pair-box #pair-body > * { padding: 24px 24px 20px; max-width: none; }
 .pair-box h2 { margin: 0 0 6px; font-family: var(--s-serif, Georgia, serif); font-weight: 500; font-size: 22px; line-height: 1.22; color: var(--n-text); }
 .pair-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
