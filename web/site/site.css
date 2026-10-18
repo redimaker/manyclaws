@@ -30,7 +30,7 @@ h2 { font-size: clamp(30px, 4.2vw, 52px); line-height: 1.2; }
 .tag i { display: inline-block; width: 3px; height: 3px; margin: 0 .7em; vertical-align: middle; border-radius: 50%; background: currentColor; opacity: .7; }
 
 /* ---- Buttons */
-.go, .listen, .ticket-go {
+.go, .ticket-go {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 20px; border: 0; border-radius: 8px;
   background: var(--s-btn); color: var(--s-btn-text); font: inherit; font-size: 17px; line-height: 1; text-decoration: none; white-space: nowrap; cursor: pointer;
   transition: background-color .15s ease, opacity .15s ease;
@@ -59,10 +59,6 @@ main > section { max-width: calc(var(--page) + 2 * var(--gutter)); margin: 0 aut
 .hero-tag { margin-bottom: 16px; }
 .lede { margin-top: 20px; font-size: 20px; line-height: 1.5; color: var(--s-faint); }
 .hero-go { display: grid; gap: 12px; margin-top: 32px; }
-.listen { background: var(--s-btn-2); color: var(--s-btn-2-text); background-image: linear-gradient(90deg, color-mix(in srgb, var(--s-accent) 45%, transparent) calc(var(--played, 0) * 100%), transparent 0); }
-.listen:hover { opacity: .9; }
-.listen-dot { width: 0; height: 0; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; }
-.listen[aria-pressed="true"] .listen-dot { width: 10px; height: 12px; border: 0; background: linear-gradient(90deg, currentColor 3px, transparent 3px 7px, currentColor 7px); }
 .hero-note { margin-top: 16px; font-size: 15px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--s-faint); }
 
 /* ---- The premise: one thing said large, and a word under it */
@@ -111,14 +107,10 @@ main > section { max-width: calc(var(--page) + 2 * var(--gutter)); margin: 0 aut
 .manifest b { font-family: var(--s-serif); font-size: 20px; font-weight: 500; line-height: 1.25; }
 .manifest span { color: var(--s-muted); line-height: 1.6; }
 
-/* ---- Sealed: the picture, the words, and what we can and can't see, in a ledger */
+/* ---- Sealed: the picture, and the words */
 .sealed { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 64px; align-items: center; max-width: calc(var(--inner) + 2 * var(--gutter)); padding-top: var(--band); }
 .sealed .plate, .sealed .words { grid-area: auto; }
 .sealed .plate { aspect-ratio: 1; }
-.ledger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 32px; margin-top: 32px; }
-.ledger div { padding: 16px 0; border-top: 1px solid var(--s-line); }
-.ledger dt { font-weight: 600; }
-.ledger dd { margin-top: 4px; color: var(--s-muted); line-height: 1.6; }
 
 /* ---- Setting up: what to say to Claude Code, as its terminal shows it */
 .setup, .price, .asked, .last { display: grid; justify-items: center; text-align: center; }
@@ -232,7 +224,7 @@ main.guide > section { max-width: none; padding: 0; }
   .top nav a:not(.go) { padding: 8px; }
   .top nav a[href="#price"], .top nav a[href="/setup.md"] { display: none; }
   .lede, .aside, .setup-say { font-size: 18px; }
-  .manifest, .ledger, .tags, .way { grid-template-columns: minmax(0, 1fr); }
+  .manifest, .tags, .way { grid-template-columns: minmax(0, 1fr); }
   .plate, .wide, .phone, .bench img, .last img, .ticket { border-radius: 16px; }
   .ticket { padding: 24px; }
   .asked summary { padding: 20px 0; font-size: 18px; }

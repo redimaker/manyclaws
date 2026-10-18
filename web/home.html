@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>ManyClaws — every Claude Code session you have, answered from your phone</title>
-  <meta name="description" content="Claude Code stops and asks before it runs things. ManyClaws puts every session you have, on every computer, on one page and on your phone, so the answer takes ten seconds.">
+  <meta name="description" content="Claude Code stops and asks before it runs things. ManyClaws puts every session you have, on every computer and every Claude account, on one page and on your phone, so the answer takes ten seconds.">
   <meta name="theme-color" content="#141413">
   <meta property="og:title" content="ManyClaws — it's waiting for a yes">
   <meta property="og:description" content="Every Claude Code session you have, on every computer, on one page and on your phone.">
@@ -44,14 +44,9 @@
       </picture>
       <p class="tag hero-tag">For Claude Code <i></i> on every computer you own</p>
       <h1>It&rsquo;s waiting<br>for a <em>yes.</em></h1>
-      <p class="lede">Claude Code stops and asks before it runs things. Then it waits, however long you&rsquo;re gone. ManyClaws puts every session you have, on every computer, on your phone or browser, so the answer takes ten seconds instead of the afternoon.</p>
+      <p class="lede">Claude Code stops and asks before it runs things. Then it waits, however long you&rsquo;re gone. ManyClaws puts every session you have, on every computer and every Claude account, on your phone or browser, so the answer takes ten seconds instead of the afternoon.</p>
       <div class="hero-go">
         <a class="go" href="/app#signup" target="_top">{{#trial}}Try it free for {{trial}}{{/trial}}{{^trial}}Start for <span data-price="monthly">$4.99 a month</span>{{/trial}}</a>
-        <button type="button" class="listen" id="listen" aria-pressed="false">
-          <span class="listen-dot" aria-hidden="true"></span>
-          <span class="listen-text">Hear it in 40 seconds</span>
-        </button>
-        <audio id="pitch" preload="none" src="/site/audio/real.mp3"></audio>
       </div>
       <p class="hero-note tag">02:14 <i></i> three sessions <i></i> nobody home</p>
     </section>
@@ -149,10 +144,6 @@
         <p class="tag">What we can&rsquo;t read</p>
         <h2>End-to-end encrypted.</h2>
         <p>Your sessions are end-to-end encrypted with a key of your own: made on your phone or browser the first time you sign in, kept there behind Face ID or Touch ID, and given to each of your other devices as you approve it. Each computer encrypts what its sessions say before sending it: prompts, replies, tool calls and their output, photos, titles, even the text of your alerts. There is no setting for this: we refuse anything that arrives unencrypted.</p>
-        <dl class="ledger">
-          <div><dt>Not encrypted</dt><dd>that a session is running, on which of your computers, and when.</dd></div>
-          <div><dt>The catch</dt><dd>a forgotten password is set again by a code to your email. A lost key is not: lose every device that has it, and you start afresh with a new key.</dd></div>
-        </dl>
       </div>
     </section>
 
@@ -212,6 +203,10 @@ on your phone, and approve it with <span class="s">Face ID</span>.</code></pre>
           <details>
             <summary>Will this keep working if I switch accounts?</summary>
             <p>Yes. ManyClaws follows your sessions, whichever Claude account they&rsquo;re signed in to. Switch accounts in the middle of a session and it stays where it was on your page. Different computers can be signed in to different accounts, and they all show up together.</p>
+          </details>
+          <details>
+            <summary>How is this different from Claude Code&rsquo;s Remote Control?</summary>
+            <p>Remote Control, Anthropic&rsquo;s own, lets you carry on a Claude Code session from claude.ai or the Claude app. You turn it on per session, or for every interactive session with a setting, under one claude.ai sign-in on a Pro, Max, Team or Enterprise plan; it doesn&rsquo;t work with API keys, Bedrock or Vertex. ManyClaws shows every session on every computer as soon as its plugin is there, whichever Claude account or plan each is signed in to, along with past sessions and a search across them, and with its agent it starts new sessions on any of your computers. Everything a session says is end-to-end encrypted.</p>
           </details>
           <details>
             <summary>Is this made by Anthropic?</summary>

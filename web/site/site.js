@@ -31,25 +31,6 @@ fetch('/api/plans')
   })
   .catch(() => {})
 
-// The spoken version: one button, which fills as it plays
-const listen = document.getElementById('listen')
-const pitch = document.getElementById('pitch')
-if (listen && pitch) {
-  const text = listen.querySelector('.listen-text')
-  const idle = text.textContent
-  listen.addEventListener('click', () => (pitch.paused ? pitch.play() : pitch.pause()))
-  pitch.addEventListener('play', () => listen.setAttribute('aria-pressed', 'true'))
-  pitch.addEventListener('pause', () => listen.setAttribute('aria-pressed', 'false'))
-  pitch.addEventListener('timeupdate', () => {
-    listen.style.setProperty('--played', pitch.duration ? pitch.currentTime / pitch.duration : 0)
-    text.textContent = pitch.paused && !pitch.currentTime ? idle : `${Math.max(0, Math.ceil(pitch.duration - pitch.currentTime))} seconds to go`
-  })
-  pitch.addEventListener('ended', () => {
-    listen.style.setProperty('--played', 0)
-    text.textContent = 'Hear it again'
-  })
-}
-
 // In the guide, a command (or what to say to Claude Code) is taken with one press
 for (const block of document.querySelectorAll('.guide pre.term, .guide-intro blockquote')) {
   const text = (block.querySelector('code') ?? block).textContent.trim()
