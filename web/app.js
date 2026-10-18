@@ -7907,7 +7907,7 @@ async function upgradeComputer(c, { now, release }) {
 // The agent set up on a computer that has none, by the plugin of a session there, from the plugin's own folder
 async function setUpAgent(c, via) {
   const name = c.name
-  const says = `Installs a small background service on ${name}, from the plugin it already has, checked against the signed release. Your phone can then start sessions in the folders you have used Claude Code in there (not your home folder, a temporary one, or one inside a folder whose name starts with a dot). You can turn any of them off on ${name}’s page.`
+  const says = `This installs a small background service on ${name}, using the plugin already there and checked against the signed release. Your phone can then start sessions in folders you’ve used Claude Code in on that computer, except your home folder, temporary folders and anything inside a hidden folder. You can turn any of them off on ${name}’s page.`
   if (!(await ask(`Let your phone start sessions on ${name}?`, { says, yes: 'Set up' }))) return
   stateOf(c).upkeep = { kind: 'agent-setup', busy: true, done: 'Setting up…' }
   renderComputer()
