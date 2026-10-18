@@ -2066,7 +2066,9 @@ function renderList() {
   const nothing = !app.sessions.size && !app.machines.size
   el('empty-pick').hidden = nothing
   el('empty-new').hidden = !nothing
-  if (!el('empty-connect').firstChild) fill(el('empty-connect'), connectBox('empty'))
+  // (the box for a computer's code, only while nothing is connected: past that, Settings and Account have it)
+  el('empty-connect').hidden = !nothing
+  if (nothing && !el('empty-connect').firstChild) fill(el('empty-connect'), connectBox('empty'))
   if (!el('setup').hidden && el('setup-status')) el('setup-status').replaceChildren(connectedLine())
   // (on a phone the list is all there is to see: it says so itself)
   if (nothing && !app.search.q) return redraw(list, [h('div', { class: 'empty list-empty' }, 'No computer is connected to your account yet.', h('br'), h('a', { href: '#/setup', class: 'primary button-link' }, 'Set up a computer'))])
