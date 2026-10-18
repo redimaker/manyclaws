@@ -14,7 +14,7 @@
 //                                         write agent.json (the installer does); what's
 //                                         there is kept (--mode: the only permission modes
 //                                         sessions may be started in; with no list, every
-//                                         mode but bypassPermissions. --files: the folders a
+//                                         mode, bypassPermissions too. --files: the folders a
 //                                         file may be opened from; with none, the --spawn
 //                                         ones), the token can come in MANYCLAWS_TOKEN
 //                                         and the key in MANYCLAWS_KEY: the account's key
