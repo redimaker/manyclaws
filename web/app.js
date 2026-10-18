@@ -784,7 +784,9 @@ function enter() {
 }
 
 // A server that charges has a front door (home.html). The cards to sign in, to make an
-// account and to pay are dressed as it is (site/join.css).
+// account and to pay are dressed as it is (site/join.css), and so are they on a server that
+// says it is the site without charging (ManyClaws' beta): there without the step that is the
+// plan, or the small print, which are the front door's.
 async function dress() {
   const plans = await fetch('/api/plans')
     .then((r) => r.json())
@@ -792,10 +794,11 @@ async function dress() {
   // (whether this server sends mail: it is what a forgotten password is got past by)
   app.mail = !!plans?.verify
   showRecover()
-  if (!plans?.on) return
+  if (!plans?.site) return
   document.documentElement.dataset.site = '1'
   el('join-art').hidden = false
-  el('signup-terms').hidden = false
+  if (plans.on) el('signup-terms').hidden = false
+  else el('join-art').querySelector('.join-steps li:last-child')?.remove()
   for (const h of document.querySelectorAll('#login [data-site-says]')) h.textContent = h.dataset.siteSays
 }
 
