@@ -6,15 +6,15 @@
 
 > Read {{origin}}/setup.md and set this computer up.
 
-Claude installs the plugin. A new session then shows a code of nine digits: enter it under **Connect a computer** ({{origin}}/app#/connect) on your phone or in a browser where you are signed in, press **Connect**, and give your passkey. Nothing is typed into Claude Code, a chat, a command or a file.
+Claude installs the plugin. Start a new session and it shows a code of nine digits: enter it under **Connect a computer** ({{origin}}/app#/connect) on your phone or in a browser where you're signed in, press **Connect**, and confirm with your passkey. Nothing is typed into Claude Code, a chat, a command or a file.
 
 ## 1. Your account's key
 
-Your sessions are end-to-end encrypted with your account's own key. There is no passphrase: the key is made of random bytes the first time you sign in to [your page]({{origin}}/app) on a phone, or in a browser with passkeys, and kept there under a passkey.
+Your sessions are end-to-end encrypted with your account's own key. There is no passphrase: the key is made of random bytes the first time you sign in to [your page]({{origin}}/app) on a phone, or in a browser with passkeys, and protected there by a passkey.
 
 There is no copy of the key to keep anywhere else. If you ever lose every device that has it, you start afresh with a new key, on your page: your computers still have their sessions.
 
-Every other phone, browser or computer gets the key by a code it shows, which you type on a device that already has it.
+Each other phone, browser or computer gets the key when you enter the code it shows on a device that already has it.
 
 ## 2. Install the plugin
 
@@ -37,21 +37,21 @@ It needs Claude Code 2.1.287 or later (`claude --version`).
 
 ## 3. Connect the computer
 
-Until this is done, nothing of this computer shows.
+The computer won't appear in {{name}} until you connect it.
 
-Start a new Claude Code session (terminal, VS Code or the desktop app). The plugin shows a code of nine digits and a link to `{{origin}}/app#/connect`. Type the code there, on your phone or in a browser that has your key, press **Connect**, and give your passkey. The code works once, for ten minutes, and three wrong tries end it; `/manyclaws connect` in Claude Code makes another.
+Start a new Claude Code session in a terminal, VS Code or the desktop app. The plugin shows a nine-digit code and a link to `{{origin}}/app#/connect`. Open the link on your phone, or in a browser that has your key, enter the code, press **Connect**, and confirm with your passkey. The code can be used once, and expires after ten minutes or three wrong tries. To get a new one, type `/manyclaws connect` in Claude Code.
 
-Claude Code then says which account it joined. If it is not yours, type `/manyclaws disconnect`.
+Claude Code then shows which account the computer joined. If it isn't yours, type `/manyclaws disconnect`.
 
-**A computer nobody sits at** (a server you reach over SSH): connect it the same way, from one Claude Code session in a terminal. It goes on with nobody there.
+**A computer nobody sits at**, such as a server you reach over SSH, is connected the same way, from a Claude Code session in a terminal. Once connected, it keeps working with nobody there.
 
 ## 4. The agent
 
 The agent is a small background service. It lets you start a session on the computer from your phone, pick up one that has ended, and search everything Claude Code has done there. It needs Node.js 22.13 or later, on macOS or Linux.
 
-**From your page:** open the computer's gear and press **Let my phone start sessions on** it. Sessions may then be started only in folders you have used Claude Code in there in the last 90 days: never your home folder or one above it, a temporary one, or one inside a folder whose name starts with a dot. The computer's page lists them.
+**From your page:** open the computer's gear and press **Let my phone start sessions on** it. Your phone can then start sessions only in folders you've used Claude Code in on that computer in the last 90 days, and never in your home folder or above it, a temporary folder, or one inside a folder whose name starts with a dot. The computer's page lists them.
 
-A session started from your phone opens in a Terminal window on a Mac, or in tmux on Linux (`tmux ls`), and runs until it is closed there.
+A session started from your phone opens in a Terminal window on a Mac, or in tmux on Linux (`tmux ls`), and runs until you close it there.
 
 **By hand** (`claude plugin list --json` gives the plugin's folder as `installPath`):
 
@@ -63,7 +63,7 @@ bash <the plugin's folder>/agent/install.sh --from <the plugin's folder> --auto-
 
 ## 5. Your phone
 
-Open {{origin}}/app on your phone and sign in. Make your key there, or approve the phone from a browser that has it. Add the page to your Home Screen, open it from there, and under **Settings** press **Turn on alerts** to hear when a session needs you or has finished.
+Open {{origin}}/app on your phone and sign in. If your account has no key yet, make it there; otherwise approve the phone from a browser that has it. Add the page to your Home Screen, open it from there, and under **Settings** press **Turn on alerts** to hear when a session needs you or has finished.
 
 ## Keeping it up to date and running
 
