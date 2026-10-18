@@ -8,7 +8,7 @@
 // prompts and questions are answered, and whether replies stream.
 //
 // Configuration comes from the plugin's options (userConfig) or the environment:
-//                  MANYCLAWS_URL           the server, where it is not https://manyclaws.dev (SERVER, in
+//                  MANYCLAWS_URL           the server, where it is not https://beta.manyclaws.dev (SERVER, in
 //                                            lib.js): the plugin has no option for it, so its dialog
 //                                            asks for no address
 //   token        / MANYCLAWS_TOKEN         an API token of the account's, made on its Account page

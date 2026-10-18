@@ -1,17 +1,17 @@
 {
-  "release": 33,
+  "release": 34,
   "made": "2026-10-18",
   "plugin": "6.1.0",
   "agent": "6.1.0",
   "files": {
     ".claude-plugin/marketplace.json": "7b64a511acba002d84d9f66516d8466a942bb451930eb42db9d94b51e5c76bbf",
     "mod/.claude-plugin/plugin.json": "82d2bd48d61fd99fab3d988cae9fa9c3cf0436f71ba19f339d2ecf16b86a7512",
-    "mod/agent/agent.mjs": "03dde9a9f4c03965dd4f704a55346a95678311886dbbd14c1d6008c86d1e48f2",
+    "mod/agent/agent.mjs": "dc5f056eb14d32dd373ce6ca54eb169a3f7fcd1fd5cde4b6530a16d502836fac",
     "mod/agent/cswap.mjs": "c92b960abcaf91422677e1f011867dff5be02f2644e9b0fefef8da5d2bd6baa0",
     "mod/agent/files.mjs": "534c4f6912ee91dff6cad707cb521c8be8ab50fbd0c85f901908548d056cc66e",
     "mod/agent/host.mjs": "ab51e3fda30bbeee9a9ef56648babbc2d4ee978b5fce675fa95da8a9c6c2495c",
     "mod/agent/indexer.mjs": "929b9dad7726ff0f109f07f2154ec3444a353f120dcc6ff0f70615756570199d",
-    "mod/agent/install.sh": "da9682bbb22fc3a65be986c466c6d5acc9a057cfc6cb49835b0a89ad83671aad",
+    "mod/agent/install.sh": "0b3254a5d4e8b25cce785be58b3d3f91a8d0a871c620ef0348c603f13ad7720d",
     "mod/agent/launch.mjs": "ecfcf9e63ddc77ac5acf21d587e9982f9bcf997b5a492741d44e7409d62826ae",
     "mod/agent/rows.mjs": "92cdeb63c94ca5778e69cdf7209bdddac07171fc41ee8716faf3af6dda8946ea",
     "mod/agent/seal.mjs": "9780fdb0f2c59a704041de1ddcd961597354c1109618dd607d952e6cda70d0f8",
@@ -21,12 +21,12 @@
     "mod/agent/transcript.mjs": "3b80ad2d03a432d01ba59044b3016a43d968d0b1cf352a3d810a32390c908cfe",
     "mod/agent/verify.mjs": "4bf495f4407be4cd9ed859f9f129811be6d1415ab373dacf59cabbed90fb494f",
     "mod/hooks/hooks.json": "9c5d5d604490378aabf4b975872cb02885042cdef106d4687618380046475c03",
-    "mod/hooks/lib.js": "45533816331ae9a058f93827034a2c370e79684797ca372b7a9a597d6c36f052",
-    "mod/hooks/register.js": "d4f626b13d8d5b3a7aa899f329918c352b8235260cbe716bd96d29dc81539ba9",
+    "mod/hooks/lib.js": "c5d155eb89f50518170afad0493e1941bd0dc9e91b11041787aaff5dfb4e0fe3",
+    "mod/hooks/register.js": "24932be1bccb2e5420fb9fda9d9e79446eadec966f97c6c241e08d87cb1d1701",
     "mod/hooks/rows.js": "92cdeb63c94ca5778e69cdf7209bdddac07171fc41ee8716faf3af6dda8946ea",
     "mod/hooks/seal.js": "9780fdb0f2c59a704041de1ddcd961597354c1109618dd607d952e6cda70d0f8",
     "mod/tests/lib.test.ts": "d43f9efeadb3e511b6caac09233b889c188457815b358ac057878c4f127b9e01",
-    "mod/tests/mod.test.ts": "aef8ddacc99f7ab8f142487c05defbd15d436eac817b05cd47b095ae2381b078",
+    "mod/tests/mod.test.ts": "07adddcf135dfa61cd15bcbf79af638e976f2c15777e6f0c11af639455453f51",
     "web/app.css": "2982f34e2b4e0dae24f546eac182804be087e8eecc2604bd2d1616d99cf3de7e",
     "web/app.js": "f5b87576cba6badf896100ce73d9bd2e5becea9b6fa9a5043bc5f05df66867d9",
     "web/home.html": "4ded78d7476c1358e0851db84871d4e1fab2cfc3e36ddfc1f172d40d5a303ca8",
@@ -43,7 +43,7 @@
     "web/qr.js": "9725a3a4b8381a28b3bbcaf881050c06a88121ab0d6977d626540a8b44dc8180",
     "web/seal.js": "9780fdb0f2c59a704041de1ddcd961597354c1109618dd607d952e6cda70d0f8",
     "web/setup.html": "355786cd0c341df9bfca6839be3957421d7b1b93b42e8597edd48be95b4ba62a",
-    "web/setup.md": "3ff279ebc86ba4313dd319c0ae3369d08296758f8e58e33f2549cdd45652c8a8",
+    "web/setup.md": "17d7e8ccc2e30928d75063587ab2d007b4954731c89405e1de310c9fb2a90b99",
     "web/site/account.css": "35bca5bb01e311ec181daf3ac8bac312fb3aa45f86e0c27b1a76c041eeba8329",
     "web/site/audio/real.mp3": "c5b8d6981cac3fe17c2e7174ab2464735fef0f0d9a3ac6d3128771c74a0bb347",
     "web/site/fonts.css": "7c7666b6e2613e4afd9480deb9a54a29005f3d234715005524e1b4ca6540b27f",
@@ -78,6 +78,6 @@
     "web/site/site.css": "c57a8bdc37f68b69b211c5f5294e8cfb5dda15dfa0f804a5bdc99f5c5627e6e0",
     "web/site/site.js": "ba06d01c737fb403f85403b4630763779878946b47b03fe19630a0e5b74600d8",
     "web/sw.js": "dcd7727fd016d5120e8993755833b3e214822933f2a0e81794997bf46f26dfbb",
-    "web/upgrade.md": "0cdbb39b2121f0578bc353f86887f29f8bbaf4d0fe4d6251f5db2d71ab4ff966"
+    "web/upgrade.md": "ff241dcb87f9151b59300a753ab0723eb0767f3c6a39c2870b26c2a75b1fb04f"
   }
 }

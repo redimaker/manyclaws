@@ -50,11 +50,11 @@ New Claude Code sessions use the new plugin; sessions already open keep the old 
 
 Its marketplace comes from {{name}}'s server, or its agent is older than 5.1.0 and cannot check what it installs.
 
-1. **The plugin**, where its marketplace is not `redimaker/manyclaws`:
+1. **The plugin**, where its marketplace is not `redimaker/manyclaws#beta`:
 
    ```
    claude plugin marketplace remove manyclaws
-   claude plugin marketplace add redimaker/manyclaws
+   claude plugin marketplace add redimaker/manyclaws#beta
    claude plugin install manyclaws@manyclaws
    ```
 

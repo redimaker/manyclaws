@@ -4,10 +4,10 @@
 export const PROTOCOL = 2
 export const PLUGIN_VERSION = '6.1.0'
 
-// Where the mod reports. ManyClaws has one server, so the plugin has no option for its
+// Where the mod reports: on the branch beta, ManyClaws' beta server. ManyClaws has one server, so the plugin has no option for its
 // address and its dialog asks for none: MANYCLAWS_URL names another (a test's, or one
 // somebody runs themselves).
-export const SERVER = 'https://manyclaws.dev'
+export const SERVER = 'https://beta.manyclaws.dev'
 
 // What may be asked of a session, by capability. A method missing here is refused.
 export const METHOD_CAPABILITY = {

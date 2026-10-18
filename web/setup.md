@@ -29,7 +29,7 @@ Claude Code can do this part, or you can paste the commands yourself. It needs C
 {{/elsewhere}}1. Add the marketplace and install the plugin from it. It comes from the public repository the plugin is kept in, [github.com/redimaker/manyclaws](https://github.com/redimaker/manyclaws), where anyone can read what it does. The plugin carries the agent, and the signed list of every file it was released with:
 
    ```
-   claude plugin marketplace add redimaker/manyclaws
+   claude plugin marketplace add redimaker/manyclaws#beta
    claude plugin install manyclaws@manyclaws
    ```
 

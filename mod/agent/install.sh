@@ -2,7 +2,7 @@
 # Installs the ManyClaws agent on this machine and starts it as a service of your
 # own user (launchd on macOS, systemd --user on Linux).
 #
-#   curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/main/mod/agent/install.sh | bash -s -- [options]
+#   curl -fsSL https://raw.githubusercontent.com/redimaker/manyclaws/beta/mod/agent/install.sh | bash -s -- [options]
 #
 # or, from the ManyClaws plugin as Claude Code installed it (the agent is in the plugin's folder, with
 # the signed list the plugin was released by), what the plugin runs when the page asks it to:
@@ -34,7 +34,7 @@
 # MANYCLAWS_KEY), and the plugin is given the same.
 #
 #   --server URL        the ManyClaws server this machine reports to (default: what it was set
-#                       up with, else https://manyclaws.dev)
+#                       up with, else https://beta.manyclaws.dev)
 #   --from WHERE        take the release from here, where it is not to come from the repository:
 #                       a .tar.gz by its address or its path, or a folder: a checkout of the
 #                       repository, or the plugin's own folder (or MANYCLAWS_AGENT_FROM). It
@@ -102,7 +102,7 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 UNIT="$HOME/.config/systemd/user/manyclaws-agent.service"
 
 REPO="redimaker/manyclaws"
-from="${MANYCLAWS_AGENT_FROM:-https://codeload.github.com/$REPO/tar.gz/refs/heads/main}"
+from="${MANYCLAWS_AGENT_FROM:-https://codeload.github.com/$REPO/tar.gz/refs/heads/beta}"
 # The keys a release may be signed by, as ssh-keygen's "allowed signers" are written. A
 # release signed by one of these may bring an installer with others: that is how a key is
 # replaced, and it is why an installed agent is updated by its own copy of this script.
@@ -193,7 +193,7 @@ if [ "$update" = 1 ]; then
 fi
 # Where it reports: what was named, else what this machine was set up with, else ManyClaws' own server
 [ -n "$server" ] || [ ! -f "$HOME_DIR/agent.json" ] || server="$(sed -n 's/^[[:space:]]*"server"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' "$HOME_DIR/agent.json" | head -1)"
-[ -n "$server" ] || server="https://manyclaws.dev"
+[ -n "$server" ] || server="https://beta.manyclaws.dev"
 server="${server%/}"
 token="${token:-${MANYCLAWS_TOKEN:-}}"
 key="${key:-${MANYCLAWS_KEY:-}}"

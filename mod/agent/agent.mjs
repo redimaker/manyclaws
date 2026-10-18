@@ -259,10 +259,10 @@ export function leftSays(has, { server = '', waiting = true } = {}) {
   const takes = waiting ? 'gives this agent the same two within a few seconds' : 'this agent takes a newer token or key from it, where the plugin has one'
   if (has.installed && has.token && has.key) return [`The ManyClaws plugin has its API token and key. Start a new Claude Code session: the plugin connects, and ${takes}.`]
   return [
-    ...(has.installed === false ? [`The ManyClaws plugin is not installed in Claude Code on this computer. Install it first: claude plugin marketplace add redimaker/manyclaws, then claude plugin install manyclaws@manyclaws`] : []),
+    ...(has.installed === false ? [`The ManyClaws plugin is not installed in Claude Code on this computer. Install it first: claude plugin marketplace add redimaker/manyclaws#beta, then claude plugin install manyclaws@manyclaws`] : []),
     "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer.",
     '  Start a new Claude Code session on it, in a terminal, VS Code or the desktop app: the plugin shows a code of nine digits.',
-    `  Type it under Connect a computer (${server || 'https://manyclaws.dev'}/app#/connect), on a phone or in a browser where you are signed in, and approve the computer there.`,
+    `  Type it under Connect a computer (${server || 'https://beta.manyclaws.dev'}/app#/connect), on a phone or in a browser where you are signed in, and approve the computer there.`,
     `Then the plugin connects, and ${takes}.`,
   ]
 }

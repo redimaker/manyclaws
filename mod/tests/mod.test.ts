@@ -289,13 +289,13 @@ test('with a token and no key the mod sends nothing of the session, whatever hap
   expect(told.some((t: unknown) => String(t).includes('\n'))).toBe(false)
 })
 
-test('given no address, the mod reports to manyclaws.dev: it has no option for one, and MANYCLAWS_URL is what names another server', async ($, on) => {
+test('given no address, the mod reports to beta.manyclaws.dev: it has no option for one, and MANYCLAWS_URL is what names another server', async ($, on) => {
   await made()
   const { clock, sent } = setup(on, { env: { MANYCLAWS_TOKEN: 'agent-token', MANYCLAWS_KEY: WORDS } })
   await start($)
   await clock.advance(1000)
-  expect(sent.some((s) => s.url === 'https://manyclaws.dev/api/agent/events')).toBe(true)
-  expect(sent.every((s) => s.url.startsWith('https://manyclaws.dev/api/agent/'))).toBe(true)
+  expect(sent.some((s) => s.url === 'https://beta.manyclaws.dev/api/agent/events')).toBe(true)
+  expect(sent.every((s) => s.url.startsWith('https://beta.manyclaws.dev/api/agent/'))).toBe(true)
 })
 
 test('a call outside the granted capabilities is refused; ping answers', async ($, on) => {
@@ -1257,11 +1257,11 @@ test('through the agent\'s relay, what the plugin signs in with is the relay\'s 
 
 test('a token that is not the relay\'s word goes to the server, on a machine that relays too', async ($, on) => {
   const m = await made()
-  const relayed = agentFolder(on, { server: 'https://manyclaws.dev', token: 'agent-token', key: keysText(m.keys), relay: { port: 8798, secret: 'relay-word' } })
+  const relayed = agentFolder(on, { server: 'https://beta.manyclaws.dev', token: 'agent-token', key: keysText(m.keys), relay: { port: 8798, secret: 'relay-word' } })
   const { clock, sent } = setup(on, { env: { MANYCLAWS_TOKEN: 'agent-token', MANYCLAWS_KEY: WORDS, HOME: '/home/me' } })
   await start($)
   await clock.advance(1000)
-  expect(sent.some((s) => s.url === 'https://manyclaws.dev/api/agent/events')).toBe(true)
+  expect(sent.some((s) => s.url === 'https://beta.manyclaws.dev/api/agent/events')).toBe(true)
   expect(sent.some((s) => s.url.startsWith('http://127.0.0.1'))).toBe(false)
   expect(relayed.written).toEqual([])
 })
