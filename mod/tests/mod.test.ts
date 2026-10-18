@@ -1910,7 +1910,8 @@ test('neither is done for a device that may not start sessions, nor the agent se
   })
   await starting($, s.clock)
   await s.clock.advance(3000)
-  for (const id of ['u1', 'u2']) expect(s.results().find((r) => r.id === id)).toMatchObject({ ok: false, error: expect.stringContaining('only from one of your own devices that may start sessions') })
+  // (named by what the list calls it, with why it may not)
+  for (const id of ['u1', 'u2']) expect(s.results().find((r) => r.id === id)).toMatchObject({ ok: false, error: "this computer's ManyClaws plugin and agent are kept up to date only when that is asked from one of your own devices that may start sessions, and Borrowed, which asked, was added as not your own (one of your account's devices for a day)" })
   expect(ran.filter((a) => a[0] === 'bash' || a[1] === 'plugin')).toEqual([])
 })
 

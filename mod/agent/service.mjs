@@ -829,10 +829,14 @@ export async function run(config, flags = {}) {
   // A session is started here only for one of the account's own devices that may start them (mayStart): not one that
   // was added as not its owner's own, which is one of the account's for a day, and not one its owner turned that off
   // for, signed with the account's root (Account, Browsers). A reply to a session that is running is not starting one.
-  const NOT_TO_START = "this computer starts a session only when that is asked from one of your own devices that may start them, and this was asked from one that may not: it was added as not your own (one of your account's devices for a day), or starting sessions is turned off for it (Account, Browsers)"
-  const startedBy = (o) => {
-    if (!mayStart(devices.list?.devices?.find((d) => d.key === o.by))) throw new HostError(NOT_TO_START)
-    return o
+  // What is said where one may not, naming the device that asked by what the list calls it, and why it may not: what is
+  // refused is said as what it is (`does`: it starts a session, it is updated, it starts sessions in more folders)
+  const startedBy = (o, does = 'starts a session') => {
+    const d = devices.list?.devices?.find((x) => x.key === o.by)
+    if (mayStart(d)) return o
+    const who = d?.name ? `${d.name}, which asked,` : 'the device that asked'
+    const why = !d ? 'the device that asked is not on the list of your devices this computer has' : d.until !== undefined ? `${who} was added as not your own (one of your account's devices for a day)` : `starting sessions is turned off for ${d.name || 'the device that asked'} (Account, Browsers)`
+    throw new HostError(`this computer ${does} only when that is asked from one of your own devices that may start sessions, and ${why}`)
   }
   // A new session from another, on the order for it: which says how it is to be made (new,
   // clone or handoff), so that one asked for empty is not made from words instead
@@ -902,7 +906,7 @@ export async function run(config, flags = {}) {
     // An upgrade to a release, named with what its plugin is (its digest); `now`: the searches this agent runs are ended
     // for it, where it has to be started again, rather than waited for
     'agent.upgrade': (a) => {
-      const w = startedBy(take(a.order, machine.id, ['upgrade'])).with
+      const w = startedBy(take(a.order, machine.id, ['upgrade']), 'is updated').with
       return { release: Number(w.release), digest: String(w.digest ?? ''), now: w.now === true }
     },
     'spawn.folders': (a) => {
@@ -910,7 +914,7 @@ export async function run(config, flags = {}) {
       const auto = typeof o.with.auto === 'boolean' ? o.with.auto : undefined
       const off = Array.isArray(o.with.off) ? o.with.off.map(String) : undefined
       const wider = (auto === true && !host.spawnConfig.auto) || (off && (host.spawnConfig.autoOff ?? []).some((f) => !off.includes(f)))
-      if (wider) startedBy(o)
+      if (wider) startedBy(o, 'starts sessions in more folders')
       return { auto, off }
     },
     'session.seed': (a, raw) => {

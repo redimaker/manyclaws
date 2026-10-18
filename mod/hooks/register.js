@@ -1182,7 +1182,6 @@ async function manyclawsCommand($, e) {
 // itself up to date on an order (manyclaws.update), and holds what Claude Code fetched to its list before any session
 // loads it; and it sets the agent up from its own folder, where the agent is carried (manyclaws.agent).
 const SELF_CHECK_MS = 10_000
-const NOT_TO_START = "keeping this computer's ManyClaws plugin and agent up to date is asked for only from one of your own devices that may start sessions, and this was asked from one that may not (Account, Browsers)"
 // The plugin's own folder: what Claude Code says it is
 const ownRoot = ($) => $.plugin.root ?? ''
 // A plugin's folder held against the list it carries: { release, plugin, digest, signed, as }
@@ -1466,7 +1465,15 @@ async function execute($, command) {
     if (!caps.has(capability)) throw new Error(`${method} needs the "${capability}" capability, which this machine's ManyClaws config doesn't grant`)
     // (what keeps this computer up to date, the plugin and the agent, is asked for only by one of the owner's own devices
     // that may start sessions: the agent is what starts them)
-    if (capability === 'upkeep' && !mayStart(devices.list?.devices?.find((d) => d.key === by))) throw new Error(NOT_TO_START)
+    if (capability === 'upkeep') {
+      // (named by what the list calls it, with why it may not, as the agent says it)
+      const d = devices.list?.devices?.find((x) => x.key === by)
+      if (!mayStart(d)) {
+        const who = d?.name ? `${d.name}, which asked,` : 'the device that asked'
+        const why = !d ? 'the device that asked is not on the list of your devices this computer has' : d.until !== undefined ? `${who} was added as not your own (one of your account's devices for a day)` : `starting sessions is turned off for ${d.name || 'the device that asked'} (Account, Browsers)`
+        throw new Error(`this computer's ManyClaws plugin and agent are kept up to date only when that is asked from one of your own devices that may start sessions, and ${why}`)
+      }
+    }
     const value = await call($, method, args)
     await emit($, 'result', { id, ok: true, value: cap(value, MAX_RESULT) })
   } catch (err) {
