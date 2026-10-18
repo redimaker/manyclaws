@@ -10,7 +10,7 @@ Claude installs the plugin. Then, in a new Claude Code session, the plugin shows
 
 ## 1. Before you start: your account's key
 
-Everything a computer's sessions say is sealed on that computer before it is sent, with your account's own key, and only your own devices can read it. There is no passphrase: the key is made of random bytes, the first time you sign in to [your page]({{origin}}/app) on a phone, or in a browser with passkeys, and it is kept there under a passkey of that device's own. Nothing of it is ever sent to {{name}}'s server.
+Everything a computer's sessions say is end-to-end encrypted: sealed on that computer before it is sent, with your account's own key. There is no passphrase: the key is made of random bytes, the first time you sign in to [your page]({{origin}}/app) on a phone, or in a browser with passkeys, and it is kept there under a passkey of that device's own.
 
 There is no copy of the key to keep anywhere else. If you ever lose every device that has it, you start afresh with a new key, on your page: your computers still have their sessions, and show them again once each is connected with its code. What you put on sessions there (their names, labels, colors and reminders) is removed.
 
@@ -41,7 +41,7 @@ This step is yours, and it is the one that matters: until it is done, nothing of
 
 Start a new Claude Code session (in a terminal, VS Code or the desktop app). The plugin says that the computer is not connected yet, and shows a code of nine digits, with a link to `{{origin}}/app#/connect`, where it is typed. Type it there, where you are signed in to {{name}}: on your phone, or in a browser that keeps your key under a passkey. The page asks whether to connect the computer, by its name: press **Connect**, and give your passkey. The code works once, for ten minutes, and three wrong tries end it; `/manyclaws connect` in Claude Code makes another.
 
-The first three digits find the computer on {{name}}'s server; the other six the plugin made, and never sends. With them the plugin and the page make a key between them (SPAKE2) through the server, which passes what each side makes and can make nothing of it, nor test a code by itself. The page makes an API token for the computer, named for it, and seals it and your key with that key. Only the plugin that showed the code opens it. Claude Code then says which account it joined: if it is not yours, type `/manyclaws disconnect`.
+The first three digits find the computer on {{name}}'s server; the other six the plugin made, and never sends. With them the plugin and the page make a key between them (SPAKE2) through the server, which passes on what each side makes. The page makes an API token for the computer, named for it, and seals it and your key with that key. Claude Code then says which account it joined: if it is not yours, type `/manyclaws disconnect`.
 
 The first session after that starts at once, and the computer is on your page. The key does one more thing than keep what is said private. What you ask of this computer from your phone or a browser (a reply, a yes to a permission prompt, a new session) is signed there, and this computer checks. It keeps what it needs to check and nothing it could sign with, so nobody between your phone and this computer, {{name}}'s server included, can ask in your name or send again what you asked before.
 
@@ -68,7 +68,7 @@ bash <the plugin's folder>/agent/install.sh --from <the plugin's folder> --auto-
 - The new session appears at {{origin}}/app within a few seconds, under the computer's name, with "encrypted" under its title.
 - With the agent, the computer is listed there by its name with every session Claude Code has had on it, running or not, and its page says which release it is, as its agent checked it.
 - `claude plugin configure manyclaws@manyclaws` lists the plugin's options and says which are set. It never shows their values.
-- If the session does not appear, the plugin says why in Claude Code itself: a token that has run out or been taken back (it then shows the code that connects the computer again), no key yet, or a server it cannot reach. A computer sends nothing unsealed, and the server takes nothing that is not sealed. Nothing of your key is on the server, so nothing checks it for you: if the page says some sessions were sealed with another key and cannot be opened, a computer of yours has another one, from before your account was started afresh. **What to do**, beside it, says which, and how it is connected again.
+- If the session does not appear, the plugin says why in Claude Code itself: a token that has run out or been taken back (it then shows the code that connects the computer again), no key yet, or a server it cannot reach. A computer sends nothing unsealed, and the server takes nothing that is not sealed. Nothing checks your key for you: if the page says some sessions were sealed with another key and cannot be opened, a computer of yours has another one, from before your account was started afresh. **What to do**, beside it, says which, and how it is connected again.
 
 ## 6. Your phone
 
