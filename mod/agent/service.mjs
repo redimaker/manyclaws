@@ -817,8 +817,8 @@ export async function run(config, flags = {}) {
   const asks = (order) => readOrder(order, sealKey, devices.list)?.do
   // A session is started here only for one of the account's own devices that may start them (mayStart): not one that
   // was added as not its owner's own, which is one of the account's for a day, and not one its owner turned that off
-  // for, signed with the account's root (Account, Devices). A reply to a session that is running is not starting one.
-  const NOT_TO_START = "this computer starts a session only when that is asked from one of your own devices that may start them, and this was asked from one that may not: it was added as not your own (one of your account's devices for a day), or starting sessions is turned off for it (Account, Devices)"
+  // for, signed with the account's root (Account, Browsers). A reply to a session that is running is not starting one.
+  const NOT_TO_START = "this computer starts a session only when that is asked from one of your own devices that may start them, and this was asked from one that may not: it was added as not your own (one of your account's devices for a day), or starting sessions is turned off for it (Account, Browsers)"
   const startedBy = (o) => {
     if (!mayStart(devices.list?.devices?.find((d) => d.key === o.by))) throw new HostError(NOT_TO_START)
     return o

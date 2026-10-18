@@ -1144,7 +1144,7 @@ async function manyclawsCommand($, e) {
     const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
     const r = await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ token: NO_TOKEN, key: NO_TOKEN }), timeoutMs: 60_000 }).catch((err) => ({ exitCode: 1, stderr: String(err?.message ?? err) }))
     if (r.exitCode !== 0) return { text: 'Claude Code would not change the plugin\'s options: ' + lastLine(r) }
-    return { text: 'Disconnected: from the next session on, this computer reports to no account, and offers a code that connects it again. This session goes on as it is until it ends. Take its API token back on your page (Account, API tokens).' }
+    return { text: 'Disconnected: from the next session on, this computer reports to no account, and offers a code that connects it again. This session goes on as it is until it ends. Disconnect it on your page too (Account, Computers), which takes back its API token.' }
   }
   return { text: '/manyclaws connect: a link that connects this computer to your account, from your page. /manyclaws disconnect: this computer reports to no account from the next session on.' }
 }
@@ -1161,7 +1161,7 @@ async function manyclawsCommand($, e) {
 // itself up to date on an order (manyclaws.update), and holds what Claude Code fetched to its list before any session
 // loads it; and it sets the agent up from its own folder, where the agent is carried (manyclaws.agent).
 const SELF_CHECK_MS = 10_000
-const NOT_TO_START = "keeping this computer's ManyClaws plugin and agent up to date is asked for only from one of your own devices that may start sessions, and this was asked from one that may not (Account, Devices)"
+const NOT_TO_START = "keeping this computer's ManyClaws plugin and agent up to date is asked for only from one of your own devices that may start sessions, and this was asked from one that may not (Account, Browsers)"
 // The plugin's own folder: what Claude Code says it is
 const ownRoot = ($) => $.plugin.root ?? ''
 // A plugin's folder held against the list it carries: { release, plugin, digest, signed, as }

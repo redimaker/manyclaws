@@ -3505,7 +3505,7 @@ function connectAsk(body, id, paired, name) {
     fill(
       body,
       h('p', { 'data-part': 'connect-done', class: 'guide-status connected' }, '✓ ', h('b', null, name), ' is connecting. Its session is in your list in a moment, and Claude Code there says which account it joined.'),
-      h('p', null, 'It signs in with an API token of its own, named for it under Account, API tokens: take that back to disconnect it.'),
+      h('p', null, 'It signs in with an API token of its own, and is listed under Account, Computers: disconnect it there.'),
       h('p', null, h('a', { href: '#' }, 'Back to your sessions')),
     )
   })
@@ -7770,7 +7770,7 @@ function upkeepNode(c, n) {
       'div',
       { class: 'needs-alarm', 'data-need': 'alarm', role: 'alert' },
       h('p', null, h('b', null, n.by === 'differ' ? `The plugin on ${name} says it is something its agent did not find there.` : `${name} is running a ManyClaws plugin that matches no signed release (${n.digest.slice(0, 12)}).`), ' This page sends it nothing until you decide.'),
-      h('p', null, n.by === 'fetched' ? 'It is what Claude Code fetched when it was asked to update the plugin: no session has loaded it yet. ' : n.by === 'plugin' ? 'That is the plugin’s own word of itself: there is no agent there to look from outside. ' : '', 'If you did not change it yourself, someone else may have: take back its access, and start afresh with a new key (Account, Encryption key) if you think it could have read your sessions.'),
+      h('p', null, n.by === 'fetched' ? 'It is what Claude Code fetched when it was asked to update the plugin: no session has loaded it yet. ' : n.by === 'plugin' ? 'That is the plugin’s own word of itself: there is no agent there to look from outside. ' : '', 'If you did not change it yourself, someone else may have: take back its access, and start afresh with a new key (Account, Browsers) if you think it could have read your sessions.'),
       h('div', { class: 'needs-do' }, h('a', { href: '#/account', class: 'button-link primary', 'data-part': 'alarm-revoke' }, `Take back ${name}’s access`), ' ', button('alarm-keep', 'Keep it blocked', () => ((stateOf(c).keptBlocked = true), renderComputer()), { primary: false })),
       stateOf(c).keptBlocked && h('p', { class: 'muted', 'data-part': 'alarm-kept' }, `Kept blocked: nothing is sent to ${name}, and no session is started on it.`),
       h('p', null, h('button', { type: 'button', class: 'link', 'data-part': 'alarm-allow', onclick: () => allowPlugin(c, n.digest) }, 'I changed the plugin myself: allow it')),
@@ -8230,14 +8230,17 @@ function connectedLine() {
 
 // ---- What a computer is given: an API token to sign in with, and the account's key. Both
 // are handed to it sealed, as it is connected with its code (openConnect): the token is made
-// for it, named for it, and is what is taken back to disconnect it. Drawn on Account.
+// for it, named for it, and is what is taken back to disconnect it. Drawn on Account, under
+// Computers: a connected computer is its token.
 
 const dayOf = (ts) => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 const TOKEN_LIVES = [['30', '30 days'], ['90', '90 days'], ['365', 'A year'], ['0', 'Never runs out']]
 
-// The account's API tokens, each with how it ends and when it was last used, a way to
-// take it back, and the form that makes another. A token is shown once, as it is made.
-function tokensPart(redraw) {
+// The account's computers, by their tokens: each with when it was connected and last heard
+// from, and Disconnect, which takes its token back. Below them, out of the way, the form that
+// makes a token by hand, for a computer set up with nobody at it (the installer's --token and
+// --key): one is shown once, as it is made.
+function computersPart(redraw) {
   const a = app.account
   const note = h('span', { class: 'form-note error' })
   const nameBox = h('input', { 'data-part': 'token-name', placeholder: 'A name for it (optional)', maxlength: '60', autocomplete: 'off' })
@@ -8264,7 +8267,7 @@ function tokensPart(redraw) {
     h(
       'div',
       { class: 'token-row api-token' + (t.expired ? ' off' : ''), 'data-token': t.id },
-      h('div', null, h('b', null, t.name), h('div', { class: 'muted' }, [`ends …${t.hint}`, `made ${dayOf(t.createdAt)}`, t.expiresAt ? (t.expired ? `ran out ${dayOf(t.expiresAt)}` : `good until ${dayOf(t.expiresAt)}`) : 'never runs out', t.lastUsedAt ? `last used ${dayOf(t.lastUsedAt)}` : 'not used yet'].join(' · '))),
+      h('div', null, h('b', null, t.name), h('div', { class: 'muted' }, [`since ${dayOf(t.createdAt)}`, t.lastUsedAt ? `last heard from ${dayOf(t.lastUsedAt)}` : 'not heard from yet', t.expiresAt && (t.expired ? `its token ran out ${dayOf(t.expiresAt)}` : `its token is good until ${dayOf(t.expiresAt)}`), `token ends …${t.hint}`].filter(Boolean).join(' · '))),
       h(
         'div',
         { class: 'token-actions' },
@@ -8274,7 +8277,7 @@ function tokensPart(redraw) {
             type: 'button',
             class: 'ghost token-revoke',
             onclick: async () => {
-              if (!(await ask(`Take back "${t.name}"?`, { says: 'Whatever signs in with it is refused from now on.', yes: 'Take it back', danger: true }))) return
+              if (!(await ask(`Disconnect ${t.name}?`, { says: 'The API token it signs in with is taken back: from then on it is refused, and its plugin offers a code that connects it again.', yes: 'Disconnect', danger: true }))) return
               const r = await fetch('/api/account/tokens/' + t.id, { method: 'DELETE' }).catch(() => null)
               if (!r?.ok) return (note.textContent = (await r?.json().catch(() => null))?.error ?? 'The server could not be reached.')
               if (app.madeToken?.id === t.id) app.madeToken = null
@@ -8282,17 +8285,25 @@ function tokensPart(redraw) {
               redraw()
             },
           },
-          'Take back',
+          'Disconnect',
         ),
       ),
     ),
   )
   const made = app.madeToken && (a.tokens ?? []).some((t) => t.id === app.madeToken.id) ? app.madeToken : null
   return [
-    made && h('div', { class: 'token-made' }, h('p', null, h('b', null, 'Your new API token.'), ' Copy it now, or leave this open until the device has it: it is not shown again.'), h('div', { 'data-part': 'token-made' }, codeBox(made.token))),
+    h('p', { class: 'muted', 'data-part': 'computers-says' }, 'Each computer is given an API token of its own as it is connected, named for it, and signs in with that. A token only reports sessions here; it cannot sign in to this page. Disconnect a computer to take its token back.'),
     ...rows,
-    !rows.length && h('p', { class: 'muted', 'data-part': 'tokens-none' }, 'No tokens yet. A device signs in with one.'),
-    h('div', { class: 'token-new' }, nameBox, life, make, ' ', note),
+    !rows.length && h('p', { class: 'muted', 'data-part': 'tokens-none' }, 'No computer is connected yet.'),
+    // (open while a token made here is still to be copied)
+    h(
+      'details',
+      { 'data-part': 'token-own', ...(made ? { open: '' } : {}) },
+      h('summary', null, 'A token for a computer nobody is at'),
+      h('p', { class: 'muted' }, 'A computer is connected with the code its plugin shows. One set up with nobody at it is given a token made here, and your key, by its installer instead. ', h('a', { href: a.server + '/setup', target: '_blank', rel: 'noopener', 'data-part': 'tokens-guide' }, 'How to set up a device')),
+      made && h('div', { class: 'token-made' }, h('p', null, h('b', null, 'Your new API token.'), ' Copy it now, or leave this open until the computer has it: it is not shown again.'), h('div', { 'data-part': 'token-made' }, codeBox(made.token))),
+      h('div', { class: 'token-new' }, nameBox, life, make, ' ', note),
+    ),
   ]
 }
 
@@ -8960,7 +8971,7 @@ async function startAfresh() {
   startOver()
 }
 
-// Account, Encryption key: what this browser holds, and what it can do with it
+// Account, Browsers: what this browser holds of the key, and what it can do with it
 function keyPart(redraw) {
   const box = h('div', { 'data-part': 'key-part' })
   if (!app.key) {
@@ -9090,7 +9101,7 @@ function devicesPart(redraw) {
     const yes = await ask(here ? 'Remove this device from your devices?' : `Remove ${name} from your devices?`, {
       says: [
         here ? 'This browser lets go of your key, and what it asks of your computers is refused from then on. To use it again, approve it again from another of your devices.' : `What ${name} asks of your computers is refused from then on, and it is signed out. Your computers and your other devices are not touched.`,
-        !here && 'Your encryption key stays as it is. If that device may be in someone else’s hands, start afresh with a new key afterwards as well (Account, Encryption key): a device that kept the old one cannot read with that.',
+        !here && 'Your encryption key stays as it is. If that device may be in someone else’s hands, start afresh with a new key afterwards as well (Account, Browsers): a device that kept the old one cannot read with that.',
         'Your passkey is asked for: the list of your devices is signed with your key.',
       ],
       yes: 'Remove',
@@ -9381,7 +9392,7 @@ function renderAccount() {
   // Signing out of this device: its key stays or goes by whose device it was said to be, as it was approved
   const signOutPart = () => [
     h('p', null, 'This signs out this device only: your computers go on reporting, and your other devices stay signed in. Alerts stop here until you sign in again.'),
-    app.key && h('p', { class: 'muted', 'data-part': 'logout-key' }, app.key.own ? 'Your key stays on this device, as you said it is yours, and opens your sessions as soon as you sign in here again. To take it off, remove this device under Devices.' : 'Your key goes from this device as you sign out, as it is borrowed: it is approved again the next time.'),
+    app.key && h('p', { class: 'muted', 'data-part': 'logout-key' }, app.key.own ? 'Your key stays on this device, as you said it is yours, and opens your sessions as soon as you sign in here again. To take it off, remove this device under Browsers.' : 'Your key goes from this device as you sign out, as it is borrowed: it is approved again the next time.'),
     h('div', { class: 'guide-end' }, h('button', { type: 'button', id: 'account-logout', class: 'ghost', onclick: () => signOut() }, 'Sign out')),
   ]
   fill(
@@ -9394,18 +9405,15 @@ function renderAccount() {
       ...passwordPart(),
     ),
     subscriptionPart(a.billing),
-    accountPart('Computers', { id: 'computers' }, h('p', null, sessions || a.machines ? `${sessions} session${sessions === 1 ? '' : 's'} and ${a.machines} computer${a.machines === 1 ? '' : 's'} with the agent are yours here. ` : 'Nothing is connected to this account yet. ', h('a', { href: '#/setup' }, 'Set up a computer'))),
-    accountPart('Stored sessions', { id: 'kept' }, ...keptPart(renderAccount)),
     accountPart(
-      'API tokens',
-      { id: 'api-tokens' },
-      h('p', { class: 'muted' }, 'What your computers sign in with: each is given one of its own as it is connected, named for it. A token only reports sessions here; it cannot sign in to this page. Take one back to disconnect its computer.'),
-      // (a token is made to set a device up with: the way to how that is done, the server's own guide, from where tokens are made)
-      h('p', null, h('a', { href: a.server + '/setup', target: '_blank', rel: 'noopener', 'data-part': 'tokens-guide' }, 'How to set up a device')),
-      ...tokensPart(renderAccount),
+      'Computers',
+      { id: 'computers' },
+      h('p', null, sessions || a.machines ? `${sessions} session${sessions === 1 ? '' : 's'} and ${a.machines} computer${a.machines === 1 ? '' : 's'} with the agent are yours here. ` : 'Nothing is connected to this account yet. ', h('a', { href: '#/setup' }, 'Set up a computer')),
+      ...computersPart(renderAccount),
     ),
-    accountPart('Encryption key', { id: 'key' }, ...keyPart(renderAccount)),
-    accountPart('Devices', { id: 'devices' }, ...devicesPart(renderAccount)),
+    // (the account's key, as this browser holds it, and the phones and browsers that have it)
+    accountPart('Browsers', { id: 'browsers' }, ...keyPart(renderAccount), ...devicesPart(renderAccount)),
+    accountPart('Stored sessions', { id: 'kept' }, ...keptPart(renderAccount)),
     accountPart('This page’s code', { id: 'page-code' }, ...codePart()),
     a.agentToken && accountPart('This server', { id: 'server-token' }, secretRow('Server token', a.agentToken, 'This server’s own agent token, from its environment file. It works in the plugin as an API token does, and is changed there.')),
     accountPart('Sign out', { id: 'sign-out' }, ...signOutPart()),

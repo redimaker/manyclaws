@@ -9,7 +9,7 @@
     "token": {
       "type": "string",
       "title": "API token",
-      "description": "Filled in for you as this computer is connected with the code the plugin shows in a new session. It signs this computer in, and is taken back on your page (Account, API tokens) to disconnect it",
+      "description": "Filled in for you as this computer is connected with the code the plugin shows in a new session. It signs this computer in, and is taken back as this computer is disconnected on your page (Account, Computers)",
       "sensitive": true
     },
     "label": {
