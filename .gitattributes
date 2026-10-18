@@ -1,0 +1,4 @@
+# Every text file is checked out with line feeds, whatever the computer's Git would make of it: core.autocrlf, which Git
+# for Windows sets, turns them into CRLF, and then no file is the one its signed release lists, and the page takes the
+# plugin for one that matches no release (deonbdev, 2026-10-18)
+* text=auto eol=lf
