@@ -234,6 +234,17 @@ export async function run(config, flags = {}) {
     // (the one the sessions this agent starts load, where that is named on their command line; then what Claude Code installed)
     add(hostedPlugin(), 'started')
     for (const root of config.roots) for (const one of installedPlugins(root)) add(one.dir, 'installed')
+    // (and every other copy Claude Code keeps beside the installed one: a session started before an update runs the copy
+    // it was started with until it ends, and leaves no note where it began before this agent was here; so what it says
+    // it is, is something measured here, and held to its list as any copy is)
+    for (const root of config.roots)
+      for (const one of installedPlugins(root)) {
+        let versions = []
+        try {
+          versions = fs.readdirSync(path.dirname(one.dir))
+        } catch {}
+        for (const v of versions) add(path.join(path.dirname(one.dir), v), 'cached')
+      }
     let names = []
     try {
       names = fs.readdirSync(ownHome).filter((n) => /^plugin-[0-9a-f]{16}\.json$/.test(n))
