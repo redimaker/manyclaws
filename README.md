@@ -8,24 +8,24 @@ This repository holds every part of it that runs on your own devices:
 - **The agent** (`mod/agent/`): a small background service, one per computer, which the plugin installs from its own folder when you ask from the page. It indexes that computer's Claude Code transcripts so past sessions can be read and searched, starts or resumes sessions when you ask from the page, each in a terminal of its own there (a Terminal window on a Mac, tmux on Linux) that outlives the agent, and checks the plugin there against the release it carries.
 - **The page** (`web/`): what your browser and your phone run, as the server hands it out. It is where your account's key is made and kept, and where every device is approved, so it is published here with the rest, and what a server hands you can be held against it (see "Checking what you run").
 
-The server is not in this repository. It stores and forwards what your devices sealed, and cannot read it.
+The server is not in this repository. It stores and forwards what your devices encrypted.
 
 ## What leaves your computer
 
-Everything a session says is encrypted on the computer it runs on, before it is sent, with your account's own key: made of random bytes on your first phone or browser, and handed from one of your devices to another, sealed, as you approve each. There is no passphrase. The server stores and forwards what it is given and cannot read it.
+Everything a session says is end-to-end encrypted: on the computer it runs on, before it is sent, with your account's own key: made of random bytes on your first phone or browser, and handed from one of your devices to another, sealed, as you approve each. There is no passphrase. The server stores and forwards what it is given.
 
 - **Sent, encrypted with your key:** what you ask Claude and what it answers, the tools it runs and their output, permission prompts and your answers, and everything about the session itself: its folder, model, mode, state and title.
 - **Sent in the open**, because the server cannot pass a session on without it: that a session exists, which of your computers it is on, what that computer is called, when it sends, and which kind of thing each message is and roughly how large.
 - **Acted on only when one of your own phones or browsers signed it:** replies, answers to permission prompts and questions, and requests to start, resume or copy a session. A computer reads the list of your devices, which is signed with a key drawn from your account's root, and does nothing asked by anyone else, the server included.
-- **Never sent in the open:** your key, your Claude account's credentials, or any file Claude has not read or written in a session. (The key goes from one of your devices to another sealed with a key the two made from the code the new device showed, which the server hands over and cannot open.)
+- **Never sent in the open:** your key, your Claude account's credentials, or any file Claude has not read or written in a session. (The key goes from one of your devices to another sealed with a key the two made from the code the new device showed, which the server hands over.)
 
 A plugin that has not been given your key sends nothing at all.
 
 ## What this protects against, and what it does not
 
-- **Whoever holds the server's data, or watches what passes through it, reads nothing of your sessions** and can ask nothing of your computers: what they have is sealed, and a computer acts only on what one of your own devices signed.
+- **A computer acts only on what one of your own devices signed**, whoever passes it on.
 - **Whoever can change the code your devices run can do anything those devices can.** That is true of any software, and it is why this code is public and released signed: the agent installs nothing that is not a release signed with a key kept neither here nor on any server; it and the page hold the plugin each computer runs to that release, and say so in red where it is not, with nothing sent to that computer until you decide; each update is approved by you on your page, for each computer; and the page's HTML names each of its scripts by its hash, which your browser enforces. A plugin that is changed where it is has the account's key from the moment it runs: what is checked is said, not stopped. What is left is the page's HTML itself, which a server hands your browser each time you open it: a server that had been taken over could hand out another. Nothing a web page does can rule that out. "Checking what you run" says how to look from outside the page.
-- **There is nothing to guess.** Your key is drawn from 32 random bytes, not from anything a person chose, so a copy of everything the server holds is no help to anyone trying to read it. What makes a device one of yours is another device of yours approving it, with its passkey (Face ID, Touch ID, a PIN or a security key), from the link or the code the new device shows: so approve only a device you have just opened yourself. And what a device may ask of a computer is limited on the computer (see "What a computer allows").
+- **There is nothing to guess.** Your key is drawn from 32 random bytes, not from anything a person chose. What makes a device one of yours is another device of yours approving it, with its passkey (Face ID, Touch ID, a PIN or a security key), from the link or the code the new device shows: so approve only a device you have just opened yourself. And what a device may ask of a computer is limited on the computer (see "What a computer allows").
 - **There is no recovery key.** Your key is kept on your own devices and nowhere else. Lose every one of them and you start afresh with a new key: your computers still have their sessions, and show them again once each is connected; what you put on sessions on the page (names, labels, colors, reminders) is removed.
 - **Whoever can run programs as you on one of your computers** can read what that computer keeps: your key, though not your root, which no computer is given. They could read your sessions there anyway.
 
@@ -43,7 +43,7 @@ A plugin that has not been given your key sends nothing at all.
 
 Claude Code's plugin runtime has no crypto library, so every primitive (SHA-256, SHA-512, HMAC, HKDF, AES-256-GCM, Ed25519, SPAKE2, and the check of an SSH signature) is implemented in that one file in plain JavaScript. `mod/agent/seal.mjs` and `web/seal.js` are identical copies. (The page seals and signs with the browser's own WebCrypto, and keeps its keys where no script can read them back: `web/keys.js`.) The plain JavaScript is not written to run in constant time: that matters only to someone who can time code on your own computer.
 
-What is known, and not hidden: a sealed value is not tied to the session or the place it was sealed for, so a server could show one sealed thing where another belongs, or leave things out, though it can read and write none; removing a device stops its orders and signs it out, and it takes starting afresh with a new key to shut it out of what is said from then on; and one key seals everything an account says.
+What is known, and not hidden: a sealed value is not tied to the session or the place it was sealed for, so a server could show one sealed thing where another belongs, or leave things out; removing a device stops its orders and signs it out, and it takes starting afresh with a new key to shut it out of what is said from then on; and one key seals everything an account says.
 
 ### Where your key is kept
 
