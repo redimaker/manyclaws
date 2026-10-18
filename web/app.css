@@ -265,10 +265,10 @@ pre, code { font-family: var(--mono); }
 /* The check that whoever makes an account is a person: a frame from another address, as wide as the card's fields
    (its height is the widget's, which the frame says) */
 .signup-check iframe { display: block; width: 100%; height: 65px; border: 0; color-scheme: normal; }
-/* API tokens, and the recovery key typed in (Account, and as a browser comes in) */
-.token-new, .recovery-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
-.token-new input, .recovery-form input { flex: 1; min-width: 180px; }
-.token-new input, .token-new select, .recovery-form input { border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text); border-radius: 4px; padding: 6px 8px; font: inherit; }
+/* API tokens */
+.token-new { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
+.token-new input { flex: 1; min-width: 180px; }
+.token-new input, .token-new select { border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text); border-radius: 4px; padding: 6px 8px; font: inherit; }
 /* The code a new phone, browser or computer shows, and the box it is typed into (app.js, pairing): digits in threes,
    as large as a glance across a desk needs */
 .pair-code { margin: 10px 0 6px; font-family: var(--mono, ui-monospace, monospace); font-size: 34px; letter-spacing: .1em; font-variant-numeric: tabular-nums; color: var(--strong); }
@@ -276,7 +276,6 @@ pre, code { font-family: var(--mono); }
 .pair-box #pair-body > * { padding: 24px 24px 20px; max-width: none; }
 .pair-box h2 { margin: 0 0 6px; font-family: var(--s-serif, Georgia, serif); font-weight: 500; font-size: 22px; line-height: 1.22; color: var(--n-text); }
 .pair-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.recovery-form input { font-family: var(--mono, ui-monospace, monospace); letter-spacing: .04em; }
 /* A code for a camera, to be approved by or to approve with: dark on light, whatever the page's colours */
 .key-code { width: 176px; height: 176px; margin: 8px 0; border-radius: 12px; overflow: hidden; background: #faf9f5; }
 .key-code:empty { display: none; }
@@ -286,8 +285,6 @@ ul.key-before { margin: 8px 0 16px; padding-left: 20px; display: grid; gap: 6px;
 .login-card .key-ask [data-part=key-needed] > ul.key-before { padding-left: 20px; }
 .login-card .key-ask [data-part=key-needed] > .key-before-then { margin-top: 28px; }
 .key-code svg { display: block; width: 100%; height: 100%; }
-/* The recovery key, shown: in groups, kept on lines of its own */
-.recovery-text .code { white-space: pre-wrap; word-break: break-word; font-size: 1.05em; letter-spacing: .04em; }
 /* Whose device this is, asked as it is approved: two answers, one to be chosen */
 .device-whose { margin: 6px 0; padding: 0; border: 0; min-width: 0; }
 .device-whose legend { padding: 0; margin-bottom: 2px; font-weight: 600; }
@@ -1867,7 +1864,6 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 .login-card .key-ask [data-part=key-needed] > * { margin: 0; }
 .login-card .key-ask [data-part=key-needed] > * + * { margin-top: 12px; }
 .login-card .key-ask .guide-form { max-width: none; }
-.login-card .recovery-form input { padding: 8px 10px; font-size: 16px; }
 /* (the two answers are a radio's own size, not a box to type in) */
 .login-card input[type="radio"] { min-height: 0; padding: 0; border: 0; background: none; }
 /* (what is said of what was typed has a line of its own under the button) */

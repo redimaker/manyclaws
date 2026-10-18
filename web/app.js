@@ -103,10 +103,9 @@ const app = {
   stopping: null, // a Stop that was taken and hasn't shown in the session's state yet: { sid }
   pressed: 0, // when something in the list was pressed, while it still is
   listStale: false, // the list changed while it couldn't be drawn again
-  key: null, // what this device holds of the account's key (keys.js, `held`): what its sessions are opened and sealed with here, and this device's own key, which signs what it asks of the account's computers. Given to it by another of the account's devices, or drawn here from the account's root (the recovery key), kept where no script can read it back, and never on the server; and, on the person's own device, the root itself, wrapped under a passkey
+  key: null, // what this device holds of the account's key (keys.js, `held`): what its sessions are opened and sealed with here, and this device's own key, which signs what it asks of the account's computers. Given to it by another of the account's devices, or drawn here from the account's root, kept where no script can read it back, and never on the server; and, on the person's own device, the root itself, wrapped under a passkey
   tourFor: undefined, // the account the tour of using ManyClaws on a phone is due to on this browser, as this page knows it (tourKeep): null once it has been seen
   tourAt: 0, // which of the tour's steps is showing
-  recovery: null, // the recovery key being shown as the key is made here, until it is said to be kept (showRecovery): { root }
   keyLater: undefined, // the sign-in "Not now" was said of to the key's card on this page, where it was (keyLater): null once that is taken back
   before: false, // this browser held a key of before for the account, made from a passphrase, and has not been given its key since (keys.js wasBefore)
   unopenedWas: '', // what did not open here when that was last looked at (lookAgain), to tell when it has changed
@@ -1042,8 +1041,8 @@ el('verify-logout').addEventListener('click', () => signOut())
 // comes in, before the sessions: signed in to, or opened again by someone still signed in
 // (a device that is not its owner's own holds the key only while the page is open). Without
 // the key it could show them only as encrypted. What it is shown is what the account's page
-// has (drawKeyless): approved from another device, the recovery key, or, for an account
-// with no key yet, the key made here. It can be left for later ("Not now"): the sessions
+// has (drawKeyless): approved from another device, afresh where there is none, or, for an
+// account with no key yet, the key made here. It can be left for later ("Not now"): the sessions
 // then, closed, with the line across the top that leads to Account. That is kept for as
 // long as the tab is, so the page loaded again there does not ask again, and it is said of
 // the one sign-in: signed in to again, by this account or another, the browser is asked afresh.
@@ -6911,8 +6910,11 @@ function pictureOf(src, name) {
   const img = h('img', { src, alt: name })
   const box = h('div', { class: 'file-picture' }, img)
   const wider = () => img.naturalWidth > img.clientWidth
-  // (the pointer over it says which, from how it is drawn then: the window may have been resized since it loaded)
-  for (const when of ['load', 'pointerenter']) img.addEventListener(when, () => box.classList.toggle('grows', wider()))
+  // (said again as it is drawn at another size: it may load before the box it is in is laid out, or the window be
+  // resized after; and the pointer over it says which, from how it is drawn then)
+  const judge = () => box.classList.toggle('grows', wider())
+  for (const when of ['load', 'pointerenter']) img.addEventListener(when, judge)
+  new ResizeObserver(judge).observe(img)
   img.addEventListener('click', (ev) => {
     const was = img.getBoundingClientRect()
     if (!box.classList.toggle('full', !box.classList.contains('full') && wider())) return
@@ -8300,7 +8302,7 @@ function tokensPart(redraw) {
 // holds it only while the page is open would lose it that way, and one that has just let
 // go of it has something to say: there the page reads everything again as it stands.
 async function startOver() {
-  // (a key had here another way, as by the recovery key: the account's devices are no longer asked for this one)
+  // (a key had here another way, as by starting afresh: the account's devices are no longer asked for this one)
   await withdrawAsking()
   const held = app.account && vault ? await vault.heldKey(app.account.user.id).catch(() => null) : null
   if (held?.own) return location.reload()
@@ -8416,12 +8418,13 @@ async function resealMarks(key, all = true, was = app.key) {
 }
 
 // ---- The account's key. One root for the account (seal.js): made by its first phone or
-// browser, and given by one of the account's devices to another, sealed to a key the new
-// one made for the once, which the server hands over and cannot open. The device that
-// gives it keeps it under a passkey, and gives it only with that: Face ID, Touch ID, a PIN,
-// a security key. Or the person types the recovery key they kept, which is the root
-// written out. Nothing typed makes a key, so nothing the server holds is anything to guess
-// at, and nothing of the root or the passkey is sent to it.
+// browser, and given by one of the account's devices to another, sealed with a key the two
+// made from a code the new one showed (pairing), which the server hands over and cannot
+// open. The device that gives it keeps it under a passkey, and gives it only with that:
+// Face ID, Touch ID, a PIN, a security key. Nothing typed makes a key, so nothing the
+// server holds is anything to guess at, and nothing of the root or the passkey is sent to
+// it. There is no copy of it anywhere else: where every device that had it is lost, the
+// account starts afresh with another (startAfresh), and loses nothing its computers have.
 //
 // A new phone or browser, and a computer, are given it by pairing (seal.js, "Pairing"; the server's pairAsk): what is
 // new shows a code, and it is typed on a device that has the key, under a passkey. The two make a key from the code by
@@ -8577,43 +8580,9 @@ async function takeRoot(root, locked, { fresh = false } = {}) {
   return { held }
 }
 
-// The recovery key, shown: once as the key is made (`first`: it is gone on with only once it is said to be kept), and
-// again on a device that keeps it, with the passkey
-function recoveryNode(root, { done, first = false }) {
-  const kept = h('input', { type: 'checkbox', 'data-part': 'recovery-kept' })
-  const go = h('button', { type: 'button', class: 'primary', 'data-part': 'recovery-done', disabled: first ? '' : null, onclick: done }, first ? 'Go on' : 'Done')
-  kept.addEventListener('change', () => (go.disabled = !kept.checked))
-  return h(
-    'div',
-    { class: 'recovery', 'data-part': 'recovery' },
-    h('p', null, h('b', null, 'Your recovery key. '), 'It is your account’s key, written out: with it, a browser can be given your key again if you ever lose every device that has it. Keep it where you keep what matters, in a password manager or on paper. Anyone who has it can read your sessions, and nobody can give it back to you: it is kept nowhere but where you keep it.'),
-    h('div', { class: 'recovery-text', 'data-part': 'recovery-text' }, codeBox(sealing.rootText(root))),
-    first && h('label', { class: 'guide-check' }, kept, h('span', null, 'I have kept my recovery key somewhere of my own.')),
-    h('div', null, go),
-  )
-}
-
-// A recovery key being shown as the key is made (`app.recovery`: { root }): drawn wherever the key's part is drawn, and
-// drawn again there if that is drawn again meanwhile, until the person says they have kept it
-// (`redraw`: what draws the part it is in again, where `box` was drawn over meanwhile and is on the page no longer)
-function showRecovery(box, root, redraw) {
-  app.recovery = { root }
-  if (box.isConnected || !redraw) fill(box, recoveryShown())
-  else redraw()
-}
-const recoveryShown = () =>
-  recoveryNode(app.recovery.root, {
-    first: true,
-    done: () => {
-      app.recovery.root.fill(0)
-      app.recovery = null
-      startOver()
-    },
-  })
-
 // The account's first key, made here: the root, under a passkey of this browser's own, and this browser alone on the
-// list of the account's devices; then the recovery key, shown in `box`
-async function makeKey(box, failed, redraw) {
+// list of the account's devices
+async function makeKey(failed) {
   const root = sealing.newRoot()
   let locked = null
   try {
@@ -8631,38 +8600,8 @@ async function makeKey(box, failed, redraw) {
     root.fill(0)
     return failed(`your key could not be kept: ${why}`)
   }
-  showRecovery(box, root, redraw)
-}
-
-// This browser given the key again from the recovery key: held against the list of the account's devices on the server
-// (it opens with it, and its signature is the root's), then put away under a passkey and put on that list. '' when it
-// is done, or why not.
-async function recoverWith(text) {
-  const root = sealing.rootFromText(text)
-  if (!root) return 'that is not a recovery key: it is 52 letters and digits, in groups of four'
-  const made = sealing.keysFromRoot(root)
-  const probe = await vault.hold(made)
-  const kept = await devicesKept()
-  const list = kept ? await vault.readDevices(kept, probe) : null
-  vault.forget(made)
-  if (!list) {
-    root.fill(0)
-    return kept === null ? 'the server could not be reached' : 'that is not your account’s recovery key'
-  }
-  let locked = null
-  try {
-    locked = await passkeyFor(root)
-  } catch (err) {
-    if (!(await ask('Keep your key here without a passkey?', { says: ['This browser then reads your sessions and asks things of your computers, but cannot approve your other devices or show your recovery key.', refused(err) ? 'No passkey was made.' : sentence(err?.message || 'No passkey could be made.')], yes: 'Keep it without one' }))) {
-      root.fill(0)
-      return 'nothing was taken'
-    }
-  }
-  const { why } = await takeRoot(root, locked)
   root.fill(0)
-  if (why) return `this browser could not be put among your devices: ${why}`
   startOver()
-  return ''
 }
 
 // What another of the account's devices gave this one: put away here, and the page starts over with it. The root,
@@ -8687,7 +8626,7 @@ async function takeGiven(got, failed = (why) => tell('Not taken', sentence(why))
         locked = await passkeyFor(root)
         break
       } catch {
-        if (!(await ask('Keep your key under a passkey here?', { says: ['Without one this browser reads your sessions and asks things of your computers, but cannot approve your other devices or show your recovery key.', 'Make one with Face ID, Touch ID, your device’s PIN or a security key.'], yes: 'Make a passkey', no: 'Not on this browser' }))) break
+        if (!(await ask('Keep your key under a passkey here?', { says: ['Without one this browser reads your sessions and asks things of your computers, but cannot approve your other devices.', 'Make one with Face ID, Touch ID, your device’s PIN or a security key.'], yes: 'Make a passkey', no: 'Not on this browser' }))) break
       }
     }
     held = await vault.hold(made, { own: true, seed, root: locked })
@@ -8880,7 +8819,6 @@ el('pair-box').addEventListener('close', () => {
 // What a browser with no key is shown, as it comes in and under Account: how it gets the key. Drawn into `box`, and
 // again by `redraw`.
 async function drawKeyless(box, redraw) {
-  if (app.recovery) return fill(box, recoveryShown())
   fill(box, h('p', { class: 'muted' }, 'Reading…'))
   const kept = await devicesKept()
   const note = h('p', { class: 'form-note', 'data-part': 'key-note' })
@@ -8898,7 +8836,7 @@ async function drawKeyless(box, redraw) {
       make.disabled = true
       note.textContent = 'Asking for a passkey…'
       note.className = 'form-note'
-      await makeKey(box, failed, redraw)
+      await makeKey(failed)
       make.disabled = false
     })
     return fill(
@@ -8906,7 +8844,7 @@ async function drawKeyless(box, redraw) {
       was,
       // (an account of before whose list of devices is gone: what its passphrase made is not carried over here either)
       app.before && !was && h('p', { 'data-part': 'key-before' }, h('b', null, 'ManyClaws no longer uses a passphrase.'), ' The key made from yours is not carried over: your account’s key is made here, now.'),
-      h('p', { 'data-part': 'key-first' }, 'What your sessions say is end-to-end encrypted, with a key of your account’s own: made here, now, and kept on your own devices, never on the server. This browser keeps it under a passkey (Face ID, Touch ID, your device’s PIN or a security key), and you approve each of your other devices from here, or from one you approved, with that passkey. You are given a recovery key to keep, for if you ever lose them all.'),
+      h('p', { 'data-part': 'key-first' }, 'What your sessions say is end-to-end encrypted, with a key of your account’s own: made here, now, and kept on your own devices, never on the server. This browser keeps it under a passkey (Face ID, Touch ID, your device’s PIN or a security key), and you approve each of your other devices from here, or from one you approved, with that passkey. If you ever lose every one of them, you start afresh with a new key: your computers still have their sessions.'),
       noPasskeys() ? h('p', { class: 'form-note error', 'data-part': 'key-no-passkeys' }, 'This browser has no passkeys. Make your key on your phone instead (sign in to ManyClaws there), then approve this browser from it.') : h('div', null, make),
       note,
     )
@@ -8943,29 +8881,16 @@ async function drawKeyless(box, redraw) {
   // (turned down on one of them: asked again only when the person says)
   const again = h('button', { type: 'button', class: 'ghost', 'data-part': 'key-ask-again', onclick: () => ((app.declined = false), redraw()) }, 'Ask again')
   const waiting = app.declined ? h('p', { class: 'form-note error', 'data-part': 'key-declined' }, 'That was turned down on another of your devices. ', again) : h('p', { class: 'muted', 'data-part': 'key-waiting' }, 'Waiting for it to be approved… The code works for ten minutes, and another is shown after.')
-  // Or from the recovery key
-  const typed = h('input', { type: 'text', 'data-part': 'recovery-typed', placeholder: 'XXXX-XXXX-XXXX-…', autocomplete: 'off', autocapitalize: 'characters', autocorrect: 'off', spellcheck: 'false' })
-  const use = h('button', { type: 'submit', class: 'primary', 'data-part': 'recovery-go' }, 'Use it')
-  const form = h('form', { class: 'guide-form recovery-form', 'data-part': 'recovery-form' }, typed, use)
-  form.addEventListener('submit', async (ev) => {
-    ev.preventDefault()
-    use.disabled = true
-    note.textContent = 'Opening…'
-    note.className = 'form-note'
-    const why = await recoverWith(typed.value)
-    use.disabled = false
-    if (why) failed(why)
-  })
-  // Or, with neither, afresh
-  const afresh = h('button', { type: 'button', class: 'ghost', 'data-part': 'key-afresh', onclick: () => startAfresh(box, redraw) }, 'Start afresh with a new key')
+  // Or, with no device that has it, afresh
+  const afresh = h('button', { type: 'button', class: 'ghost', 'data-part': 'key-afresh', onclick: () => startAfresh() }, 'Start afresh with a new key')
   // A browser that held a key of before, made from a passphrase: the account starts afresh once, which is said first, with
   // what it does. (It cannot tell whether that was done already, on another of the account's devices: the list of them
   // opens with neither key here. So being approved from one is said too, after.)
   if (app.before) {
-    const start = h('button', { type: 'button', class: 'primary', 'data-part': 'key-afresh', onclick: () => startAfresh(box, redraw) }, 'Start afresh')
+    const start = h('button', { type: 'button', class: 'primary', 'data-part': 'key-afresh', onclick: () => startAfresh() }, 'Start afresh')
     return fill(
       box,
-      h('p', { 'data-part': 'key-before' }, h('b', null, 'ManyClaws no longer uses a passphrase.'), ' Your account’s key is a random one now, made on one of your devices and kept there under a passkey (Face ID, Touch ID, your device’s PIN or a security key), with a recovery key for if you ever lose them all. The key made from your passphrase is not carried over, so your account starts afresh once, with a new key:'),
+      h('p', { 'data-part': 'key-before' }, h('b', null, 'ManyClaws no longer uses a passphrase.'), ' Your account’s key is a random one now, made on one of your devices and kept there under a passkey (Face ID, Touch ID, your device’s PIN or a security key). The key made from your passphrase is not carried over, so your account starts afresh once, with a new key:'),
       h(
         'ul',
         { class: 'key-before', 'data-part': 'key-before-does' },
@@ -8979,7 +8904,6 @@ async function drawKeyless(box, redraw) {
       h('p', { class: 'key-before-then', 'data-part': 'key-approve' }, h('b', null, 'Started afresh already, on another of your devices?'), ' It is asking you there to approve this browser: enter this code in it.'),
       code,
       waiting,
-      h('details', { 'data-part': 'recovery-ask' }, h('summary', null, 'I have my new recovery key'), form),
     )
   }
   fill(
@@ -8988,19 +8912,18 @@ async function drawKeyless(box, redraw) {
     h('p', { 'data-part': 'key-approve' }, 'Your account’s key is on your other devices. Each of them that keeps it under a passkey is asking you now to approve this browser (open ManyClaws on one, or tap its notification): enter this code there.'),
     code,
     waiting,
-    h('details', { 'data-part': 'recovery-ask' }, h('summary', null, 'I have my recovery key'), form),
-    h('details', { 'data-part': 'afresh-ask' }, h('summary', null, 'I have neither'), h('p', null, 'Without a device that has your key or your recovery key, nobody can open what your sessions said before. You can start afresh with a new key, and connect your computers again.'), afresh),
+    h('details', { 'data-part': 'afresh-ask' }, h('summary', null, 'I have no other device with it'), h('p', null, 'Start afresh with a new key. Your computers still have their sessions, and show them again once each is connected with the code its plugin shows. What you put on sessions here (their names, labels, colors and reminders) was sealed with the old key, and is removed.'), afresh),
     note,
   )
 }
 
 // The account given a new key, made here: what can no longer be opened goes, every other device and computer has to be
-// given the new one, and the new recovery key is shown in `box`. For an account whose every device and recovery key
-// are lost, or may be in someone else's hands.
-async function startAfresh(box, redraw) {
+// given the new one, and the page starts over with it. For an account whose every device is lost, or may be in someone
+// else's hands.
+async function startAfresh() {
   const yes = await ask('Start afresh with a new key?', {
     says: [
-      'Your account is given a new key, made on this browser and kept under a passkey here, and a new recovery key. What is kept sealed on the server can no longer be opened, so it is removed: your stored sessions (your computers still have them), and the names of your favorites and what you put on your sessions, where this browser cannot read them to seal them again.',
+      'Your account is given a new key, made on this browser and kept under a passkey here. What is kept sealed on the server can no longer be opened, so it is removed: your stored sessions (your computers still have them), and the names of your favorites and what you put on your sessions, where this browser cannot read them to seal them again.',
       'Every other phone and browser lets go of the key it had and has to be approved again, and every computer is disconnected (its API token is taken back): connect each again with the code its plugin shows.',
     ],
     yes: 'Start afresh',
@@ -9033,41 +8956,28 @@ async function startAfresh(box, redraw) {
   // (every computer: its token taken back, so that its plugin asks to be connected again)
   const tokens = await fetch('/api/account/tokens').then((r) => (r.ok ? r.json() : null)).catch(() => null)
   for (const t of tokens?.tokens ?? []) await fetch('/api/account/tokens/' + encodeURIComponent(t.id), { method: 'DELETE' }).catch(() => {})
-  showRecovery(box, root, redraw)
+  root.fill(0)
+  startOver()
 }
 
 // Account, Encryption key: what this browser holds, and what it can do with it
 function keyPart(redraw) {
   const box = h('div', { 'data-part': 'key-part' })
-  if (app.recovery) return [(fill(box, recoveryShown()), box)]
   if (!app.key) {
     drawKeyless(box, redraw)
     return [box]
   }
   const k = app.key
-  const shown = h('div', { 'data-part': 'key-shown' })
-  const show = async () => {
-    let opened
-    try {
-      opened = await unlocked()
-    } catch (err) {
-      return void tell('Not shown', sentence(err.message))
-    }
-    vault.forget(opened.made)
-    fill(shown, recoveryNode(opened.root, { done: () => (opened.root.fill(0), fill(shown)) }))
-  }
   fill(
     box,
     h(
       'p',
       { 'data-part': 'key-here', class: 'guide-status connected' },
-      k.root ? '✓ This browser has your account’s key, kept under a passkey of its own: it can approve your other devices. ' : k.own ? '✓ This browser has your key. It keeps it without a passkey, so it cannot approve your other devices or show your recovery key: do that on one that keeps it under one. ' : '✓ This browser has your key while this page is open: it is borrowed, and one of your devices for a day. ',
+      k.root ? '✓ This browser has your account’s key, kept under a passkey of its own: it can approve your other devices. ' : k.own ? '✓ This browser has your key. It keeps it without a passkey, so it cannot approve your other devices: do that on one that keeps it under one. ' : '✓ This browser has your key while this page is open: it is borrowed, and one of your devices for a day. ',
       h('a', { href: '#/account/unopened', 'data-part': 'key-check' }, 'See what each of your devices opens'),
     ),
     unopened().any && h('p', { 'data-part': 'key-other', class: 'guide-status' }, 'Some of what is kept here for your account was sealed with another key than this browser’s, so it cannot be opened here. ', h('a', { href: '#/account/unopened', 'data-part': 'key-other-link' }, 'See which, and what to do')),
-    k.root && h('div', null, h('button', { type: 'button', class: 'ghost', 'data-part': 'key-show-recovery', onclick: show }, 'Show my recovery key')),
-    shown,
-    k.own && h('details', { 'data-part': 'afresh-ask' }, h('summary', null, 'Start afresh with a new key'), h('p', null, 'Only if every device that has your key and your recovery key are lost, or may be in someone else’s hands: what was sealed before can no longer be opened.'), h('button', { type: 'button', class: 'ghost', 'data-part': 'key-afresh', onclick: () => startAfresh(box, redraw) }, 'Start afresh')),
+    k.own && h('details', { 'data-part': 'afresh-ask' }, h('summary', null, 'Start afresh with a new key'), h('p', null, 'Only if every other device that has your key is lost, or may be in someone else’s hands. Your computers keep their sessions; what you put on sessions here is removed.'), h('button', { type: 'button', class: 'ghost', 'data-part': 'key-afresh', onclick: () => startAfresh() }, 'Start afresh')),
   )
   return [box]
 }

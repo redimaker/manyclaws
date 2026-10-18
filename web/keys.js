@@ -6,8 +6,8 @@
 //
 // The account's key is drawn from its root (seal.js says how), which is 32 random bytes:
 // nothing typed makes it, and nothing of it is sent to the server. A phone or a browser is
-// given it by another of the account’s devices, sealed with a key the two made from a code (seal.js, Pairing), or by the
-// person, from the recovery key they kept.
+// given it by another of the account’s devices, sealed with a key the two made from a code (seal.js, Pairing), or
+// made afresh.
 //
 // What this device keeps (`held`) is kept where no script can read it back: the key and
 // what names are made with as WebCrypto keys that cannot be exported, and with them a
@@ -20,7 +20,7 @@
 // And the root, on the person's own device: wrapped (AES-256-GCM) under a key drawn from a
 // passkey's PRF secret, which the device's authenticator gives only after Face ID, Touch ID,
 // a PIN or a security key's touch. So the root is opened for the moment something is signed
-// with it or handed over (approving a device, taking one off, showing the recovery key),
+// with it or handed over (approving a device, taking one off),
 // and the person is there each time. Nothing of the passkey goes to the server: the page
 // asks the authenticator for the PRF secret and checks no signature. A device whose
 // authenticator has no PRF keeps the key and its own signing key, and not the root: it
