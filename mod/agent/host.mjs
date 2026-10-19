@@ -1,10 +1,11 @@
 // Sessions the agent starts, on request. Each opens in a terminal of its own: a Terminal
 // window on a Mac (or the app spawn.terminal names), a tmux session elsewhere, a console
 // window on Windows. There it is an ordinary interactive Claude Code session, the
-// terminal's and not the agent's: it runs until it is closed there, whatever becomes of
-// the agent, which can be stopped, started again or updated under it. With the ManyClaws
-// plugin installed it reports to the server like any session, and what the page says to
-// it reaches it through the plugin, as it reaches one a person started in a terminal.
+// terminal's and not the agent's: it runs until it is closed there (or ended from the page,
+// as closing it would end it), whatever becomes of the agent, which can be stopped, started
+// again or updated under it. With the ManyClaws plugin installed it reports to the server
+// like any session, and what the page says to it reaches it through the plugin, as it
+// reaches one a person started in a terminal.
 // A search (`background`) is the one kind the agent still runs itself, headless (Claude
 // Code's stream-json mode, the way an editor hosts it): it does its one turn and ends.
 import { spawn, spawnSync, execFileSync } from 'node:child_process'
@@ -47,7 +48,7 @@ export class Host {
     this.config = config
     // args and env are added to every session the agent starts: a default model, say.
     // max: how many of the sessions it started may be open at once, working or not: one
-    // stays open until it is closed in its terminal. 64 is the owner's number.
+    // stays open until it is closed in its terminal, or ended from the page. 64 is the owner's number.
     // terminal: what a session is opened in. On a Mac the name of an app that runs a
     // .command file it is given (Terminal, the default; iTerm), or tmux; tmux elsewhere
     // (tmuxPrefix: what its tmux sessions' names start with). Windows has a console window.
@@ -92,6 +93,16 @@ export class Host {
   // (`mine`: a search it runs itself; `started`: one it started, in a terminal or as a search)
   open() {
     const out = {}
+    for (const [sid, r] of Object.entries(this.records())) {
+      const mine = this.hosted.get(sid)?.proc.pid === r.pid // one the agent runs itself
+      out[sid] = { pid: r.pid, status: r.status ?? '', kind: r.kind ?? '', entrypoint: r.entrypoint ?? '', cwd: r.cwd ?? '', name: r.name ?? '', updatedAt: r.updatedAt ?? 0, mine, started: this.started.has(sid) }
+    }
+    return out
+  }
+
+  // Claude Code's own records of the sessions open in it here, of processes still alive: sid -> the record
+  records() {
+    const out = {}
     for (const root of this.config.roots) {
       let names = []
       try {
@@ -100,9 +111,7 @@ export class Host {
       for (const name of names) {
         try {
           const r = JSON.parse(fs.readFileSync(path.join(root, 'sessions', name), 'utf8'))
-          if (!r.sessionId || !alive(r.pid)) continue
-          const mine = this.hosted.get(r.sessionId)?.proc.pid === r.pid // one the agent runs itself
-          out[r.sessionId] = { pid: r.pid, status: r.status ?? '', kind: r.kind ?? '', entrypoint: r.entrypoint ?? '', cwd: r.cwd ?? '', name: r.name ?? '', updatedAt: r.updatedAt ?? 0, mine, started: this.started.has(r.sessionId) }
+          if (r.sessionId && alive(r.pid)) out[r.sessionId] = r
         } catch {}
       }
     }
@@ -234,12 +243,30 @@ export class Host {
     return { sid: id, forked: fork, cwd: folder, ...opened }
   }
 
-  // A search is ended: the agent's own, and no other
+  // A session is ended: a search the agent runs, or one it opened in a terminal, and no other. One in a terminal is
+  // ended as closing its window would end it (Claude Code is told to go, and is made to if it has not in ten seconds);
+  // it stays on the machine, where a reply from the page, or claude --resume, picks it up again.
   stop({ sid }) {
     const h = this.hosted.get(sid)
-    if (!h) throw new HostError('the agent is not running this session')
-    this.close(h)
-    setTimeout(() => this.hosted.get(sid) === h && h.proc.kill(), 10_000).unref()
+    if (h) {
+      this.close(h)
+      setTimeout(() => this.hosted.get(sid) === h && h.proc.kill(), 10_000).unref()
+      return { sid }
+    }
+    const open = this.started.has(sid) ? this.records()[sid] : null
+    if (!open || !sameProcess(open)) throw new HostError('the agent is not running this session, and did not open it in a terminal here')
+    try {
+      process.kill(open.pid, 'SIGTERM')
+    } catch (err) {
+      throw new HostError(`Claude Code (pid ${open.pid}) could not be ended: ${err.message}`)
+    }
+    this.log(`ended ${sid}, which it opened in a terminal (pid ${open.pid})`)
+    setTimeout(() => {
+      if (!sameProcess(open)) return
+      try {
+        process.kill(open.pid, 'SIGKILL')
+      } catch {}
+    }, 10_000).unref()
     return { sid }
   }
 
@@ -265,7 +292,7 @@ export class Host {
   // beside whichever device is chosen there, which need not be the one that refused.
   room() {
     const c = this.spawnConfig
-    if (this.running() >= c.max) throw new HostError(`${this.config.label || os.hostname()} already has ${c.max} sessions open that were started for ManyClaws, the most it has at once (spawn.max in its agent.json): close one in its terminal first`)
+    if (this.running() >= c.max) throw new HostError(`${this.config.label || os.hostname()} already has ${c.max} sessions open that were started for ManyClaws, the most it has at once (spawn.max in its agent.json): close one in its terminal, or with Exit on the page, first`)
   }
 
   // How many of the sessions it started are open now: in their terminals, or searches it runs
@@ -735,6 +762,17 @@ function alive(pid) {
   } catch (err) {
     return err.code === 'EPERM'
   }
+}
+
+// Whether the process a record of Claude Code's names is still the one that wrote it, and not another given its number
+// since: Claude Code says when its process started (procStart, as ps says it in UTC), where ps can say it too. Where
+// either says nothing of it (Windows has no ps), the record is gone when the process is.
+function sameProcess(r) {
+  if (!alive(r.pid)) return false
+  if (process.platform === 'win32' || typeof r.procStart !== 'string') return true
+  const said = spawnSync('ps', ['-o', 'lstart=', '-p', String(r.pid)], { encoding: 'utf8', env: { ...process.env, TZ: 'UTC', LC_ALL: 'C' }, timeout: 5_000 })
+  if (said.error) return said.error.code === 'ENOENT'
+  return said.status === 0 && said.stdout.trim().replace(/\s+/g, ' ') === r.procStart.trim().replace(/\s+/g, ' ')
 }
 
 // The first claude on the PATH that isn't one npm left in a node_modules/.bin

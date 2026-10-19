@@ -51,7 +51,7 @@ The agent is a small background service. It lets you start a session on the comp
 
 **From your page:** open the computer's gear and press **Let my phone start sessions on** it. Your phone can then start sessions only in folders you've used Claude Code in on that computer in the last 90 days, and never in your home folder or above it, a temporary folder, or one inside a folder whose name starts with a dot. The computer's page lists them.
 
-A session started from your phone opens in a Terminal window on a Mac, a console window on Windows, or tmux on Linux (`tmux ls`), and runs until you close it there.
+A session started from your phone opens in a Terminal window on a Mac, a console window on Windows, or tmux on Linux (`tmux ls`), and runs until you close it there, or with Exit on the page.
 
 **By hand** (on Windows, in Git Bash), from the plugin's folder (Claude Code's default; with `CLAUDE_CONFIG_DIR` set it is under that folder instead, and `claude plugin list --json` gives it as `installPath`):
 
