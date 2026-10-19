@@ -285,6 +285,8 @@ function deviceOf(m) {
     checks: card.checks === true,
     upgrade: card.upgrade && typeof card.upgrade === 'object' ? card.upgrade : null,
     stats: card.stats ?? {},
+    // (how its installer is run by hand there: its agent's folder, and on Windows its Git Bash; from an agent that says)
+    installer: card.installer && typeof card.installer === 'object' ? card.installer : null,
     hosted: (m.hosted ?? []).map((h) => ({ ...part(h.s), sid: h.sid })),
     open: Object.fromEntries(Object.entries(m.open ?? {}).map(([sid, o]) => [sid, { ...part(o?.s), title: typeof o?.named === 'string' && !isLocked(o.named) ? o.named : '' }])),
   }
@@ -8160,7 +8162,7 @@ function renderComputer() {
 // off from here, by an order, and the whole lot allowed or not; a folder of any other kind is set on the computer.
 function foldersPart(c, m, at) {
   if (!m.capabilities?.includes('auto-folders') || !m.online) return null
-  const more = moreFolders(m, at)
+  const more = moreFolders(c, m, at)
   const f = m.folders ?? {}
   const name = machineName(m)
   const set = (f.folders ?? []).length ? h('p', { 'data-part': 'folders-set' }, `Set on ${name}: `, ...f.folders.flatMap((x, i) => [i ? ', ' : '', h('code', null, x)]), '.') : null
@@ -8228,20 +8230,30 @@ function removePart(c, m) {
 // How a folder that is not listed is allowed, said where the list is: a folder a person uses Claude Code in is listed
 // by itself, within its limits; any other is named on the computer, in its agent.json, and the agent started again
 // with what it has (the installer's --update writes nothing there, and handles each system's service: Task Scheduler
-// on Windows has more to stop than the task). The plugin's folder is the one Claude Code installed, by the version the
-// computer's sessions say they run.
-function moreFolders(m, at) {
+// on Windows has more to stop than the task). Said for the computer's own system, with its own paths where its agent
+// says them (the plugin Claude Code installed, as the agent measured it; its own folder; on Windows its Git Bash),
+// and where it does not, the ones they are unless set otherwise, the plugin by the version its sessions run.
+function moreFolders(c, m, at) {
   const name = machineName(m)
-  const version = at ? pluginOn(at) : null
-  const p = '~/.claude/plugins/cache/manyclaws/manyclaws/' + (version ?? '<its version>')
   const windows = /windows/i.test(m.platform ?? '')
+  const installed = (m.plugins ?? []).find((x) => x.where === 'installed' && typeof x.dir === 'string')?.dir
+  const version = (at ? pluginOn(at) : null) ?? '<its version>'
+  const home = typeof m.installer?.home === 'string' ? m.installer.home : null
+  const command = windows
+    ? [
+        `$p = "${installed ?? `$env:USERPROFILE\\.claude\\plugins\\cache\\manyclaws\\manyclaws\\${version}`}"`,
+        `& "${typeof m.installer?.bash === 'string' ? m.installer.bash : 'C:\\Program Files\\Git\\bin\\bash.exe'}" "$p\\agent\\install.sh" --update --from "$p"`,
+      ].join('\n')
+    : [`p="${installed ?? `$HOME/.claude/plugins/cache/manyclaws/manyclaws/${version}`}"`, 'bash "$p/agent/install.sh" --update --from "$p"'].join('\n')
+  const file = windows ? (home ? home + '\\agent.json' : '%USERPROFILE%\\.manyclaws\\agent.json') : home ? home + '/agent.json' : '~/.manyclaws/agent.json'
   return h(
     'details',
-    { class: 'folders-more', 'data-part': 'folders-more' },
+    // (open as it was left: the page is drawn again whenever the computer says something new)
+    { class: 'folders-more', 'data-part': 'folders-more', open: !!c.foldersMore, ontoggle: (ev) => (c.foldersMore = ev.currentTarget.open) },
     h('summary', null, 'Allow another folder'),
     h('p', null, `Use Claude Code in it on ${name}, and it is listed here: a folder used in the last 90 days is. Not your home folder or one above it, a temporary folder, or one inside a folder whose name starts with a dot.`),
-    h('p', null, `Or name it on ${name}, for that folder and every one under it, where a new folder may be made from here too: add it to `, h('code', null, '"folders"'), ' under ', h('code', null, '"spawn"'), ' in ', h('code', null, '~/.manyclaws/agent.json'), ` there, then start the agent again as it is set up, in a terminal${windows ? ' (Git Bash)' : ''}:`),
-    h('pre', { class: 'folders-cmd' }, h('code', null, `p=${p}\nbash "$p/agent/install.sh" --update --from "$p"`)),
+    h('p', null, `Or name it on ${name}, for that folder and every one under it, where a new folder may be made from here too: add it to `, h('code', null, '"folders"'), ' under ', h('code', null, '"spawn"'), ' in ', h('code', null, file), ` there, then start the agent again as it is set up, in ${windows ? 'PowerShell' : 'a terminal'}:`),
+    h('pre', { class: 'folders-cmd', 'data-system': windows ? 'windows' : 'unix' }, h('code', null, command)),
     h('p', { class: 'muted' }, 'While the agent is running anything started from this page, the installer changes nothing and says so; --end-sessions ends that first. The folders named there are listed here, as set on it.'),
   )
 }
