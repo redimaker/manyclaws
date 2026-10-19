@@ -41,6 +41,9 @@ import {
   parseCapabilities,
   parseSlash,
   commandRefusal,
+  effortRefusal,
+  cacheTtlOf,
+  HOUR_CACHE_MS,
   TEXT_COMMANDS,
   VALUE_COMMANDS,
   cap,
@@ -128,6 +131,9 @@ let classicHeard = false // a settings hook event (classic.*) has reached this p
 let managedHere = null // a promise of whether an organization manages Claude Code here (classicSkipped)
 let effortNow // the effort the session thinks at, as last reported: null when it has none, undefined until something says
 let modelAskedUntil = 0 // a /model the page asked for is on its way: until then, the switch is not asked about again
+let lastReplyAt = 0 // when this process last had a reply of the main conversation (0: none yet)
+let replyCacheMs = HOUR_CACHE_MS // how long that reply's prompt cache stays warm
+let effortSetAt = 0 // when /effort last changed the effort
 const pendingList = [] // requests the band above the prompt offers to answer: { rid, kind, ... }
 const localAnswers = new Map() // rid -> the answer given at the terminal
 const localApprovals = new Map() // tool_use_id -> rid, for prompts left to the terminal's dialog
@@ -217,7 +223,14 @@ export function register(on, options) {
     }
     // (a subagent's request says it is at work, and that there is one, where this process had not heard it start)
     if (e.agentId) agentHeard(e.agentId, { known: false })
-    else stepDone(e)
+    else {
+      stepDone(e)
+      // (a reply whose prompt cache a change of effort would throw away, for as long as it stays warm)
+      if (isDone) {
+        lastReplyAt = await $.clock.now()
+        replyCacheMs = cacheTtlOf(result?.usage, replyCacheMs)
+      }
+    }
     return result
   })
 
@@ -915,7 +928,10 @@ async function noteSetting($, content) {
   if (!text.includes('<local-command-stdout>')) return
   const said = settingSaid(text)
   if (!said) return
-  if ('effort' in said) noteEffort(said.effort)
+  if ('effort' in said) {
+    if (said.effort !== effortNow) effortSetAt = await $.clock.now()
+    noteEffort(said.effort)
+  }
   if (said.model) await noteModel($)
 }
 
@@ -1683,6 +1699,11 @@ async function runCommand($, args) {
   if (!args.force && !TEXT_COMMANDS.has(command) && !(commandArgs && VALUE_COMMANDS.has(command))) {
     const found = (await $.command.list()).find((c) => c.name === command)
     const refusal = commandRefusal(command, commandArgs, found)
+    if (refusal) throw new Error(refusal)
+  }
+  // (in a terminal, a change of effort Claude Code would stop to ask about there is not sent)
+  if (command === 'effort' && commandArgs && !args.force && (await $.session.surfaces()).includes('terminal')) {
+    const refusal = effortRefusal({ level: commandArgs, current: effortNow, lastReplyAt, ttlMs: replyCacheMs, setSinceReply: effortSetAt > lastReplyAt, now: await $.clock.now() })
     if (refusal) throw new Error(refusal)
   }
   if (command === 'model' && commandArgs) modelAskedUntil = Date.now() + 15_000
