@@ -3766,7 +3766,7 @@ function noReleaseOn(c) {
     // (and a session's plugin that says it is another than any its agent measured: one of the two is not as it says)
     const known = new Set(c.m.plugins.map((x) => x.digest))
     const other = c.live.find((s) => s.release?.digest && c.m.plugins.length && !known.has(s.release.digest) && !allowedHere(c, s.release.digest))
-    if (other) return { digest: other.release.digest, by: 'differ', release: other.release.release, signed: !!other.release.signed, found: c.m.plugins.filter((x) => x.digest).map((x) => ({ release: x.release, digest: x.digest })) }
+    if (other) return { digest: other.release.digest, by: 'differ', release: other.release.release, signed: !!other.release.signed }
     return null
   }
   for (const s of c.live) {
@@ -7796,13 +7796,20 @@ function upkeepNode(c, n) {
   const said = stateOf(c).upkeep ?? {}
   const told = said.kind === n.kind ? [said.error && h('p', { class: 'form-note error', role: 'alert', 'data-part': 'upkeep-error' }, said.error), said.done && h('p', { class: 'guide-status connected', 'data-part': 'upkeep-done' }, said.done)] : []
   const button = (part, text, onclick, { primary = true, disabled = false } = {}) => h('button', { type: 'button', class: primary ? 'primary' : 'ghost', 'data-part': part, onclick, disabled: disabled || said.busy ? '' : null }, text)
+  // (a session that runs a plugin its agent did not find there: said in a line, with the two ways on)
+  if (n.kind === 'alarm' && n.by === 'differ')
+    return h(
+      'div',
+      { class: 'needs-alarm', 'data-need': 'alarm', role: 'alert' },
+      h('p', null, h('b', null, `Unexpected plugin version on ${name}.`), ` A session there runs release ${n.release ?? '(none)'}, which its agent didn’t find. Nothing is sent to ${name} until you decide.`),
+      h('div', { class: 'needs-do' }, button('alarm-allow', 'Allow it', () => allowPlugin(c, n.digest)), ' ', h('a', { href: '#/account', class: 'button-link ghost', 'data-part': 'alarm-revoke' }, `Take back ${name}’s access`)),
+      ...told,
+    )
   if (n.kind === 'alarm')
     return h(
       'div',
       { class: 'needs-alarm', 'data-need': 'alarm', role: 'alert' },
-      h('p', null, h('b', null, n.by === 'differ' ? `A session on ${name} says it runs ManyClaws plugin release ${n.release ?? '(none)'}, fingerprint ${n.digest.slice(0, 12)}, which ${name}’s agent did not find there.` : `${name} is running a ManyClaws plugin that matches no signed release (${n.digest.slice(0, 12)}).`), ' This page sends it nothing until you decide.'),
-      // (what the agent did find, by release and fingerprint: one of the two words is not as it says, or the agent has not looked at the copy the session runs)
-      n.by === 'differ' && h('p', { 'data-part': 'alarm-found' }, `The agent checked ${n.found.length === 1 ? 'one copy' : `${n.found.length} copies`} of the plugin on ${name}: ${n.found.map((f) => `release ${f.release ?? '(none)'}, fingerprint ${f.digest.slice(0, 12)}`).join('; ')}. Either the session or the agent is not as it says, or the agent has not looked at the copy that session runs: an agent older than the plugin, or one not heard from since the session started, does not. Starting the session again, or updating the agent, settles which.`),
+      h('p', null, h('b', null, `${name} is running a ManyClaws plugin that matches no signed release (${n.digest.slice(0, 12)}).`), ' This page sends it nothing until you decide.'),
       h('p', null, n.by === 'fetched' ? 'It is what Claude Code fetched when it was asked to update the plugin: no session has loaded it yet. ' : n.by === 'plugin' ? 'That is the plugin’s own word of itself: there is no agent there to look from outside. ' : '', 'If you did not change it yourself, someone else may have: take back its access, and start afresh with a new key (Account, Encryption key) if you think it could have read your sessions.'),
       h('div', { class: 'needs-do' }, h('a', { href: '#/account', class: 'button-link primary', 'data-part': 'alarm-revoke' }, `Take back ${name}’s access`), ' ', button('alarm-keep', 'Keep it blocked', () => ((stateOf(c).keptBlocked = true), renderComputer()), { primary: false })),
       stateOf(c).keptBlocked && h('p', { class: 'muted', 'data-part': 'alarm-kept' }, `Kept blocked: nothing is sent to ${name}, and no session is started on it.`),
