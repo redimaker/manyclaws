@@ -1,4 +1,9 @@
 {
   "description": "ManyClaws session relay",
-  "modules": ["./register.js"]
+  "modules": ["./register.js"],
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/relay.sh\"" }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/relay.sh\"" }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/relay.sh\"", "timeout": 3600 }] }]
+  }
 }

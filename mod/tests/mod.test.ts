@@ -519,6 +519,133 @@ test('told once on this computer that the settings hook events pass the plugin o
   expect(s.said.filter((l: string) => l.includes('an organization manages Claude Code here'))).toEqual([])
 })
 
+// The folder the plugin's own settings hooks (relay.sh) leave what they are given in, for this session: the permission
+// mode, and the permission prompts the app is asking in its own dialog, each `N.ask`. What the plugin writes there (that
+// it is answering one, and its answer) is in `wrote`, by name.
+function relay(on: any, { mode = 'auto' as string | null, asks = {} as Record<string, any> } = {}) {
+  const dir = '/.claude/manyclaws/relay/sess-1'
+  const state = { mode, asks }
+  const wrote = new Map<string, string>()
+  const name = (path: string) => (path.startsWith(dir + '/') ? path.slice(dir.length + 1) : null)
+  on('fs.read', ($: any, e: any) => {
+    const n = name(e.path)
+    if (n === 'mode' && state.mode !== null) return { value: state.mode }
+    if (n && state.asks[n]) return { value: JSON.stringify(state.asks[n]) }
+    return { deny: 'ENOENT' }
+  })
+  on('fs.list', ($: any, e: any) => (e.path === dir ? { value: Object.keys(state.asks).map((n) => ({ name: n, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) } : { deny: 'ENOENT' }))
+  on('fs.write', ($: any, e: any) => {
+    wrote.set(name(e.path) ?? e.path, e.text)
+    return { value: undefined }
+  })
+  return { state, wrote }
+}
+const PERMISSION_REQUEST = (command: string) => ({ session_id: 'sess-1', hook_event_name: 'PermissionRequest', permission_mode: 'auto', tool_name: 'Bash', tool_input: { command } })
+
+test("in auto mode where the settings hook events pass the plugin over, its own settings hooks say the mode: the card shows it, and an ask is left to the classifier, with nothing asked on the page", async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  on('tool.call', () => ({ result: 'done' }))
+  const m = await made()
+  relay(on)
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'auto' }, commands: [] }] })
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  expect(opened(s, m).cards.at(-1).permissionMode).toBe('auto')
+  const d = await $.tool.check({ tool: 'Bash', input: { command: 'make' }, tool_use_id: 'ta1' })
+  expect(d.decision).toBe('ask')
+  // (the classifier lets it run: nothing was asked, and nothing is told)
+  await $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'ta1' } as any)
+  await s.clock.advance(300)
+  expect([opened(s, m).requests, opened(s, m).resolved]).toEqual([[], []])
+})
+
+test('in auto mode, a call the classifier puts to a person is asked on the page as its dialog is up, by the relay, and the page answering first is the answer the relay is given', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  const m = await made()
+  const r = relay(on)
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'auto' }, commands: [] }], decision: () => answer() })
+  const answer = answerTo(s, m, (q) => ({ decision: 'allow', order: order(m, 'answer', { decision: 'allow', rid: q.rid, asked: askedOf(q) }) }))
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  await $.tool.check({ tool: 'Bash', input: { command: 'rm x' }, tool_use_id: 'ta2' })
+  await s.clock.advance(300)
+  expect(opened(s, m).requests).toEqual([])
+  // The dialog is up: its PermissionRequest event, as the relay leaves it
+  r.state.asks['1-2-3.ask'] = PERMISSION_REQUEST('rm x')
+  await until(s.clock, () => r.wrote.has('1-2-3.done'))
+  expect(r.wrote.get('1-2-3.taken')).toBe('')
+  expect(opened(s, m).requests[0]).toMatchObject({ kind: 'approval', tool: 'Bash', route: 'both' })
+  expect(JSON.parse(r.wrote.get('1-2-3.answer')!)).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
+})
+
+test('in auto mode, a dialog answered at the terminal first: the relay is given no answer, and the page is told how it went', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  on('tool.call', () => ({ result: 'done' }))
+  const m = await made()
+  const r = relay(on)
+  // (the page says nothing, a wait at a time)
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'auto' }, commands: [] }], decision: async (clock: any) => (await clock.sleep(20_000), { pending: true }) })
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  await $.tool.check({ tool: 'Bash', input: { command: 'rm y' }, tool_use_id: 'ta3' })
+  r.state.asks['4-5-6.ask'] = PERMISSION_REQUEST('rm y')
+  await until(s.clock, () => opened(s, m).requests.length > 0)
+  // Allowed in the dialog: the call runs
+  await $.tool.call({ tool: 'Bash', command: 'rm y', tool_use_id: 'ta3' } as any)
+  await until(s.clock, () => r.wrote.has('4-5-6.done'), 1000)
+  expect(r.wrote.get('4-5-6.answer')).toBe('')
+  await s.clock.advance(300)
+  expect(opened(s, m).resolved[0]).toMatchObject({ decision: 'allow', by: 'terminal' })
+})
+
+test('in auto mode with the page set to "terminal only", a prompt in the dialog is told to the page as asked there, and not answered from it', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  const m = await made()
+  const r = relay(on)
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'local' }, commands: [] }] })
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  await $.tool.check({ tool: 'Bash', input: { command: 'rm z' }, tool_use_id: 'ta4' })
+  r.state.asks['7-8-9.ask'] = PERMISSION_REQUEST('rm z')
+  await until(s.clock, () => r.wrote.has('7-8-9.done'))
+  expect(r.wrote.get('7-8-9.answer')).toBe('')
+  await s.clock.advance(300)
+  expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'local' })
+})
+
+test('in auto mode where nobody can be at the session (a machine\'s agent runs it), the classifier settles an ask first too, and one it puts to a person is asked on the page alone, by its PermissionRequest event', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  const m = await made()
+  const r = relay(on)
+  const s: any = session(on, m, { ...HEADLESS, decision: () => answer() })
+  const answer = answerTo(s, m, (q) => ({ decision: 'allow', order: order(m, 'answer', { decision: 'allow', rid: q.rid, asked: askedOf(q) }) }))
+  await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
+  await s.clock.advance(3_300)
+  expect((await $.tool.check({ tool: 'Bash', input: { command: 'rm h' }, tool_use_id: 'ta6' })).decision).toBe('ask')
+  await s.clock.advance(300)
+  expect(opened(s, m).requests).toEqual([])
+  r.state.asks['2-2-2.ask'] = PERMISSION_REQUEST('rm h')
+  await until(s.clock, () => r.wrote.has('2-2-2.done'))
+  expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'remote' })
+  expect(JSON.parse(r.wrote.get('2-2-2.answer')!)).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
+})
+
+test('in any other mode, an ask is the page\'s as before (here, in a terminal: the page and the band above the prompt), and the relay\'s prompts are not taken up', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  const m = await made()
+  const r = relay(on, { mode: 'default' })
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'auto' }, commands: [] }] })
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  expect(opened(s, m).cards.at(-1).permissionMode).toBe('default')
+  void $.tool.check({ tool: 'Bash', input: { command: 'rm w' }, tool_use_id: 'ta5' })
+  await s.clock.advance(300)
+  expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'remote' })
+  r.state.asks['1-1-1.ask'] = PERMISSION_REQUEST('rm w')
+  await s.clock.advance(1_000)
+  expect(r.wrote.has('1-1-1.taken')).toBe(false)
+})
+
 // ---- The key: given to this computer written out (mcf_…) as it is connected, and taken as it is. There is no passphrase.
 
 test('the key written out among its options is used as it is: the session starts at once, sealed, saying nothing of which key, and the server is asked nothing of whose computer this is', { options: { key: '' } }, async ($, on) => {
