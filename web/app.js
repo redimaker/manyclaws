@@ -226,6 +226,8 @@ function sessionOf(s, devices) {
     // (false where its plugin is passed over by the settings hook events, which alone say the mode: see renderHeader)
     classicHooks: typeof card.classicHooks === 'boolean' ? card.classicHooks : null,
     effort: card.effort ?? null,
+    // (Ultracode, beside the effort: true or false where the session has said, null until it has)
+    ultracode: typeof card.ultracode === 'boolean' ? card.ultracode : null,
     since: card.since ?? s.lastActivity,
     shaped: true,
     machine: s.machine ?? onHost,
@@ -5429,6 +5431,10 @@ const canSetOptions = (s) => !!s && !app.past && !!s.online && !s.ended && (s.at
 // The one asked for and not yet shown by the session, if it is of this kind
 const asked = (s, kind) => (s && app.setting?.sid === s.id && app.setting.kind === kind ? app.setting.value : null)
 
+// Whether Ultracode is on in a session (dynamic workflows on every task, beside the effort and not one of its levels):
+// what was asked for here until the session says, then what it says. Off where it has said nothing of it
+const ultracodeOf = (s) => (!s ? false : asked(s, 'ultracode') ? asked(s, 'ultracode') === 'on' : s.ultracode === true)
+
 // VS Code's button for the mode: the menu of modes opens from it, with the effort under them
 function modeButton(mode, title) {
   return h('button', { type: 'button', id: 'foot-modes', class: 'mode-btn for-vscode', title, 'aria-label': 'Mode: ' + (PERMISSION_MODES[mode]?.[0] ?? mode), 'aria-haspopup': 'true', 'aria-expanded': String(app.footMenu?.kind === 'modes'), onclick: () => openFootMenu('modes') }, icon(mode), h('span', null, PERMISSION_MODES[mode]?.[0] ?? mode))
@@ -5445,20 +5451,22 @@ function renderFootOptions(s) {
   // (the model by its name alone, as VS Code's pill has it: "Opus 5.5", whatever its context window)
   const name = live ? (asked(live, 'model') ? modelChoice(asked(live, 'model'))[0] : (prettyModel(live.model)?.replace(/ \(1M context\)$/, '') ?? null)) : null
   const level = live ? (asked(live, 'effort') ?? live.effort) : null
+  const ultra = ultracodeOf(live)
   // (drawn already: drawing them again would take them from under a finger)
-  const drawn = JSON.stringify([live?.id, name, level, can, !!app.setting])
+  const drawn = JSON.stringify([live?.id, name, level, ultra, can, !!app.setting])
   if (pill.dataset.drawn !== drawn) {
     pill.dataset.drawn = drawn
     pill.hidden = !name
     pill.disabled = !can
     pill.classList.toggle('pending', !!asked(live, 'model'))
     pill.title = !name ? '' : `${prettyModel(live.model) ?? name}. ` + (can ? 'Press to change the model, or how hard it thinks.' : 'The model this session runs on, and how hard it thinks.')
-    put(pill, h('b', null, name ?? ''), level ? h('span', { class: 'for-vscode' + (asked(live, 'effort') ? ' pending' : '') }, effortName(level)) : null, h('span', { class: 'for-terminal foot-hint' }, ' · /model'))
+    put(pill, h('b', null, name ?? ''), level ? h('span', { class: 'for-vscode' + (asked(live, 'effort') ? ' pending' : '') }, effortName(level)) : null, ultra ? h('span', { class: 'for-vscode foot-ultra' + (asked(live, 'ultracode') ? ' pending' : '') }, 'Ultracode') : null, h('span', { class: 'for-terminal foot-hint' }, ' · /model'))
     hint.hidden = !live || (!level && !can)
     hint.disabled = !can
     hint.classList.toggle('pending', !!asked(live, 'effort'))
     hint.title = can ? 'How hard the model thinks. Press to change it.' : 'How hard the model thinks'
-    put(hint, level ? `${EFFORT_MARKS[level] ?? '●'} ${level}` : '/effort', level ? h('span', { class: 'foot-hint' }, ' · /effort') : null)
+    // (as a terminal says them under its prompt: "● high · ultracode · /effort")
+    put(hint, level ? `${EFFORT_MARKS[level] ?? '●'} ${level}` : '/effort', level && ultra ? ' · ultracode' : null, level ? h('span', { class: 'foot-hint' }, ' · /effort') : null)
   }
   if (!live && app.footMenu && app.footMenu.kind !== 'modes') app.footMenu = null
   drawAuto(live)
@@ -5569,7 +5577,7 @@ function drawFootMenu() {
   // (drawn already: drawing it again would take it from under a finger)
   // Auto approve, under the modes: whether it is on for this session, how long yet, and why it cannot be where it cannot
   const auto = live ? { on: !!autoUntil(live.id), left: autoUntil(live.id) ? autoLeft(live.id) : '', bars: autoBars(live) } : null
-  const drawn = JSON.stringify([kind, app.view, live?.id, live?.model, level, can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto, clones, app.modeRestart, live?.cwd])
+  const drawn = JSON.stringify([kind, app.view, live?.id, live?.model, level, ultracodeOf(live), can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto, clones, app.modeRestart, live?.cwd])
   if (box.dataset.drawn === drawn) return
   box.dataset.drawn = drawn
   box.dataset.kind = kind
@@ -5604,6 +5612,26 @@ function drawFootMenu() {
       h('span', { class: 'effort-names' }, ...EFFORT_LEVELS.map((l) => h('button', { ...level5(l), class: marks(l).trim(), title: EFFORT_SAYS[l] }, l))),
     )
   }
+  // Ultracode, under the effort as VS Code has it: a switch, for this session only, whatever the level
+  const ultraOn = ultracodeOf(live)
+  const ultraRow = () =>
+    live &&
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'menu-row menu-ultra' + (ultraOn ? ' on' : '') + (asked(live, 'ultracode') ? ' pending' : ''),
+        role: 'switch',
+        'aria-checked': String(ultraOn),
+        'data-ultracode': ultraOn ? 'on' : 'off',
+        disabled: !can || undefined,
+        title: can ? `Turn Ultracode ${ultraOn ? 'off' : 'on'}: /effort ultracode ${ultraOn ? 'off' : 'on'} in the session` : 'It can be changed while the session is running and reachable.',
+        onclick: () => setOption(live, 'ultracode', ultraOn ? 'off' : 'on'),
+      },
+      h('span', { class: 'menu-icon' }),
+      h('span', { class: 'menu-text' }, h('span', { class: 'menu-title' }, 'Ultracode'), h('span', { class: 'menu-say' }, 'Dynamic workflows on every task, at any effort. This session only.')),
+      h('span', { class: 'ultra-switch', 'aria-hidden': 'true' }),
+    )
   // What is listed scrolls when there is more of it than room; the effort under it stays in sight
   const list = (...children) => h('div', { class: 'menu-list' }, ...children)
   const foot = (...children) => (live ? h('div', { class: 'menu-foot' }, ...children) : null)
@@ -5654,10 +5682,10 @@ function drawFootMenu() {
             },
           }),
       ),
-      foot(dots(), can ? h('p', { class: 'menu-note' }, saved) : null),
+      foot(dots(), can ? h('p', { class: 'menu-note' }, saved) : null, ultraRow()),
     )
   } else if (kind === 'effort') {
-    put(box, list(h('div', { class: 'menu-head' }, 'Effort'), line(), h('p', { class: 'menu-note' }, can ? 'Pick a level · Esc to cancel. ' + saved : 'It can be changed while the session is running and reachable.')))
+    put(box, list(h('div', { class: 'menu-head' }, 'Effort'), line(), h('p', { class: 'menu-note' }, can ? 'Pick a level · Esc to cancel. ' + saved : 'It can be changed while the session is running and reachable.'), ultraRow()))
   } else {
     const options = row?.options ?? ['default', ...MODELS.map(([value]) => value).filter(Boolean)]
     // (which one it is set to is the session's to say; until it has, none is ticked)
@@ -5673,7 +5701,7 @@ function drawFootMenu() {
           return menuRow({ title, says, on: alias === now, pending: alias === asked(live, 'model'), disabled: !can, 'data-model': alias, onclick: () => (alias === now ? closeFootMenu() : setOption(live, 'model', alias)) })
         }),
       ),
-      foot(app.view === 'terminal' ? [h('div', { class: 'menu-head' }, 'Effort'), line()] : dots(), h('p', { class: 'menu-note' }, ...both(can ? saved : '', 'Pick one · Esc to cancel'))),
+      foot(app.view === 'terminal' ? [h('div', { class: 'menu-head' }, 'Effort'), line()] : dots(), h('p', { class: 'menu-note' }, ...both(can ? saved : '', 'Pick one · Esc to cancel')), ultraRow()),
     )
   }
 }
@@ -5691,7 +5719,8 @@ async function setOption(s, kind, value) {
     app.setting = null
     if (app.current === s.id) renderHeader()
   }
-  const args = { command: kind, args: value }
+  // (Ultracode is set by /effort too: "ultracode on" or "ultracode off")
+  const args = kind === 'ultracode' ? { command: 'effort', args: 'ultracode ' + value } : { command: kind, args: value }
   // (it goes as its order and nothing beside it: which command, and with what, are in what this device signed.
   // Where it cannot sign, nothing is sent.)
   const order = await orderFor(s.id, 'call', { method: 'command.run', args })
@@ -5700,7 +5729,7 @@ async function setOption(s, kind, value) {
   if (failed) {
     // (shown for long enough to read: a why with what to do instead is longer than "not on this plan")
     const showMs = Math.max(10_000, String(failed).length * 100)
-    app.modeError = { sid: s.id, text: `The ${kind} was not changed: ${failed}`, until: Date.now() + showMs }
+    app.modeError = { sid: s.id, text: kind === 'ultracode' ? `Ultracode was not turned ${value}: ${failed}` : `The ${kind} was not changed: ${failed}`, until: Date.now() + showMs }
     setTimeout(() => app.current === s.id && renderHeader(), showMs + 100)
     return done()
   }

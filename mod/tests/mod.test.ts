@@ -814,6 +814,8 @@ test('from the page, a change of effort a terminal would stop to ask about is re
   const refused = await effort('max')
   expect(refused.ok).toBe(false)
   expect(refused.error).toMatch(/^mid-conversation, Claude Code asks about it in the terminal first, where nothing sent from here can answer, and everything sent after it would wait\. Change it there with \/effort, or here in 60 minutes, once the conversation's cache has gone\.$/)
+  // (nor is Ultracode, a switch beside the level: Claude Code asks nothing of it, and the level stays as it is)
+  expect(await effort('ultracode on')).toMatchObject({ ok: true })
   // (the level it has already is not asked about)
   expect(await effort('high')).toMatchObject({ ok: true })
   // Answered in the terminal once, it is not asked about again until the next reply
@@ -829,7 +831,7 @@ test('from the page, a change of effort a terminal would stop to ask about is re
   await reply()
   where.length = 0
   expect(await effort('medium')).toMatchObject({ ok: true })
-  expect(ran).toEqual(['xhigh', 'high', 'medium', 'medium'])
+  expect(ran).toEqual(['xhigh', 'ultracode on', 'high', 'medium', 'medium'])
 })
 
 // ---- A session's chat, sent as it starts and whenever the server asks for it
@@ -1779,6 +1781,23 @@ test('the permission mode and the effort are on the card as soon as they change:
   const card = opened(s, m).cards.at(-1)
   expect([card.permissionMode, card.effort]).toEqual(['plan', 'high'])
   expect(JSON.stringify(s.events())).not.toMatch(/"plan"|"high"|PostToolUse/)
+})
+
+test('Ultracode is on the card as /effort says it, beside the effort; and /effort refusing it, from the page, is a refusal with its reason', async ($, on) => {
+  const m = await made()
+  const s = session(on, m)
+  await start($)
+  await s.clock.advance(300)
+  expect(opened(s, m).cards.at(-1).ultracode).toBe(null)
+  const answer = (id: string, text: string) => ($ as any).session.append(said(id, 'command', 'user', [{ type: 'text', text: `<local-command-stdout>${text}</local-command-stdout>` }]))
+  await answer('c1', 'Ultracode on (this session only): dynamic workflows on every task. Effort stays high.')
+  await s.clock.advance(300)
+  expect([opened(s, m).cards.at(-1).ultracode, opened(s, m).cards.at(-1).effort]).toEqual([true, 'high'])
+  await answer('c2', 'Ultracode off. Effort stays high.')
+  await s.clock.advance(300)
+  expect(opened(s, m).cards.at(-1).ultracode).toBe(false)
+  // (and nothing of it in the open)
+  expect(JSON.stringify(s.events())).not.toMatch(/ultracode|Ultracode/i)
 })
 
 // ---- What is left in the open of a session is what the server cannot do without: nothing that numbers, sizes or
