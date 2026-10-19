@@ -39,6 +39,7 @@
 //                                         to do
 import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
+import dns from 'node:dns'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -49,6 +50,11 @@ import { Transcript } from './transcript.mjs'
 import { findClaude, expandHome } from './host.mjs'
 import { keysFromText } from './seal.mjs'
 import { secretsOf, settle, forgetKept, fingerprint } from './secrets.mjs'
+
+// What the agent asks its server it asks over IPv4 first, where the server's name has both: a network whose IPv6
+// addresses a server does not let in is heard all the same (beta.manyclaws.dev lets in deon's IPv4 range alone, and
+// deonbdev went out over IPv6, 2026-10-18). A server with IPv6 alone is still reached, second
+dns.setDefaultResultOrder('ipv4first')
 
 const HOME = process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws')
 const RELAY_PORT = 8798
