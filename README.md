@@ -5,7 +5,7 @@
 This repository holds every part of it that runs on your own devices:
 
 - **The plugin** (`mod/`): a Claude Code plugin. It reports each session to the ManyClaws server and does what your own devices ask of that session. It carries the agent, and the signed list of every file it was released with (`mod/release.json`).
-- **The agent** (`mod/agent/`): a small background service, one per computer, which the plugin installs from its own folder when you ask from the page. It indexes that computer's Claude Code transcripts so past sessions can be read and searched, starts or resumes sessions when you ask from the page, each in a terminal of its own there (a Terminal window on a Mac, tmux on Linux) that outlives the agent, and checks the plugin there against the release it carries.
+- **The agent** (`mod/agent/`): a small background service, one per computer, which the plugin installs from its own folder when you ask from the page. It indexes that computer's Claude Code transcripts so past sessions can be read and searched, starts or resumes sessions when you ask from the page, and checks the plugin there against the release it carries.
 - **The page** (`web/`): what your browser and your phone run, as the server hands it out. It is where your account's key is made and kept, and where every device is approved, so it is published here with the rest, and what a server hands you can be held against it (see "Checking what you run").
 
 The server is not in this repository. It stores and forwards what your devices encrypted.
@@ -65,8 +65,7 @@ The key reads what your sessions say. It cannot sign the list of your devices, s
 | `mod/tests/` | The plugin's own tests |
 | `mod/agent/agent.mjs` | The agent's command line: `run`, `index`, `search`, `sessions`, `read`, `configure`, `verify` |
 | `mod/agent/service.mjs` | The agent as a service: its connection to the server, what it answers, the plugin's measure and its own upgrade |
-| `mod/agent/host.mjs` | Sessions the agent starts or resumes, each opened in a terminal of its own (and searches, which it runs itself), and the rules for which it may, and where |
-| `mod/agent/launch.mjs` | What runs a session in the console window the agent opens for it on Windows |
+| `mod/agent/host.mjs` | Sessions the agent starts or resumes itself, and the rules for which it may, and where |
 | `mod/agent/indexer.mjs`, `store.mjs`, `transcript.mjs` | The index of this computer's transcripts (SQLite, with full-text search) |
 | `mod/agent/files.mjs` | Opening a file that a link in a chat names |
 | `mod/agent/cswap.mjs` | Switching between Claude accounts with `cswap`, where it is installed |
