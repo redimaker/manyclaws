@@ -747,6 +747,9 @@ export async function run(config, flags = {}) {
       files: filesFrom ?? [],
       upload: takesInto ?? [],
       stats: { ...store.stats(), pending: indexer.pending.length, bytesLeft: Math.max(0, indexer.bytesLeft) },
+      // (how its installer is run by hand here, for the page to say so exactly: this agent's folder, where agent.json is,
+      // and on Windows the Git Bash that runs it, found as Claude Code finds it, or null where there is none)
+      installer: { home: ownHome, bash: process.platform === 'win32' ? findGitBash(host.shellEnv()) : null },
     }
     // What the machine is called and what its agent can do are the account's to see as a
     // device of its own, and are in the open: among them that it seals all it says (2),
