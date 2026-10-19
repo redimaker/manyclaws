@@ -8047,7 +8047,7 @@ function renderComputer() {
     h('p', { class: 'muted' }, 'Wherever a session says which computer it is on, ', m.color ? whereLabel(name, m.id) : name, m.color ? ' is a label in this color: in the list, over a chat, and in what a search finds.' : ' is said plainly. Give it a color and it is a label in that color: in the list, over a chat, and in what a search finds.'),
     c.colorError && h('p', { class: 'form-note error', role: 'alert' }, c.colorError),
   )
-  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), colors, newPart(c, m), foldersPart(c, m), versionsPart(at), cswapPart(m)].filter(Boolean))
+  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), colors, newPart(c, m), foldersPart(c, m), versionsPart(at), cswapPart(m), removePart(c, m)].filter(Boolean))
   // (what is chosen is this page's to say: a drawing leaves what a hand has changed as it is)
   const set = (id, value) => el(id) && el(id).value !== value && (el(id).value = value)
   set('computer-project', c.cwd)
@@ -8092,6 +8092,35 @@ function foldersPart(c, m) {
     ...off.map((x) => h('div', { class: 'person muted', 'data-folder-off': x }, h('code', null, x), h('button', { type: 'button', class: 'ghost', 'data-part': 'folder-on', onclick: () => asking({ off: off.filter((y) => y !== x) }, `Turned on again: ${x}.`) }, 'Turn on'))),
     h('p', null, h('button', { type: 'button', class: 'link', 'data-part': 'folders-stop', onclick: () => asking({ auto: false }, 'Not allowed: sessions are started only in the folders set on the computer.') }, 'Stop allowing the folders I’ve used')),
     said,
+  )
+}
+
+// An offline computer taken off the list: one whose agent went for good, or was installed again and came back under
+// another id (as deonbdev's did, 2026-10-18), stays offline in the list for ever otherwise. The server removes only one
+// that is offline; its sessions stay on it, and its agent connecting again puts it back.
+function removePart(c, m) {
+  if (m.online) return null
+  const name = machineName(m)
+  const remove = async () => {
+    const yes = await ask(`Remove ${name} from your computers?`, {
+      says: `Its sessions stay on it, and nothing on it is changed. If its agent connects again, it is back in the list.`,
+      yes: 'Remove',
+      danger: true,
+    })
+    if (!yes) return
+    c.removeError = ''
+    const r = await sendJson(`/api/machines/${encodeURIComponent(m.id)}`, {}, 'DELETE')
+    if (!r.ok) return void ((c.removeError = sentence(r.error) || 'It could not be removed.'), renderComputer())
+    app.machines.delete(m.id)
+    renderListSoon()
+    location.hash = ''
+  }
+  return accountPart(
+    'Remove',
+    { id: 'computer-remove', 'data-key': 'remove' },
+    h('p', { class: 'muted' }, `${name} is offline. Remove it from your list where its agent is gone, or was installed again and is listed anew.`),
+    h('p', null, h('button', { type: 'button', class: 'ghost danger', 'data-part': 'computer-remove', onclick: remove }, 'Remove this computer')),
+    c.removeError && h('p', { class: 'form-note error', role: 'alert' }, c.removeError),
   )
 }
 
