@@ -5698,8 +5698,10 @@ async function setOption(s, kind, value) {
   const r = order ? await sendJson(`/api/sessions/${encodeURIComponent(s.id)}/call`, { order, timeoutMs: 20_000 }) : { ok: false, error: NO_KEY }
   const failed = !r.ok ? r.error : r.data?.status === 'done' && !r.data.ok ? r.data.error || 'Claude Code refused it.' : null
   if (failed) {
-    app.modeError = { sid: s.id, text: `The ${kind} was not changed: ${failed}`, until: Date.now() + 10_000 }
-    setTimeout(() => app.current === s.id && renderHeader(), 10_100)
+    // (shown for long enough to read: a why with what to do instead is longer than "not on this plan")
+    const showMs = Math.max(10_000, String(failed).length * 100)
+    app.modeError = { sid: s.id, text: `The ${kind} was not changed: ${failed}`, until: Date.now() + showMs }
+    setTimeout(() => app.current === s.id && renderHeader(), showMs + 100)
     return done()
   }
   // Run: the session says what it has in a moment. Still waiting: Claude is mid-turn, and

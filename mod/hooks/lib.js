@@ -2,7 +2,7 @@
 // load them directly. register.js holds everything that touches `$`.
 
 export const PROTOCOL = 2
-export const PLUGIN_VERSION = '6.1.73'
+export const PLUGIN_VERSION = '6.1.74'
 
 // Where the mod reports: on the branch beta, ManyClaws' beta server. ManyClaws has one server, so the plugin has no option for its
 // address and its dialog asks for none: MANYCLAWS_URL names another (a test's, or one
@@ -153,6 +153,33 @@ export function commandRefusal(name, args, found) {
   if (found.source !== 'builtin') return ''
   if (VALUE_COMMANDS.has(name)) return `/${name} on its own opens a picker in the terminal. Send it with a value, such as /${name} <value>.`
   return `/${name} opens a panel in the terminal, so it can't run from here.`
+}
+
+// How long the prompt cache of a reply stays warm: an hour where the reply wrote its cache for an
+// hour (a plan's), five minutes where it wrote it for five; one that wrote none says nothing new
+export const HOUR_CACHE_MS = 3_600_000
+export const SHORT_CACHE_MS = 300_000
+export function cacheTtlOf(usage, before = HOUR_CACHE_MS) {
+  const made = usage?.cache_creation ?? usage?.cacheCreation
+  if (!made) return before
+  if (Number(made.ephemeral_1h_input_tokens ?? made.ephemeral1hInputTokens) > 0) return HOUR_CACHE_MS
+  if (Number(made.ephemeral_5m_input_tokens ?? made.ephemeral5mInputTokens) > 0) return SHORT_CACHE_MS
+  return before
+}
+
+// Why /effort <level> from the page would leave a terminal's session waiting, or '' when it would not.
+// Mid-conversation, while the prompt cache is warm, Claude Code in a terminal stops to ask "Change
+// effort level?" in a dialog only the terminal can answer, and all that is sent after it waits behind
+// it. It asks once this process has had a reply, until that reply's cache has gone cold, unless the
+// level is the one it has, or a change was answered there since the reply (one answer covers the rest).
+export function effortRefusal({ level, current, lastReplyAt, ttlMs, setSinceReply, now }) {
+  if (!lastReplyAt || setSinceReply) return ''
+  const left = lastReplyAt + ttlMs - now
+  if (left <= 0) return ''
+  const asked = String(level ?? '').trim().toLowerCase()
+  if (asked === (current ?? 'auto') || (asked === 'unset' && !current)) return ''
+  const minutes = Math.max(1, Math.ceil(left / 60_000))
+  return `mid-conversation, Claude Code asks about it in the terminal first, where nothing sent from here can answer, and everything sent after it would wait. Change it there with /effort, or here in ${minutes} minute${minutes === 1 ? '' : 's'}, once the conversation's cache has gone.`
 }
 
 // Strings capped, arrays and depth bounded, so any value can travel as JSON

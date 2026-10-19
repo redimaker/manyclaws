@@ -768,6 +768,70 @@ test('a model switch made in the app is the app\'s to ask about, and so is one a
   expect(asked?.permissionDecision).toBeUndefined()
 })
 
+// Mid-conversation, Claude Code in a terminal asks "Change effort level?" there before a change, while the reply's
+// prompt cache is warm, and what is sent after it waits behind it (deon, 2026-10-19: a session the page set to max sat
+// at that dialog with two messages behind it). From the page such a change is refused, and said why.
+test('from the page, a change of effort a terminal would stop to ask about is refused and said why; one it would not ask about is run', async ($, on) => {
+  const m = await made(WORDS)
+  const ran: string[] = []
+  on('command.run', ($: any, e: any) => {
+    ran.push(e.args)
+    return { value: { text: '' } }
+  })
+  let cache: any = { ephemeral_1h_input_tokens: 9000, ephemeral_5m_input_tokens: 0 }
+  on('turn.step', async function* ($: any, e: any) {
+    return { turnId: e.turnId, index: e.index, answer: 'one', stopReason: 'end_turn', usage: { output_tokens: 3, cache_creation: cache }, toolUses: [] }
+  } as any)
+  engine(on)
+  // (the page's /effort, a poll at a time, as it is asked for)
+  const asked: string[] = []
+  let seq = 0
+  const next = async (clock: any) => {
+    while (!asked.length) await clock.sleep(500)
+    seq++
+    return { commands: [prompt(seq, { order: order(m, 'call', { method: 'command.run', args: { command: 'effort', args: asked.shift() } }) })] }
+  }
+  const where = ['terminal']
+  const { clock, results } = session(on, m, { surfaces: where, poll: Array.from({ length: 12 }, () => next) })
+  await start($)
+  await clock.advance(1000)
+  const effort = async (level: string) => {
+    asked.push(level)
+    await clock.advance(2000)
+    return results().at(-1)
+  }
+  let turns = 0
+  const reply = async () => {
+    const turnId = 't' + ++turns
+    await ($ as any).turn.start({ turnId, text: 'Reply with just: one' })
+    for await (const _ of ($ as any).turn.step({ turnId, index: 0, model: 'claude-test', effort: 'high', messages: [] })) void _
+    await ($ as any).turn.complete({ turnId, reason: 'answer', isAborted: false, durationMs: 10, answer: 'one' })
+  }
+  // Before this process has had a reply, it does not ask
+  expect(await effort('xhigh')).toMatchObject({ ok: true })
+  await reply()
+  // After one, it would: not sent, and why said, with when it would go from here
+  const refused = await effort('max')
+  expect(refused.ok).toBe(false)
+  expect(refused.error).toMatch(/^mid-conversation, Claude Code asks about it in the terminal first, where nothing sent from here can answer, and everything sent after it would wait\. Change it there with \/effort, or here in 60 minutes, once the conversation's cache has gone\.$/)
+  // (the level it has already is not asked about)
+  expect(await effort('high')).toMatchObject({ ok: true })
+  // Answered in the terminal once, it is not asked about again until the next reply
+  await ($ as any).session.append(said('e1', 'command', 'user', [{ type: 'text', text: '<local-command-stdout>Set effort level to low: Quick</local-command-stdout>' }]))
+  expect(await effort('medium')).toMatchObject({ ok: true })
+  await reply()
+  expect(await effort('max')).toMatchObject({ ok: false })
+  // A reply that wrote its cache for five minutes is asked about for five (and once it has gone, not: see lib.test.ts)
+  cache = { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 9000 }
+  await reply()
+  expect((await effort('low')).error).toMatch(/here in 5 minutes,/)
+  // Where no terminal draws the session (an app or the agent hosts it), it is sent as it is
+  await reply()
+  where.length = 0
+  expect(await effort('medium')).toMatchObject({ ok: true })
+  expect(ran).toEqual(['xhigh', 'high', 'medium', 'medium'])
+})
+
 // ---- A session's chat, sent as it starts and whenever the server asks for it
 
 const TALK = [

@@ -1,6 +1,6 @@
 // The mod's pure helpers
 import { expect, test } from 'claude-code/testing'
-import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, colorless, took } from '../hooks/lib.js'
+import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, effortRefusal, cacheTtlOf, HOUR_CACHE_MS, SHORT_CACHE_MS, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, colorless, took } from '../hooks/lib.js'
 import { summarizeInput, messageRows } from '../hooks/rows.js'
 
 test('capabilities: default, all, additions and exact lists', async () => {
@@ -36,6 +36,27 @@ test('slash commands: parsed, and panel commands refused', async () => {
   expect(commandRefusal('status', '', { name: 'status', source: 'builtin' })).toMatch(/opens a panel/)
   expect(commandRefusal('my-skill', '', { name: 'my-skill', source: 'plugin' })).toBe('')
   expect(commandRefusal('nope', '', undefined)).toMatch(/no \/nope command/)
+})
+
+test("a change of effort a terminal would stop to ask about: after a reply, while its cache is warm, to another level, and not answered there since", async () => {
+  const at = 1_000_000
+  const asks = (more: any) => effortRefusal({ level: 'max', current: 'high', lastReplyAt: at, ttlMs: HOUR_CACHE_MS, setSinceReply: false, now: at + 1000, ...more })
+  expect(asks({})).toMatch(/^mid-conversation, Claude Code asks about it in the terminal first, .* or here in 60 minutes, /)
+  // (no reply in this process yet; the cache gone cold, an hour on or five minutes on; the level it has; one answered there)
+  expect(asks({ lastReplyAt: 0 })).toBe('')
+  expect(asks({ now: at + HOUR_CACHE_MS })).toBe('')
+  expect(asks({ now: at + HOUR_CACHE_MS - 30_000 })).toMatch(/here in 1 minute, /)
+  expect(asks({ ttlMs: SHORT_CACHE_MS, now: at + SHORT_CACHE_MS })).toBe('')
+  expect(asks({ ttlMs: SHORT_CACHE_MS })).toMatch(/here in 5 minutes, /)
+  expect(asks({ level: 'HIGH' })).toBe('')
+  expect(asks({ level: 'auto', current: null })).toBe('')
+  expect(asks({ level: 'auto' })).not.toBe('')
+  expect(asks({ setSinceReply: true })).toBe('')
+  // How long a reply's cache stays warm is what it wrote its cache for; one that wrote none keeps what was known
+  expect(cacheTtlOf({ cache_creation: { ephemeral_1h_input_tokens: 5, ephemeral_5m_input_tokens: 0 } }, SHORT_CACHE_MS)).toBe(HOUR_CACHE_MS)
+  expect(cacheTtlOf({ cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 5 } })).toBe(SHORT_CACHE_MS)
+  expect(cacheTtlOf({ cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 } }, SHORT_CACHE_MS)).toBe(SHORT_CACHE_MS)
+  expect(cacheTtlOf(null)).toBe(HOUR_CACHE_MS)
 })
 
 test('cap bounds strings, arrays, depth and odd values', async () => {
