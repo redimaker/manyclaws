@@ -48,6 +48,7 @@ import {
   colorless,
   flattenText,
   settingSaid,
+  settingRefused,
   isAttended,
   randomId,
 } from './lib.js'
@@ -123,6 +124,7 @@ let permissionMode = null // the permission mode, as last reported
 let classicHeard = false // a settings hook event (classic.*) has reached this plugin
 let managedHere = null // a promise of whether an organization manages Claude Code here (classicSkipped)
 let effortNow // the effort the session thinks at, as last reported: null when it has none, undefined until something says
+let ultracodeNow = null // whether Ultracode is on (dynamic workflows on every task, beside the effort), as /effort last said: null until it has
 let modelAskedUntil = 0 // a /model the page asked for is on its way: until then, the switch is not asked about again
 const pendingList = [] // requests the band above the prompt offers to answer: { rid, kind, ... }
 const localAnswers = new Map() // rid -> the answer given at the terminal
@@ -710,6 +712,7 @@ function cardNow() {
     ...usageNow,
     permissionMode,
     effort: effortNow ?? null,
+    ultracode: ultracodeNow,
     agents: [...subagents.values()].filter((a) => now - a.lastActivity < AGENT_IDLE_MS).sort((a, b) => a.startedAt - b.startedAt),
   }
 }
@@ -877,6 +880,10 @@ async function noteSetting($, content) {
   const said = settingSaid(text)
   if (!said) return
   if ('effort' in said) noteEffort(said.effort)
+  if ('ultracode' in said && said.ultracode !== ultracodeNow) {
+    ultracodeNow = said.ultracode
+    cardChanged(true)
+  }
   if (said.model) await noteModel($)
 }
 
@@ -1617,6 +1624,9 @@ async function runCommand($, args) {
   }
   if (command === 'model' && commandArgs) modelAskedUntil = Date.now() + 15_000
   const result = await $.command.run({ command, args: commandArgs })
+  // (/effort says no as it says yes, with no error: where it did not do what was asked, the page is told why)
+  const refused = settingRefused(command, result?.text)
+  if (refused) throw new Error(refused)
   return { text: cap(result?.text, policy.maxField), context: cap(result?.context, 4000) }
 }
 

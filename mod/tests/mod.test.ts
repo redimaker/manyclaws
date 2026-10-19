@@ -1553,6 +1553,23 @@ test('the permission mode and the effort are on the card as soon as they change:
   expect(JSON.stringify(s.events())).not.toMatch(/"plan"|"high"|PostToolUse/)
 })
 
+test('Ultracode is on the card as /effort says it, beside the effort; and /effort refusing it, from the page, is a refusal with its reason', async ($, on) => {
+  const m = await made()
+  const s = session(on, m)
+  await start($)
+  await s.clock.advance(300)
+  expect(opened(s, m).cards.at(-1).ultracode).toBe(null)
+  const answer = (id: string, text: string) => ($ as any).session.append(said(id, 'command', 'user', [{ type: 'text', text: `<local-command-stdout>${text}</local-command-stdout>` }]))
+  await answer('c1', 'Ultracode on (this session only): dynamic workflows on every task. Effort stays high.')
+  await s.clock.advance(300)
+  expect([opened(s, m).cards.at(-1).ultracode, opened(s, m).cards.at(-1).effort]).toEqual([true, 'high'])
+  await answer('c2', 'Ultracode off. Effort stays high.')
+  await s.clock.advance(300)
+  expect(opened(s, m).cards.at(-1).ultracode).toBe(false)
+  // (and nothing of it in the open)
+  expect(JSON.stringify(s.events())).not.toMatch(/ultracode|Ultracode/i)
+})
+
 // ---- What is left in the open of a session is what the server cannot do without: nothing that numbers, sizes or
 // names what is said
 

@@ -1,6 +1,6 @@
 // The mod's pure helpers
 import { expect, test } from 'claude-code/testing'
-import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, colorless } from '../hooks/lib.js'
+import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, settingRefused, colorless } from '../hooks/lib.js'
 import { summarizeInput, messageRows } from '../hooks/rows.js'
 
 test('capabilities: default, all, additions and exact lists', async () => {
@@ -90,6 +90,23 @@ test('what /effort and /model answer is read off the transcript', async () => {
   expect(settingSaid(out('Kept model as Sonnet 5.5'))).toBe(null)
   expect(settingSaid(out('Set effort level to heroic'))).toBe(null)
   expect(settingSaid(out('Cancelled'))).toBe(null)
+})
+
+test("Ultracode is a switch beside the effort, read off what /effort ultracode answers, with the level it leaves as it was; and what /effort refuses is said as a refusal", async () => {
+  const out = (said: string) => `<local-command-stdout>${said}</local-command-stdout>`
+  // (as Claude Code 2.1.303 says them)
+  expect(settingSaid(out('Ultracode on (this session only): dynamic workflows on every task. Effort stays high.'))).toEqual({ ultracode: true, effort: 'high' })
+  expect(settingSaid(out('Ultracode off. Effort stays xhigh.'))).toEqual({ ultracode: false, effort: 'xhigh' })
+  expect(settingSaid(out('\x1b[1mUltracode on\x1b[0m (this session only): dynamic workflows on every task.'))).toEqual({ ultracode: true })
+  // A level set leaves it as it was: nothing is said of it
+  expect(settingSaid(out('Set effort level to high (saved as your default for new sessions): Comprehensive implementation'))).toEqual({ effort: 'high' })
+  // Refused where it cannot be turned on, in /effort's own words, without the list a terminal is given
+  expect(settingRefused('effort', out('Ultracode needs dynamic workflows enabled (see /config). Valid options are: low, medium, high'))).toBe('Ultracode needs dynamic workflows enabled (see /config)')
+  expect(settingRefused('effort', out("Ultracode isn't available on Haiku 5.5"))).toBe("Ultracode isn't available on Haiku 5.5")
+  expect(settingRefused('effort', 'Invalid argument: heroic. Valid options are: low, medium')).toBe('Invalid argument: heroic')
+  // What it did is no refusal, and nor is another command's answer
+  expect(settingRefused('effort', out('Ultracode off. Effort stays high.'))).toBe(null)
+  expect(settingRefused('model', out("Ultracode isn't available on Haiku 5.5"))).toBe(null)
 })
 
 test("a local command's answer drawn in color for a terminal is its answer on the page, however much color: the colors go before it is cut to what is sent", async () => {

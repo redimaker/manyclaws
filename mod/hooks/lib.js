@@ -218,12 +218,33 @@ export function settingSaid(text) {
   // eslint-disable-next-line no-control-regex
   const said = out[1].replace(/\x1b\[[0-9;]*m/g, '').trim()
   const level = '(low|medium|high|xhigh|max)\\b'
+  // Ultracode is a switch beside the level, not one of them (dynamic workflows on every task, at whichever level):
+  // "Ultracode on (this session only): dynamic workflows on every task. Effort stays high." and "Ultracode off.
+  // Effort stays high." are what /effort ultracode answers, with the level it leaves as it was
+  const ultra = /^Ultracode (on|off)\b/.exec(said)
+  if (ultra) {
+    const stays = new RegExp(`\\bEffort stays ${level}`).exec(said)
+    return { ultracode: ultra[1] === 'on', ...(stays ? { effort: stays[1] } : {}) }
+  }
   // (the last is a level over what the settings or the organization allow, brought down to one they do)
   const effort = new RegExp(`^(?:Set effort level to|Current effort level:) ${level}`).exec(said) ?? new RegExp(`^Effort level: auto \\(currently ${level}`).exec(said) ?? new RegExp(`^Effort '[a-z]+' exceeds [\\s\\S]*; set to '${level}`).exec(said)
   if (effort) return { effort: effort[1] }
   if (/^Effort level set to auto\b/.test(said)) return { effort: null }
   if (/^Set model to \S/.test(said)) return { model: true }
   return null
+}
+
+// What /effort answered in place of doing what was asked: it says no in the words it says yes in, with no error. To
+// Ultracode where that cannot be turned on (dynamic workflows are off in that computer's /config, or the model has
+// none), and to a word it does not take. The reason, as it gave it, or null where it did what was asked.
+export function settingRefused(command, text) {
+  if (command !== 'effort') return null
+  const out = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(String(text ?? ''))
+  // eslint-disable-next-line no-control-regex
+  const said = (out ? out[1] : String(text ?? '')).replace(/\x1b\[[0-9;]*m/g, '').trim()
+  if (!/^(?:Invalid argument\b|Ultracode needs |Ultracode isn't available )/.test(said)) return null
+  // (what it could have been asked instead is a list for a terminal: "… Valid options are: low, medium, …")
+  return said.split(/\.? Valid options are:/)[0].trim()
 }
 
 // A local command's answer without the colors it was drawn in for a terminal: they are dropped before it is cut to
