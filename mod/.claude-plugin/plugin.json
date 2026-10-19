@@ -1,6 +1,6 @@
 {
   "name": "manyclaws",
-  "version": "6.1.66",
+  "version": "6.1.67",
   "description": "Connects this session to a ManyClaws server: its chat, state and approvals on one web page for every machine and account, with replies from anywhere",
   "author": {
     "name": "Deon Brewis"
