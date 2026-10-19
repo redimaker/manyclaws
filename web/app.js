@@ -8144,7 +8144,7 @@ function renderComputer() {
     h('p', { class: 'muted' }, 'Wherever a session says which computer it is on, ', m.color ? whereLabel(name, m.id) : name, m.color ? ' is a label in this color: in the list, over a chat, and in what a search finds.' : ' is said plainly. Give it a color and it is a label in that color: in the list, over a chat, and in what a search finds.'),
     c.colorError && h('p', { class: 'form-note error', role: 'alert' }, c.colorError),
   )
-  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), colors, newPart(c, m), foldersPart(c, m), versionsPart(at), cswapPart(m), removePart(c, m)].filter(Boolean))
+  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), colors, newPart(c, m), foldersPart(c, m, at), versionsPart(at), cswapPart(m), removePart(c, m)].filter(Boolean))
   // (what is chosen is this page's to say: a drawing leaves what a hand has changed as it is)
   const set = (id, value) => el(id) && el(id).value !== value && (el(id).value = value)
   set('computer-project', c.cwd)
@@ -8158,8 +8158,9 @@ function renderComputer() {
 // ones a person has used Claude Code in there (the agent works those out, within its own limits: never the home folder
 // or one above it, a temporary one, or one inside a folder whose name starts with a dot). Each of those can be turned
 // off from here, by an order, and the whole lot allowed or not; a folder of any other kind is set on the computer.
-function foldersPart(c, m) {
+function foldersPart(c, m, at) {
   if (!m.capabilities?.includes('auto-folders') || !m.online) return null
+  const more = moreFolders(m, at)
   const f = m.folders ?? {}
   const name = machineName(m)
   const set = (f.folders ?? []).length ? h('p', { 'data-part': 'folders-set' }, `Set on ${name}: `, ...f.folders.flatMap((x, i) => [i ? ', ' : '', h('code', null, x)]), '.') : null
@@ -8178,6 +8179,7 @@ function foldersPart(c, m) {
       'Folders',
       { id: 'computer-folders', 'data-key': 'folders' },
       set ?? h('p', { class: 'muted' }, `No folder is set on ${name} for sessions to start in.`),
+      more,
       h('p', null, h('button', { type: 'button', class: 'ghost', 'data-part': 'folders-allow', onclick: () => asking({ auto: true }, 'Allowed: the folders you have used Claude Code in are listed here in a moment.') }, 'Also allow the folders I’ve used Claude Code in')),
       said,
     )
@@ -8188,6 +8190,7 @@ function foldersPart(c, m) {
     h('p', null, `The folders you have used Claude Code in on ${name}, in the last 90 days, where a session may be started from here:`),
     ...(f.auto.length ? f.auto.map((x) => h('div', { class: 'person', 'data-folder': x }, h('code', null, x), h('button', { type: 'button', class: 'ghost', 'data-part': 'folder-off', onclick: () => asking({ off: [...off, x] }, `Turned off: no session is started in ${x} from here.`) }, 'Turn off'))) : [h('p', { class: 'muted' }, 'None yet.')]),
     ...off.map((x) => h('div', { class: 'person muted', 'data-folder-off': x }, h('code', null, x), h('button', { type: 'button', class: 'ghost', 'data-part': 'folder-on', onclick: () => asking({ off: off.filter((y) => y !== x) }, `Turned on again: ${x}.`) }, 'Turn on'))),
+    more,
     h('p', null, h('button', { type: 'button', class: 'link', 'data-part': 'folders-stop', onclick: () => asking({ auto: false }, 'Not allowed: sessions are started only in the folders set on the computer.') }, 'Stop allowing the folders I’ve used')),
     said,
   )
@@ -8219,6 +8222,27 @@ function removePart(c, m) {
     h('p', { class: 'muted' }, `${name} is offline. Remove it from your list where its agent is gone, or was installed again and is listed anew.`),
     h('p', null, h('button', { type: 'button', class: 'ghost danger', 'data-part': 'computer-remove', onclick: remove }, 'Remove this computer')),
     c.removeError && h('p', { class: 'form-note error', role: 'alert' }, c.removeError),
+  )
+}
+
+// How a folder that is not listed is allowed, said where the list is: a folder a person uses Claude Code in is listed
+// by itself, within its limits; any other is named on the computer, in its agent.json, and the agent started again
+// with what it has (the installer's --update writes nothing there, and handles each system's service: Task Scheduler
+// on Windows has more to stop than the task). The plugin's folder is the one Claude Code installed, by the version the
+// computer's sessions say they run.
+function moreFolders(m, at) {
+  const name = machineName(m)
+  const version = at ? pluginOn(at) : null
+  const p = '~/.claude/plugins/cache/manyclaws/manyclaws/' + (version ?? '<its version>')
+  const windows = /windows/i.test(m.platform ?? '')
+  return h(
+    'details',
+    { class: 'folders-more', 'data-part': 'folders-more' },
+    h('summary', null, 'Allow another folder'),
+    h('p', null, `Use Claude Code in it on ${name}, and it is listed here: a folder used in the last 90 days is. Not your home folder or one above it, a temporary folder, or one inside a folder whose name starts with a dot.`),
+    h('p', null, `Or name it on ${name}, for that folder and every one under it, where a new folder may be made from here too: add it to `, h('code', null, '"folders"'), ' under ', h('code', null, '"spawn"'), ' in ', h('code', null, '~/.manyclaws/agent.json'), ` there, then start the agent again as it is set up, in a terminal${windows ? ' (Git Bash)' : ''}:`),
+    h('pre', { class: 'folders-cmd' }, h('code', null, `p=${p}\nbash "$p/agent/install.sh" --update --from "$p"`)),
+    h('p', { class: 'muted' }, 'While the agent is running anything started from this page, the installer changes nothing and says so; --end-sessions ends that first. The folders named there are listed here, as set on it.'),
   )
 }
 

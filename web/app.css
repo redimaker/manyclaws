@@ -1926,6 +1926,13 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 .acct-head, .acct-mark, .back-word { display: none; }
 .acct-part + .acct-part, #setup-status + .acct-part { margin-top: 26px; }
 .acct-body h3 { font-size: 1em; margin: 20px 0 8px; }
+/* How another folder is allowed, under a computer's list of them: folded away until asked for */
+.folders-more { margin: 14px 0 6px; }
+.folders-more summary { color: var(--muted); cursor: pointer; }
+.folders-more summary:hover { color: var(--text); }
+.folders-more[open] summary { margin-bottom: 8px; color: var(--text); }
+.folders-cmd { margin: 8px 0; padding: 10px 12px; border-radius: 6px; background: var(--code-bg); font-size: .9em; white-space: pre-wrap; word-break: break-all; user-select: all; }
+.folders-cmd code { padding: 0; background: none; color: inherit; font-size: inherit; }
 /* What does not open here (#/account/unopened): a computer, a line between one and the
    next, with how it stands and, numbered, what to do on it */
 .shut-device { padding: 12px 0; border-top: 1px solid var(--border); }
