@@ -834,6 +834,29 @@ test('from the page, a change of effort a terminal would stop to ask about is re
   expect(ran).toEqual(['xhigh', 'ultracode on', 'high', 'medium', 'medium'])
 })
 
+test("in a session VS Code hosts, an effort or Ultracode set from the page is said in the conversation not to show in VS Code's own menu, with where to see it took effect; in a terminal nothing is said", async ($, on) => {
+  on('command.run', ($: any, e: any) => ({ value: { text: e.args.startsWith('ultracode') ? 'Ultracode on (this session only): dynamic workflows on every task. Effort stays high.' : 'Set effort level to xhigh (this session only): Deeper reasoning' } }))
+  const m = await made()
+  const run = (seq: number, args: string) => prompt(seq, { order: order(m, 'call', { method: 'command.run', args: { command: 'effort', args } }) })
+  const s: any = session(on, m, { ...VSCODE, poll: [{ commands: [run(1, 'xhigh'), run(2, 'ultracode on')] }] })
+  await startHosted($)
+  await s.clock.advance(1000)
+  expect(s.results().map((r: any) => r.ok)).toEqual([true, true])
+  const said = s.said.map((l: string) => String(JSON.parse(l).text ?? JSON.parse(l)))
+  expect(said).toContain("VS Code's Effort menu doesn't show a change made from outside VS Code. It took effect: Claude Code's line above says so, and the ManyClaws page shows the level each reply is sent at.")
+  expect(said).toContain("VS Code's Ultracode switch doesn't show a change made from outside VS Code. It took effect: Claude Code's line above says so, and Claude runs its next task as workflows.")
+})
+
+test('in a terminal, an effort set from the page is not said to be anywhere else: its footer shows it', async ($, on) => {
+  on('command.run', () => ({ value: { text: 'Set effort level to xhigh (this session only): Deeper reasoning' } }))
+  const m = await made()
+  const s: any = session(on, m, { poll: [{ commands: [prompt(1, { order: order(m, 'call', { method: 'command.run', args: { command: 'effort', args: 'xhigh' } }) })] }] })
+  await start($)
+  await s.clock.advance(1000)
+  expect(s.results()[0]).toMatchObject({ ok: true })
+  expect(s.said.some((l: string) => l.includes("doesn't show a change made from outside"))).toBe(false)
+})
+
 // ---- A session's chat, sent as it starts and whenever the server asks for it
 
 const TALK = [
