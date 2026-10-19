@@ -1,5 +1,5 @@
 {
-  "release": 74,
+  "release": 75,
   "made": "2026-10-19",
   "plugin": "6.1.74",
   "agent": "6.1.0",
@@ -9,7 +9,7 @@
     "mod/agent/agent.mjs": "b08c521165b78a9039b1fa75bc20f7e420aca81cabc11bee4920e2461521f9c7",
     "mod/agent/cswap.mjs": "c92b960abcaf91422677e1f011867dff5be02f2644e9b0fefef8da5d2bd6baa0",
     "mod/agent/files.mjs": "534c4f6912ee91dff6cad707cb521c8be8ab50fbd0c85f901908548d056cc66e",
-    "mod/agent/host.mjs": "18a3371c3d63af60ede0ab9962f4edfcfd006b4a3bf536094628f95dd5556cfc",
+    "mod/agent/host.mjs": "35d3fed75178e02f53475a80d6af54d577cc816d210acbb99569e8060b8beb2a",
     "mod/agent/indexer.mjs": "929b9dad7726ff0f109f07f2154ec3444a353f120dcc6ff0f70615756570199d",
     "mod/agent/install.sh": "919f9acaae6edb0d4d8da4ffa0e5fdbc90acd22da51e7df1ffaf9e6dd6e6fedc",
     "mod/agent/rows.mjs": "92cdeb63c94ca5778e69cdf7209bdddac07171fc41ee8716faf3af6dda8946ea",
