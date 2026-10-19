@@ -1627,7 +1627,24 @@ async function runCommand($, args) {
   // (/effort says no as it says yes, with no error: where it did not do what was asked, the page is told why)
   const refused = settingRefused(command, result?.text)
   if (refused) throw new Error(refused)
+  if (command === 'effort' && commandArgs) vscodeNote($, commandArgs)
   return { text: cap(result?.text, policy.maxField), context: cap(result?.context, 4000) }
+}
+
+// VS Code's own Effort row and Ultracode switch show what VS Code itself last set: it reads the session's again only
+// when it connects, changes model, or sends a command of its own, never after one this plugin ran for the page. The
+// change has taken effect all the same (the next request is sent at the new level, tried 2026-10-19), and nothing in VS
+// Code asks the session what it is (/effort alone says how to use it, /status is not there): so it is said in the
+// conversation, as a line Claude does not read, with where to see it
+function vscodeNote($, asked) {
+  if (meta.entrypoint !== 'claude-vscode') return
+  const ultra = /^ultracode\b/i.test(asked.trim())
+  const text = ultra
+    ? "VS Code's Ultracode switch doesn't show a change made from outside VS Code. It took effect: Claude Code's line above says so, and Claude runs its next task as workflows."
+    : "VS Code's Effort menu doesn't show a change made from outside VS Code. It took effect: Claude Code's line above says so, and the ManyClaws page shows the level each reply is sent at."
+  Promise.resolve()
+    .then(() => $.ui.log(text))
+    .catch(() => {})
 }
 
 // ---- Requests the page answers: approvals and questions
