@@ -71,6 +71,9 @@ const AGENT_IDLE_MS = 6 * 3600_000 // a subagent not heard of for this long is t
 const DEVICES_MS = 2000 // the list of the account's devices is not asked for again sooner than this after it was
 const DEVICES_EVERY_MS = 5 * 60_000 // and it is read this often with no order to go by: a device taken off it is seen to be, while the list without it is still what the server hands over
 const TOOL_PREFIX = 'mcp__manyclaws__'
+const RELAY_MS = 250 // how often the relay's folder is looked in, while a permission prompt may come by it (relayTick)
+const RELAY_MODE_MS = 3000 // and how often the permission mode it keeps is read
+const MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions'])
 
 const instance = randomId() // this load of the module, said in what `ping` answers (sealed, as every answer is) and nowhere else: a reload is a new one
 
@@ -129,6 +132,10 @@ const localAnswers = new Map() // rid -> the answer given at the terminal
 const localApprovals = new Map() // tool_use_id -> rid, for prompts left to the terminal's dialog
 const asking = [] // approvals the app is asking in its own dialog that the page may answer too: { rid, tool, input, request }
 const answeredBy = new Map() // rid -> who answered one of those first, when it wasn't the app's dialog
+const held = new Map() // tool_use_id -> { e, decided, watch, asked }: calls auto mode's classifier decides, until each has run or been refused
+const relayTaken = new Set() // the permission prompts the relay handed over that are taken up, by name
+let relayBusy = false // a look in the relay's folder is under way
+let relayModeAt = 0 // when the permission mode the relay keeps was last read
 const deltas = new Map() // streamed reply text not yet sent, by turn, step and block
 const added = new Set() // the names of its own tools that are before Claude (OWN_TOOLS)
 
@@ -172,6 +179,8 @@ export function register(on, options) {
       await currentSessionId($)
       runningTurn = e.turnId
       stepsDone.clear()
+      // (the prompt's own settings hook has just said the mode, where only the relay says it)
+      if (!e.agentId) await relayMode($, true)
       // (the turn the server asked the answer of is the first to start after it asked)
       if (answerAsked && !answerTurn) answerTurn = e.turnId
       await setState($, 'working')
@@ -219,6 +228,8 @@ export function register(on, options) {
       else {
         sendDeltas()
         runningTurn = null
+        // (a call the classifier refused is not asked about after the turn)
+        for (const id of [...held.keys()]) settleHeld(id)
         await turnDone($, e)
         await setState($, 'idle', e.reason === 'answer' ? '' : e.reason)
       }
@@ -236,6 +247,8 @@ export function register(on, options) {
     agentHeard(agentId)
     const result = await next(e)
     agentHeard(agentId)
+    // (decided, however it was: a call left to auto mode's classifier is no longer one a dialog can come for)
+    settleHeld(toolUseId)
     // What the call came back with, as its row in the chat is made of it (rows.js): none for a subagent's call
     const end = { toolUseId, agentId }
     if (typeof result?.deny === 'string') end.deny = cap(result.deny, 2000)
@@ -273,6 +286,12 @@ export function register(on, options) {
     if (decided?.decision !== 'ask' || e.tool === 'AskUserQuestion') return decided
     // Its own two tools are as trusted as the plugin that put them there
     if (isOwnTool(e.tool)) return { decision: 'allow', reason: 'A ManyClaws tool' }
+    // In auto mode an "ask" is the classifier's to settle first: it lets most calls run, and puts the rest to a person
+    // in the app's own dialog. The page is asked only then (dialogUp), as that dialog is up, and not for what it lets run.
+    if (attended && (await modeNow($)) === 'auto') {
+      held.set(e.tool_use_id, { e, decided, watch: { done: false } })
+      return decided
+    }
     return approve($, e, decided, next)
   })
 
@@ -293,7 +312,7 @@ export function register(on, options) {
       // The app is asking in its own dialog. The engine runs this hook beside the dialog
       // and takes whichever answers first, so the page's answer, if it comes, is given here
       if (event === 'PermissionRequest') {
-        const decision = await pageDecision($, e, next)
+        const decision = await dialogUp($, e, next)
         if (decision) return { decision }
       }
       // A conversation started or resumed in this process (after /clear, /resume or
@@ -483,6 +502,7 @@ async function begin($, e, given, keys) {
   // (taken up again, with another token or key, the loops of before stop: these are the ones that go on)
   const loop = ++loops
   $.clock.every(FLUSH_MS, () => loop === loops && flush($))
+  $.clock.every(RELAY_MS, () => loop === loops && relayTick($))
   $.clock.after(1, () => poll($, loop))
 }
 
@@ -558,6 +578,8 @@ function forgetSession() {
   subagents.clear()
   spawns = []
   stepsDone.clear()
+  for (const id of [...held.keys()]) settleHeld(id)
+  relayTaken.clear()
   answerAsked = ''
   answerTurn = null
 }
@@ -1211,7 +1233,7 @@ async function selfCheck($) {
   } catch {}
 }
 const CLASSIC_SKIPPED =
-  "ManyClaws: an organization manages Claude Code here, and Claude Code doesn't pass a plugin a person installed its settings hook events (classic.*). So the page can't answer a permission prompt VS Code asks in its own dialog, doesn't see the session's permission mode, and gets no notifications from it; the rest works. An administrator who lists ManyClaws in the organization's managed settings brings them back."
+  "ManyClaws: an organization manages Claude Code here, and Claude Code doesn't pass a plugin a person installed its settings hook events (classic.*). So the page can't answer a permission prompt VS Code asks in its own dialog, and gets no notifications from it; the rest works (the permission mode, and a prompt asked in the terminal, come by the plugin's own settings hooks). An administrator who lists ManyClaws in the organization's managed settings brings them back."
 // Whether the settings hook events pass this plugin over: where an organization manages Claude Code (it has settings in
 // force here), they reach only a plugin it lists itself. One that has come says this plugin is such a one, or that the
 // organization manages nothing
@@ -1657,14 +1679,14 @@ function forget(rid) {
 // The page's answer to a permission prompt the app is asking in its own dialog, as a
 // classic PermissionRequest decision; null when the dialog was answered first (or the
 // turn was interrupted, or this prompt isn't one the page was shown).
-async function pageDecision($, e, hook) {
+async function pageDecision($, e, hook, watch) {
   const input = JSON.stringify(e.tool_input ?? null)
   const mine = asking.filter((a) => a.tool === e.tool_name)
   const found = mine.find((a) => JSON.stringify(a.input ?? null) === input) ?? (mine.length === 1 ? mine[0] : null)
   if (!found) return null
   forget(found.rid)
   await flush($)
-  const answer = await awaitAnswer($, found.rid, hook, found.request, 0)
+  const answer = await awaitAnswer($, found.rid, hook, found.request, 0, watch)
   if (answer.decision !== 'allow' && answer.decision !== 'deny') return null
   // (what came of it is reported when the call ends, as for one answered in the dialog)
   answeredBy.set(found.rid, answer.by ?? 'server')
@@ -1673,10 +1695,105 @@ async function pageDecision($, e, hook) {
   return { behavior: 'deny', message: 'The user denied this from ManyClaws' + (answer.reason ? ': ' + answer.reason : '') }
 }
 
-async function approve($, e, decided, hook) {
+// A permission prompt the app is asking in its own dialog, as its PermissionRequest event says (by the settings hook
+// events where they reach this plugin, or by its relay where they pass it over): the page's answer to it, or null.
+// One for a call auto mode's classifier put to a person is asked on the page now, beside that dialog, unless the page
+// is to be told only (the policy's "terminal only"); the dialog is up already, so the band above the prompt is not.
+async function dialogUp($, e, hook, watch) {
+  const input = JSON.stringify(e.tool_input ?? null)
+  const mine = [...held.values()].filter((h) => !h.asked && h.e.tool === e.tool_name)
+  const found = mine.find((h) => JSON.stringify(h.e.input ?? null) === input) ?? (mine.length === 1 ? mine[0] : null)
+  if (found) {
+    // (held until the call is decided, however it is: that ends the page's wait too)
+    found.asked = true
+    const local = policy.approvals === 'local' || !caps.has('approve')
+    await approve($, found.e, found.decided, hook, local ? 'local' : 'both')
+  }
+  return pageDecision($, e, hook, watch ?? found?.watch)
+}
+// A call left to auto mode's classifier has been decided: whatever waits on a dialog for it stops
+function settleHeld(toolUseId) {
+  const h = held.get(toolUseId)
+  if (h) h.watch.done = true
+  held.delete(toolUseId)
+}
+
+// The session's permission mode as of now: what the settings hook events said last, or where they pass this plugin
+// over, what its relay keeps
+async function modeNow($) {
+  await relayMode($)
+  return permissionMode
+}
+
+// Where the plugin's own settings hooks (relay.sh) leave what they are given for this session
+async function relayFolder($) {
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || ((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '') + '/.claude'
+  return configDir + '/manyclaws/relay/' + (await currentSessionId($))
+}
+
+// The permission mode the relay keeps, read where the settings hook events do not reach this plugin (where they do,
+// they say it themselves, and more often): at most every few seconds, unless `now`
+async function relayMode($, now = false) {
+  if (classicHeard || !config || (!now && Date.now() - relayModeAt < RELAY_MODE_MS)) return
+  relayModeAt = Date.now()
+  let said = ''
+  try {
+    said = String(await $.fs.read((await relayFolder($)) + '/mode')).trim()
+  } catch {
+    return
+  }
+  if (MODES.has(said) && said !== permissionMode) {
+    permissionMode = said
+    cardChanged(true)
+  }
+}
+
+// A look in the relay's folder: for a permission prompt, while one may come there (a call left to auto mode's
+// classifier, or one asked in the app's dialog and on the page), and for the mode now and then
+async function relayTick($) {
+  if (relayBusy || !config || !sessionId) return
+  relayBusy = true
+  try {
+    await relayMode($)
+    if (!held.size && !asking.length) return
+    const folder = await relayFolder($)
+    const asks = (await $.fs.list(folder)).map((x) => x.name).filter((n) => n.endsWith('.ask') && !relayTaken.has(n))
+    for (const name of asks) {
+      relayTaken.add(name)
+      const base = folder + '/' + name.slice(0, -'.ask'.length)
+      await $.fs.write(base + '.taken', '')
+      let e = null
+      try {
+        e = JSON.parse(await $.fs.read(folder + '/' + name))
+      } catch {}
+      void relayAnswer($, base, e)
+    }
+  } catch {
+    // (no folder yet: no settings hook of this session's has run)
+  } finally {
+    relayBusy = false
+  }
+}
+
+// The answer to a permission prompt the relay handed over, written where it waits: the page's, or none (the dialog's
+// alone). Where the settings hook events reach this plugin, the PermissionRequest event answers it, and this does not.
+async function relayAnswer($, base, e) {
+  let decision = null
+  try {
+    if (!classicHeard && e?.hook_event_name === 'PermissionRequest' && e.session_id === sessionId) decision = await dialogUp($, e, null)
+  } catch {}
+  const said = decision ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } }) : ''
+  try {
+    await $.fs.write(base + '.answer', said)
+    await $.fs.write(base + '.done', '')
+  } catch {}
+}
+
+// (`route`: where it is asked, where that is settled already: see dialogUp)
+async function approve($, e, decided, hook, route) {
   const rid = requestId()
   const summary = summarizeInput(e.input)
-  const route = await routeOf($, 'approvals')
+  route ??= await routeOf($, 'approvals')
   const remote = route === 'remote'
   const request = {
     rid,
