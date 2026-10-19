@@ -76,6 +76,7 @@ const app = {
   latest: {}, // the plugin and the agent the server hands out now: { plugin, agent }, each a version or null
   footMenu: null, // what is open over the reply box: { kind: 'modes' | 'model' | 'effort' }
   modeMenu: null, // the modes that menu offers: { mode, allowed, onPick }
+  modeRestart: null, // a mode picked there for a session in a terminal, which is said how to start again in it: { sid, mode }
   setting: null, // a model or effort asked for and not yet shown by the session: { sid, kind, value }
   modelRows: new Map(), // session id -> { value, options }: its models, as its own settings list them
   catalog: new Map(), // machine id -> { sessions, more, at }: its past sessions, newest first
@@ -5453,6 +5454,7 @@ function openFootMenu(kind) {
 function closeFootMenu() {
   const had = app.footMenu
   app.footMenu = null
+  app.modeRestart = null
   drawFootMenu()
   if (had && !matchMedia('(pointer: coarse)').matches) el('input').focus({ preventScroll: true })
 }
@@ -5486,7 +5488,23 @@ function menuRow({ title, says, mark, on, pending, disabled, onclick, ...data })
 const MODE_CHANGED_WITH = { 'VS Code': ', with the mode button', 'the terminal': ', with shift+tab' }
 function modeNote(s) {
   if (!s || s.hosted) return h('p', { class: 'menu-note' }, 'A session in a terminal or an editor has its mode changed there: shift+tab in a terminal, this menu in an editor.')
+  if (inTerminal(s)) return h('p', { class: 'menu-note' }, 'This session runs in the terminal, so its mode is changed there, with shift+tab. Or pick one here to see how to start it again in that mode.')
   return h('p', { class: 'menu-note' }, `This session runs in ${appName(s)}, so its mode is changed there${MODE_CHANGED_WITH[appName(s)] ?? ''}.`)
+}
+// A session in a terminal, which nothing but its keyboard can switch to another mode as it runs (Claude Code gives a
+// plugin no way to): it can be ended there and resumed in the mode picked, by its id, in its own folder
+const inTerminal = (s) => !!s && !s.hosted && !s.ended && appName(s) === 'the terminal'
+const quoted = (text) => "'" + String(text).replace(/'/g, "'\\''") + "'"
+const resumeIn = (s, mode) => (s.cwd ? `cd ${quoted(s.cwd)} && ` : '') + `claude --resume ${s.id} --permission-mode ${mode}`
+function restartNote(s, mode) {
+  const command = resumeIn(s, mode)
+  return h(
+    'div',
+    { class: 'menu-note mode-restart' },
+    h('p', null, `To switch it to ${PERMISSION_MODES[mode]?.[0] ?? mode}, end Claude Code in its terminal (/exit, or Ctrl+C twice) and start it again in that mode, with what it said before:`),
+    h('code', { class: 'mode-command' }, command),
+    h('button', { type: 'button', class: 'link', 'data-copy': 'mode', onclick: (ev) => void copyText(command).then(() => (ev.target.textContent = 'Copied')) }, 'Copy'),
+  )
 }
 
 // What is open over the reply box, drawn in the look's own way
@@ -5511,7 +5529,7 @@ function drawFootMenu() {
   // (drawn already: drawing it again would take it from under a finger)
   // Auto approve, under the modes: whether it is on for this session, how long yet, and why it cannot be where it cannot
   const auto = live ? { on: !!autoUntil(live.id), left: autoUntil(live.id) ? autoLeft(live.id) : '', bars: autoBars(live) } : null
-  const drawn = JSON.stringify([kind, app.view, live?.id, live?.model, level, can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto])
+  const drawn = JSON.stringify([kind, app.view, live?.id, live?.model, level, can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto, app.modeRestart, live?.cwd])
   if (box.dataset.drawn === drawn) return
   box.dataset.drawn = drawn
   box.dataset.kind = kind
@@ -5551,7 +5569,10 @@ function drawFootMenu() {
   const foot = (...children) => (live ? h('div', { class: 'menu-foot' }, ...children) : null)
   if (kind === 'modes') {
     const shown = [...new Set([...Object.keys(PERMISSION_MODES).filter((m) => m !== 'dontAsk'), ...modes.allowed, modes.mode])]
-    const pickable = (m) => !!modes.onPick && modes.allowed.includes(m)
+    // (one in a terminal: a mode picked says how to start it again in that mode)
+    const restarts = !modes.onPick && inTerminal(live)
+    const pickable = (m) => (!!modes.onPick && modes.allowed.includes(m)) || restarts
+    const restart = restarts && app.modeRestart?.sid === live.id ? app.modeRestart.mode : null
     put(
       box,
       list(
@@ -5562,15 +5583,20 @@ function drawFootMenu() {
             says: PERMISSION_MODES[m]?.[2],
             mark: icon(m),
             on: m === modes.mode,
+            pending: m === restart,
             disabled: !pickable(m) && m !== modes.mode,
             'data-mode': m,
             onclick: () => {
+              if (restarts && m !== modes.mode) {
+                app.modeRestart = { sid: live.id, mode: m }
+                return drawFootMenu()
+              }
               if (pickable(m) && m !== modes.mode) modes.onPick(m)
               closeFootMenu()
             },
           }),
         ),
-        modes.onPick ? null : modeNote(live),
+        modes.onPick ? null : restart && restart !== modes.mode ? restartNote(live, restart) : modeNote(live),
         // Not one of the session's own modes: what this browser does about what the session asks, in whichever mode it is
         auto && h('div', { class: 'menu-sep', role: 'separator' }),
         auto &&
