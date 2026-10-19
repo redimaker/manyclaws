@@ -260,9 +260,19 @@ export class Host {
 
   stop({ sid }) {
     const h = this.hosted.get(sid)
-    if (!h) throw new HostError('the agent is not running this session')
+    if (!h) {
+      this.log(`${sid}: Exit asked for, and the agent is not running it`)
+      throw new HostError('the agent is not running this session')
+    }
+    // (said, with how long it takes to go: VS Code that opens it meanwhile finds it still open)
+    h.exitAskedAt = Date.now()
+    this.log(`${sid}: Exit asked for (pid ${h.proc.pid}, ${h.state ?? 'state not known'}): its input is ended`)
     this.close(h)
-    setTimeout(() => this.hosted.get(sid) === h && h.proc.kill(), 10_000).unref()
+    setTimeout(() => {
+      if (this.hosted.get(sid) !== h) return
+      this.log(`${sid}: still running ten seconds after Exit was asked for: killed`)
+      h.proc.kill()
+    }, 10_000).unref()
     return { sid }
   }
 
@@ -477,8 +487,9 @@ export class Host {
     })
     proc.stderr.on('data', (chunk) => (h.tail = (h.tail + chunk).slice(-2000)))
     proc.on('error', (err) => (h.tail += '\n' + err.message))
-    proc.on('exit', (code) => {
+    proc.on('exit', (code, signal) => {
       clearTimeout(h.timer)
+      if (h.exitAskedAt) this.log(`${h.sid}: Claude Code (pid ${proc.pid}) ended ${Date.now() - h.exitAskedAt} ms after Exit was asked for${signal ? ', by ' + signal : ''}`)
       if (this.hosted.get(h.sid) === h) this.hosted.delete(h.sid)
       // (what couldn't be marked in place while Claude Code was writing it is marked now)
       this.mark(h, { whole: true })
