@@ -1397,6 +1397,7 @@ test('of a session nothing is in the open but which session, the order things ca
     ['assistant', 'Counting.', undefined, undefined],
     ['tool', 'count herons', 'Bash', 'tu1'],
     ['result', 'seven herons', undefined, 'tu1'],
+    ['notice', '2s', undefined, undefined],
   ])
   // (a row's name is made of what it is called here, with the key: the same row has the same name each time, and the name says nothing)
   expect(got.rows[0].id).toBe(nameOf('u1', contentKey(m.key)))
@@ -1467,7 +1468,7 @@ test('a session tells the account\'s phones itself, sealed: when it starts to ne
   await s.clock.advance(10)
   await ($ as any).turn.start({ turnId: 't1', text: 'Build it' })
   expect((await check($)).decision).toBe('allow')
-  await ($ as any).turn.complete({ turnId: 't1', reason: 'answer', isAborted: false, durationMs: 45_000, answer: 'Built, with\n  three warnings.' })
+  await ($ as any).turn.complete({ turnId: 't1', reason: 'answer', isAborted: false, durationMs: 45_000, answer: 'Built, with\n  three warnings.', usage: { input_tokens: 10, output_tokens: 2412, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'm' } })
   await s.clock.advance(2000)
   const { notes, all } = opened(s, m)
   expect(notes.map((n) => [n.kind, n.prefix, n.body])).toEqual([['needs', 'Needs you: ', 'Permission: Bash make'], ['done', 'Done: ', 'Built, with three warnings.']])
@@ -1479,7 +1480,8 @@ test('a session tells the account\'s phones itself, sealed: when it starts to ne
   await ($ as any).turn.complete({ turnId: 't2', reason: 'aborted', isAborted: true, durationMs: 90_000 })
   await s.clock.advance(2000)
   expect(opened(s, m).notes.length).toBe(2)
-  expect(opened(s, m).rows.map((r) => [r.role, r.text])).toEqual([['notice', 'Interrupted']])
+  // (each turn says in the chat what it took, as the terminal does: the stopped one counted no tokens)
+  expect(opened(s, m).rows.map((r) => [r.role, r.text])).toEqual([['notice', '45s · ↓ 2.4k tokens'], ['notice', 'Interrupted'], ['notice', '1m 30s']])
 })
 
 test('the reply as it is written goes in sealed pieces, and word that they are done with when the reply is in the chat', async ($, on) => {

@@ -2,7 +2,7 @@
 // load them directly. register.js holds everything that touches `$`.
 
 export const PROTOCOL = 2
-export const PLUGIN_VERSION = '6.1.67'
+export const PLUGIN_VERSION = '6.1.68'
 
 // Where the mod reports: on the branch beta, ManyClaws' beta server. ManyClaws has one server, so the plugin has no option for its
 // address and its dialog asks for none: MANYCLAWS_URL names another (a test's, or one
@@ -246,6 +246,16 @@ export function flattenText(content) {
 // points (claude -p is sdk-cli, scripts are sdk-ts and sdk-py) are unattended.
 export function isAttended(isInteractive, entrypoint) {
   return !!isInteractive || !/^sdk-/.test(String(entrypoint ?? ''))
+}
+
+// What a turn took, as the terminal says it beneath the turn: how long it ran, and the
+// tokens it wrote where it made a request that counted (8m 5s · ↓ 8.0k tokens)
+export function took(e) {
+  const s = Math.round(Number(e.durationMs) / 1000)
+  if (!Number.isFinite(s) || s < 0) return ''
+  const time = s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : s + 's'
+  const n = e.usage?.output_tokens
+  return typeof n === 'number' && n > 0 ? `${time} · ↓ ${n < 1000 ? n : (n / 1000).toFixed(1) + 'k'} tokens` : time
 }
 
 export function randomId() {

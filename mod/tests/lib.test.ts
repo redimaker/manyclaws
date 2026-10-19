@@ -1,6 +1,6 @@
 // The mod's pure helpers
 import { expect, test } from 'claude-code/testing'
-import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, colorless } from '../hooks/lib.js'
+import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, colorless, took } from '../hooks/lib.js'
 import { summarizeInput, messageRows } from '../hooks/rows.js'
 
 test('capabilities: default, all, additions and exact lists', async () => {
@@ -107,4 +107,14 @@ test("a local command's answer drawn in color for a terminal is its answer on th
   const cut = messageRows({ uuid: 'c2', door: 'command', blocks: [{ type: 'text', text: '<local-command-stdout>Context Usage\nlong' }] })
   expect(cut.map((r: any) => [r.role, r.text])).toEqual([['output', 'Context Usage\nlong']])
   expect(colorless('\x1b[1mbold\x1b[22m plain')).toBe('bold plain')
+})
+
+test('what a turn took reads as the terminal says it: its length, and the tokens it wrote where any counted', () => {
+  expect(took({ durationMs: 485_000, usage: { output_tokens: 8012 } })).toBe('8m 5s · ↓ 8.0k tokens')
+  expect(took({ durationMs: 27_167, usage: { output_tokens: 451 } })).toBe('27s · ↓ 451 tokens')
+  expect(took({ durationMs: 3_725_000, usage: { output_tokens: 120_400 } })).toBe('1h 2m · ↓ 120.4k tokens')
+  // (an interrupt or an API error counts nothing: its length alone)
+  expect(took({ durationMs: 90_000 })).toBe('1m 30s')
+  expect(took({ durationMs: 400, usage: { output_tokens: 0 } })).toBe('0s')
+  expect(took({})).toBe('')
 })

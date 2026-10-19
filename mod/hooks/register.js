@@ -50,6 +50,7 @@ import {
   settingSaid,
   isAttended,
   randomId,
+  took,
 } from './lib.js'
 import { seal, open, isSealed, openBytes, keysFromText, keysText, contentKey, nameOf, toB64, fromB64, sha256, isOrder, readOrder, takeOrder, orderMemory, devicesMemory, askedOf, OrderRefused, sshSigned, pluginDigest, pluginOfList, notPlugin, hexSha256, mayStart, pairStart, pairFinish, pairConfirmed, sealPaired, openPaired, pairCode } from './seal.js'
 import { messageRows, resultRow, historyRows, summarizeInput } from './rows.js'
@@ -818,12 +819,14 @@ function tellPhones(kind, body, { title, prefix = '' } = {}) {
 }
 
 // A turn is over, and what there is to say of that is said here, where it can be read:
-// the chat's line where it did not end in an answer, word to a phone where it took a
-// while and nobody stopped it, and its answer where the server asked for it.
+// the chat's line where it did not end in an answer, and what it took, word to a phone
+// where it took a while and nobody stopped it, and its answer where the server asked for it.
 async function turnDone($, e) {
   partDone()
   if (e.reason === 'aborted') await emitRows($, [{ uuid: e.turnId + ':end', role: 'notice', text: 'Interrupted' }])
   else if (e.reason && e.reason !== 'answer') await emitRows($, [{ uuid: e.turnId + ':end', role: 'notice', text: 'Turn ended: ' + e.reason }])
+  const spent = took(e)
+  if (spent) await emitRows($, [{ uuid: e.turnId + ':took', role: 'notice', text: spent }])
   if (e.reason !== 'aborted' && !e.isAborted && Number(e.durationMs) >= DONE_WORTH_MS && attended) {
     if (e.reason && e.reason !== 'answer') tellPhones('done', 'Stopped: ' + e.reason)
     else if (typeof e.answer === 'string' && e.answer) tellPhones('done', e.answer, { prefix: 'Done: ' })
