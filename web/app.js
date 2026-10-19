@@ -2196,7 +2196,7 @@ function rowTime(s) {
 }
 // What started a session that is running, for its tile: its person, there, in a terminal or an editor, said in a word
 // after the project and the computer, with the rest for whoever points at it; or the computer's own agent, which runs
-// it itself (a search from this page: the ones Exit ends), which is said by ManyClaws' own mark before the time
+// it itself (a search from this page), which is said by ManyClaws' own mark before the time
 // (agentMark). Of a session that is not running there is nothing to say.
 function startedBy(s) {
   if (!s || s.ended || !s.online || s.hosted) return null
@@ -2210,7 +2210,10 @@ function startedBy(s) {
 // tile's first line, before the time (unless this device's settings leave it off). What it means is said to whoever
 // points at it, or has it read out.
 const BY_AGENT = 'A search started from this page: the ManyClaws agent on its computer runs it, and Exit ends it'
-const FROM_PAGE = 'Started from this page: it is open in a terminal on its computer, and is closed there'
+const FROM_PAGE = 'Started from this page: it is open in a terminal on its computer, and is closed there or with Exit'
+// What Exit does, said on it: it ends a search, or Claude Code in the terminal the agent opened
+const EXIT_SEARCH = "Ends this search, which this machine's agent is running. The session stays on the machine, where a reply here, or claude --resume in a terminal, picks it up again."
+const EXIT_TERMINAL = "Ends Claude Code in the terminal this machine's agent opened it in, as closing that terminal would. The session stays on the machine, where a reply here, or claude --resume in a terminal, picks it up again."
 function agentMark(s) {
   if (!s || s.ended || !s.online || !(s.hosted || openedHere(s))) return null
   const says = s.hosted ? BY_AGENT : FROM_PAGE
@@ -2828,9 +2831,9 @@ async function drawNewProjects() {
 function opensIn(m) {
   const t = m?.spawn?.terminal
   const there = m ? ` on ${machineName(m)}` : ''
-  if (t === 'tmux') return `It opens in tmux${there} (tmux ls lists it there), and runs until it is closed there.`
-  if (t === 'console') return `It opens in a console window${there}, and runs until it is closed there.`
-  return `It opens in ${t && t !== 'Terminal' ? 'a ' + t : 'a Terminal'} window${there}, and runs until it is closed there.`
+  if (t === 'tmux') return `It opens in tmux${there} (tmux ls lists it there), and runs until it is closed there or with Exit.`
+  if (t === 'console') return `It opens in a console window${there}, and runs until it is closed there or with Exit.`
+  return `It opens in ${t && t !== 'Terminal' ? 'a ' + t : 'a Terminal'} window${there}, and runs until it is closed there or with Exit.`
 }
 function drawNewOpens() {
   el('ns-opens').textContent = app.machines.has(el('ns-device').value) ? opensIn(app.machines.get(el('ns-device').value)) : ''
@@ -5210,8 +5213,10 @@ function renderHeader() {
   // The terminal's own words for it, where there's a key to press
   working.lastChild.hidden = !stoppable || matchMedia('(pointer: coarse)').matches
   el('remove').hidden = s.online
-  // One the machine's agent is running can be handed back to the machine
-  el('release').hidden = !(s.hosted && s.machine && s.online)
+  // One the machine's agent is running can be handed back to the machine, and one it opened in a terminal there ended
+  // as closing that would end it
+  el('release').hidden = !(s.machine && s.online && (s.hosted || openedHere(s)))
+  el('release').title = s.hosted ? EXIT_SEARCH : EXIT_TERMINAL
   // (a prompt the session is set to ask in its own app alone is not one to answer here: the page says where it is asked)
   const answerable = (s.pendingRequests ?? []).some((r) => r.route !== 'local')
   el('attention').hidden = s.state !== 'attention' || answerable
