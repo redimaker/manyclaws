@@ -1324,6 +1324,8 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 .menu-note { margin: 2px 10px 6px; color: var(--muted); font-size: .85em; line-height: 1.35; }
 .menu-sep { height: 1px; margin: 6px 10px; background: var(--border); }
 .menu-note:empty { display: none; }
+.mode-restart p { margin: 0 0 6px; }
+.mode-restart .mode-command { display: block; padding: 6px 8px; margin-bottom: 4px; border-radius: 6px; background: var(--code-bg); font-family: var(--mono); font-size: .95em; color: inherit; white-space: pre-wrap; word-break: break-all; user-select: all; }
 .menu-foot .menu-note { margin-bottom: 2px; }
 /* (in a note: the way to somewhere else, said in its line) */
 .menu-link { display: inline; padding: 0; border: 0; background: none; color: var(--link); }
