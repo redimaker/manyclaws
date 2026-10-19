@@ -287,8 +287,10 @@ export function register(on, options) {
     // Its own two tools are as trusted as the plugin that put them there
     if (isOwnTool(e.tool)) return { decision: 'allow', reason: 'A ManyClaws tool' }
     // In auto mode an "ask" is the classifier's to settle first: it lets most calls run, and puts the rest to a person
-    // in the app's own dialog. The page is asked only then (dialogUp), as that dialog is up, and not for what it lets run.
-    if (attended && (await modeNow($)) === 'auto') {
+    // (in the app's own dialog, where someone can be at it). The page is asked only then, by the PermissionRequest
+    // event (dialogUp), and not for what it lets run. Where nobody can be at the session (a machine's agent runs it,
+    // claude -p), that event comes all the same, and the page alone answers it.
+    if ((await modeNow($)) === 'auto') {
       held.set(e.tool_use_id, { e, decided, watch: { done: false } })
       return decided
     }
@@ -1699,6 +1701,7 @@ async function pageDecision($, e, hook, watch) {
 // events where they reach this plugin, or by its relay where they pass it over): the page's answer to it, or null.
 // One for a call auto mode's classifier put to a person is asked on the page now, beside that dialog, unless the page
 // is to be told only (the policy's "terminal only"); the dialog is up already, so the band above the prompt is not.
+// Where nobody can be at the session there is no dialog: the page is asked alone, as for any of its prompts.
 async function dialogUp($, e, hook, watch) {
   const input = JSON.stringify(e.tool_input ?? null)
   const mine = [...held.values()].filter((h) => !h.asked && h.e.tool === e.tool_name)
@@ -1707,6 +1710,12 @@ async function dialogUp($, e, hook, watch) {
     // (held until the call is decided, however it is: that ends the page's wait too)
     found.asked = true
     const local = policy.approvals === 'local' || !caps.has('approve')
+    if (!attended && !local) {
+      const d = await approve($, found.e, found.decided, hook, 'remote')
+      if (d?.decision === 'allow') return { behavior: 'allow' }
+      if (d?.decision === 'deny') return { behavior: 'deny', message: d.reason }
+      return null
+    }
     await approve($, found.e, found.decided, hook, local ? 'local' : 'both')
   }
   return pageDecision($, e, hook, watch ?? found?.watch)
