@@ -23,14 +23,14 @@
        from: a preload that fails its check is otherwise fetched again by the import, unchecked (the server names
        the map by its own hash in the page's policy, since it is inline). -->
   <script type="importmap">{"integrity":{"/seal.js":"sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6","/keys.js":"sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
-  <link rel="stylesheet" href="app.css" integrity="sha384-5jvus97DxbEwDf1lcsrmWZv/hLZFTbC7SDYBK5yM5l0CnTaCLvr4RcBt96p0f8Lh">
+  <link rel="stylesheet" href="app.css" integrity="sha384-rmQnKoTsoY9/RTid6yKTHw7XivF/deQZJ7TsOW7hckzfe7SGEexKUzWU2u93UewB">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-xHFs1C1eTRqlAVrbhI7uCCxb9+IA6tQMHHnLZaCCtwOUIQzmFQR7Mdm7+rfeCZjd">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
-  <script src="app.js" defer integrity="sha384-gL+rWNia3NHEfuN8ykatHHarqk45lcZiLvhTDywkMRf5jrUvsK8T5MVMIu9sM3Zw"></script>
+  <script src="app.js" defer integrity="sha384-wLhY1LKpHeausVHlz1V8XAGG7z6GkPn1A/QstRschzWBR0O9xlmjWLwL7J31aeiN"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -177,7 +177,7 @@
             <button type="button" data-set-view="terminal">Terminal</button>
           </div>
           <button id="stop" class="stop" hidden title="Interrupts what Claude is doing. The Escape key does the same.">Stop</button>
-          <button id="release" class="ghost" hidden>Exit</button>
+          <button id="release" class="ghost" hidden title="Ends the copy this machine's agent is running. The session stays on the machine, where a reply here, or claude --resume in a terminal, picks it up again.">Exit</button>
           <button id="remove" class="ghost" hidden>Remove</button>
         </header>
         <div id="attention" class="attention-banner" hidden></div>
@@ -257,7 +257,7 @@
               <input id="new-name" maxlength="80" autocomplete="off" spellcheck="false">
             </label>
             <label class="check"><input id="new-favorite" type="checkbox"> Favorite: kept at the top of the list</label>
-            <p id="new-opens" class="muted"></p>
+            <label class="check" id="new-listed-row"><input id="new-listed" type="checkbox" checked> Show in VS Code's resume list</label>
             <div class="new-row">
               <label>Permissions <select id="new-mode"></select></label>
               <label>Model <select id="new-model"></select></label>
@@ -457,7 +457,7 @@
         <input id="ns-name" maxlength="80" autocomplete="off" spellcheck="false">
       </label>
       <label class="ns-listed"><input id="ns-favorite" type="checkbox"><span><b>Favorite</b><i>Kept at the top of the list.</i></span></label>
-      <p id="ns-opens" class="ns-opens"></p>
+      <label class="ns-listed"><input id="ns-listed" type="checkbox" checked><span><b>Show in VS Code's resume list</b><i id="ns-listed-hint"></i></span></label>
       <div class="ns-ways">
         <button type="button" data-how="new"><b>New</b><span>An empty session in that project.</span></button>
         <button type="button" data-how="refer" hidden><b>New with reference to this session</b><span>An empty one, told where this session's transcript is and how far it had got, to read what it needs of it.</span></button>

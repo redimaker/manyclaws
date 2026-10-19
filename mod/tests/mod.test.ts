@@ -648,6 +648,23 @@ test('in auto mode with the page set to "terminal only", a prompt in the dialog 
   expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'local' })
 })
 
+test('in auto mode where nobody can be at the session (a machine\'s agent runs it), the classifier settles an ask first too, and one it puts to a person is asked on the page alone, by its PermissionRequest event', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  const m = await made()
+  const r = relay(on)
+  const s: any = session(on, m, { ...HEADLESS, decision: () => answer() })
+  const answer = answerTo(s, m, (q) => ({ decision: 'allow', order: order(m, 'answer', { decision: 'allow', rid: q.rid, asked: askedOf(q) }) }))
+  await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
+  await s.clock.advance(3_300)
+  expect((await $.tool.check({ tool: 'Bash', input: { command: 'rm h' }, tool_use_id: 'ta6' })).decision).toBe('ask')
+  await s.clock.advance(300)
+  expect(opened(s, m).requests).toEqual([])
+  r.state.asks['2-2-2.ask'] = PERMISSION_REQUEST('rm h')
+  await until(s.clock, () => r.wrote.has('2-2-2.done'))
+  expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'remote' })
+  expect(JSON.parse(r.wrote.get('2-2-2.answer')!)).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
+})
+
 test('in any other mode, an ask is the page\'s as before (here, in a terminal: the page and the band above the prompt), and the relay\'s prompts are not taken up', async ($, on) => {
   on('tool.check', () => ({ decision: 'ask' }))
   const m = await made()
