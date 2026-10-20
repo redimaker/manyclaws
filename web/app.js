@@ -20,7 +20,7 @@ const rendered = (src) => (trusted ? trusted.createHTML(src) : markdown(src))
 // What a session's tile shows beside its name, until this device says otherwise (the settings): the project
 // and computer it is on, its session id (not to begin with), the last thing its user typed, the last thing
 // Claude said, when it was last heard from, and how many lines each thing said takes
-const TILE = { where: true, id: false, prompt: true, reply: true, time: true, claws: true, star: true, grip: true, edit: true, lines: 1 }
+const TILE = { where: true, id: false, prompt: true, reply: true, time: true, by: true, star: true, grip: true, edit: true, lines: 1 }
 // (the three on a tile that are pressed: each can be left off, and brought back by a long press or a double click)
 const TILE_OPTIONS = ['star', 'grip', 'edit']
 // How long a session this page saw go quiet stays among the active ones in the list (renderList)
@@ -2196,27 +2196,38 @@ function rowTime(s) {
   const typed = app.sortBy === 'prompt' ? app.promptAt.get(s.id) : 0
   return typed ? h('span', { class: 'row-time', title: 'You last typed to it ' + whenText(typed) }, ago(typed)) : h('span', { class: 'row-time' }, ago(s.lastActivity))
 }
-// What started a session that is running, for its tile: its person, there, in a terminal or an editor, said in a word
-// after the project and the computer, with the rest for whoever points at it; or the computer's own agent, which runs
-// it itself (a search from this page: the ones Exit ends), which is said by ManyClaws' own mark before the time
-// (agentMark). Of a session that is not running there is nothing to say.
-function startedBy(s) {
-  if (!s || s.ended || !s.online || s.hosted) return null
-  const e = s.entrypoint ?? ''
-  const [word, says] = /vscode/.test(e) ? ['VS Code', 'in VS Code'] : /desktop/.test(e) ? ['Desktop app', 'in the Desktop app'] : s.interactive === false ? ['headless', 'by a script or claude -p, with nobody at it'] : ['terminal', 'in a terminal']
-  return h('span', { class: 'row-by', title: 'Started on its computer, ' + says }, word)
-}
-
-// ManyClaws' mark on the tile of a running session that was started from this page: one its computer's agent opened in
-// a terminal there, or a search the agent runs itself. The two claws beside the page's name, small, at the end of the
-// tile's first line, before the time (unless this device's settings leave it off). What it means is said to whoever
-// points at it, or has it read out.
+// What started a session that is running, for its tile: an icon at the end of the tile's first line, before the time
+// (unless this device's settings leave it off), and what it means for whoever points at it or has it read out. ManyClaws'
+// own mark, the two claws beside the page's name, for one started from this page: one its computer's agent opened in a
+// terminal there, or a search the agent runs itself (the ones Exit ends). Otherwise where its person started it, there:
+// in a terminal, in VS Code, in the Desktop app, or by a script with nobody at it. Of a session that is not running
+// there is nothing to say.
 const BY_AGENT = 'A search started from this page: the ManyClaws agent on its computer runs it, and Exit ends it'
 const FROM_PAGE = 'Started from this page: it is open in a terminal on its computer, and is closed there'
-function agentMark(s) {
-  if (!s || s.ended || !s.online || !(s.hosted || openedHere(s))) return null
-  const says = s.hosted ? BY_AGENT : FROM_PAGE
-  return h('span', { class: 'row-agent', role: 'img', 'aria-label': says, title: says }, document.querySelector('.brand svg').cloneNode(true))
+function startedBy(s) {
+  if (!s || s.ended || !s.online) return null
+  const e = s.entrypoint ?? ''
+  const [by, says] = s.hosted ? ['manyclaws', BY_AGENT] : openedHere(s) ? ['manyclaws', FROM_PAGE] : /vscode/.test(e) ? ['vscode', 'in VS Code'] : /desktop/.test(e) ? ['desktop', 'in the Desktop app'] : s.interactive === false ? ['headless', 'by a script or claude -p, with nobody at it'] : ['terminal', 'in a terminal']
+  const title = by === 'manyclaws' ? says : 'Started on its computer, ' + says
+  return h('span', { class: 'row-by', 'data-by': by, role: 'img', 'aria-label': title, title }, by === 'manyclaws' ? document.querySelector('.brand svg').cloneNode(true) : byIcon(by))
+}
+// (the others, drawn as the page's own icons are: a terminal's prompt; VS Code's mark, filled; a computer's screen; a script)
+const BY_ICONS = {
+  terminal: 'M4 4.5h12A1.5 1.5 0 0 1 17.5 6v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 14V6A1.5 1.5 0 0 1 4 4.5ZM6 8l2.25 2L6 12m4 0h4',
+  vscode: 'M23.15 2.587 18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .326 8.74L3.899 12 .326 15.26a1 1 0 0 0 .001 1.479L1.65 17.94a.999.999 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 14.861L10.826 12l7.178-5.448v10.896z',
+  desktop: 'M4 3.5h12A1.5 1.5 0 0 1 17.5 5v7.5A1.5 1.5 0 0 1 16 14H4a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 4 3.5ZM7 17h6m-3-3v3',
+  headless: 'M6.5 2.5h5L15 6v10a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 5 16V4a1.5 1.5 0 0 1 1.5-1.5ZM11.5 2.5V6H15M7.75 10h4.5m-4.5 3h4.5',
+}
+function byIcon(by) {
+  const NS = 'http://www.w3.org/2000/svg'
+  const svg = document.createElementNS(NS, 'svg')
+  // (VS Code's is its own mark, filled, on a grid of 24)
+  const filled = by === 'vscode'
+  for (const [k, v] of Object.entries({ class: 'by-icon', viewBox: filled ? '0 0 24 24' : '0 0 20 20', fill: filled ? 'currentColor' : 'none', stroke: filled ? 'none' : 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(k, v)
+  const path = document.createElementNS(NS, 'path')
+  path.setAttribute('d', BY_ICONS[by])
+  svg.append(path)
+  return svg
 }
 // Whether the computer's agent opened this session, as that computer says of the sessions open there
 const openedHere = (s) => !!s?.fromPage || !!app.machines.get(s?.machine)?.open?.[s?.id]?.started
@@ -3371,7 +3382,7 @@ function typedHere(sid, rows) {
 function renderRow(s, { favorite = false, due = false } = {}) {
   const tile = app.tile
   // The project it's in, the machine, and what started it: what it's about is its title, or the name it was given here
-  const sub = tile.where ? dotted(s.project !== s.title ? s.project : null, whereLabel(whereOf(s), s.machine), startedBy(s)) : []
+  const sub = tile.where ? dotted(s.project !== s.title ? s.project : null, whereLabel(whereOf(s), s.machine)) : []
   const mark = markOf(s.id)
   const soon = !due && remindSoon(mark)
   const name = nameOf(s)
@@ -3401,7 +3412,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
       'div',
       { class: 'row-main' },
       // (the first line: its name, its label, ManyClaws' mark, when, and the star, at the end)
-      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.claws && agentMark(s), tile.time && rowTime(s), starButton(s)),
+      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.by && startedBy(s), tile.time && rowTime(s), starButton(s)),
       (sub.length || s.agents?.length || soon) && h('div', { class: 'row-sub' }, sub, sub.length && s.agents?.length ? ' · ' : '', agentsMark(s), (sub.length || s.agents?.length) && soon ? ' · ' : '', soon),
       idLine(s),
       due && remindLine(mark),
@@ -3566,7 +3577,7 @@ function tileKept() {
     kept = JSON.parse(localStorage.getItem('mc.tile'))
   } catch {}
   const tile = { ...TILE }
-  for (const k of ['where', 'id', 'prompt', 'reply', 'time', 'claws', ...TILE_OPTIONS]) if (typeof kept?.[k] === 'boolean') tile[k] = kept[k]
+  for (const k of ['where', 'id', 'prompt', 'reply', 'time', 'by', ...TILE_OPTIONS]) if (typeof kept?.[k] === 'boolean') tile[k] = kept[k]
   if ([1, 2, 3].includes(kept?.lines)) tile.lines = kept.lines
   return tile
 }
