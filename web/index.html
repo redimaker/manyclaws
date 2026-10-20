@@ -6,6 +6,8 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f8f8f8" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#181818" media="(prefers-color-scheme: dark)">
+  <!-- Light or dark, before anything is drawn: as this device has it in the settings, or as its system has it -->
+  <script src="/site/theme.js" integrity="sha384-YY8V8M+USZowjigh4sEpiwFEKq0WdJyGwqY6y9p3UHR7e3i2FDrekYdigM9o3Aqj"></script>
   <!-- Added to a phone's home screen, it opens as an app of its own -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -23,14 +25,14 @@
        from: a preload that fails its check is otherwise fetched again by the import, unchecked (the server names
        the map by its own hash in the page's policy, since it is inline). -->
   <script type="importmap">{"integrity":{"/seal.js":"sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6","/keys.js":"sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
-  <link rel="stylesheet" href="app.css" integrity="sha384-362g2wdly/D5uGGJWEXXbfQ530ICFXypA41RaOHuhhuL/yaimRdnokV4J/EvNMFF">
+  <link rel="stylesheet" href="app.css" integrity="sha384-cWWGC2D31Ybd8wMpJ+U9K6MK/h+zAdOHQhsomriKLxNt7rEe5wiJps4j0RNurqvx">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-xHFs1C1eTRqlAVrbhI7uCCxb9+IA6tQMHHnLZaCCtwOUIQzmFQR7Mdm7+rfeCZjd">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
-  <script src="app.js" defer integrity="sha384-vMNlr1KPNvmPxoK20ZPO9KFRx4BD+hKN4LjZACSlZg9AWCmFlJVQFptDM7CC7Aab"></script>
+  <script src="app.js" defer integrity="sha384-xXaDPC9hptpX1m5jVYrAhEjKFJkHMHztmRF7QKRejjOUKURhJfmdEa+yq5PKY9rX"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -364,6 +366,14 @@
                 <span class="view-switch" role="group" aria-label="Look">
                   <button type="button" data-set-view="vscode" title="Look like the VS Code extension">VS Code</button>
                   <button type="button" data-set-view="terminal" title="Look like Claude Code in the terminal">Terminal</button>
+                </span>
+              </div>
+              <div class="set-row">
+                <span class="set-name">Light or dark</span>
+                <span class="view-switch" role="group" aria-label="Light or dark">
+                  <button type="button" data-set-theme="system" title="As this device's system has it, and as it changes">System</button>
+                  <button type="button" data-set-theme="light" title="Light, whatever the system has">Light</button>
+                  <button type="button" data-set-theme="dark" title="Dark, whatever the system has">Dark</button>
                 </span>
               </div>
             </div>

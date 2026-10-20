@@ -59,45 +59,43 @@
   --attention-bg: #fff4ec;
   --scroll: #64646466;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    /* VS Code, Dark Modern */
-    --bg: #181818;
-    --panel: #181818;
-    --tool-bg: #1f1f1f;
-    --text: #cccccc;
-    --strong: #cccccc;
-    --muted: #9d9d9d;
-    --dot: #9d9d9d;
-    --border: #2b2b2b;
-    --hover: #2a2d2e;
-    --active: #04395e;
-    --active-text: #ffffff;
-    --input-bg: #313131;
-    --input-border: #454545;
-    --menu-bg: #1f1f1f;
-    --placeholder: #989898;
-    --code-bg: #2b2b2b;
-    --code-inline-bg: #3c3c3c;
-    --code-inline-text: #d0d0d0;
-    --link: #4daafc;
-    --quote-border: #616161;
-    --button-bg: #d97757;
-    --button-hover: #c96442;
-    --button-text: #ffffff;
-    --button2-bg: transparent;
-    --button2-text: #cccccc;
-    --button-border: #ffffff1a;
-    --toolbar-hover: #5a5d5e50;
-    --add-bg: #9bb95533;
-    --del-bg: #ff000033;
-    --working: #4daafc;
-    --attention: #fb923c;
-    --idle: #4ade80;
-    --offline: #7c7a73;
-    --attention-bg: #3a2516;
-    --scroll: #79797966;
-  }
+:root[data-theme="dark"] {
+  /* VS Code, Dark Modern */
+  --bg: #181818;
+  --panel: #181818;
+  --tool-bg: #1f1f1f;
+  --text: #cccccc;
+  --strong: #cccccc;
+  --muted: #9d9d9d;
+  --dot: #9d9d9d;
+  --border: #2b2b2b;
+  --hover: #2a2d2e;
+  --active: #04395e;
+  --active-text: #ffffff;
+  --input-bg: #313131;
+  --input-border: #454545;
+  --menu-bg: #1f1f1f;
+  --placeholder: #989898;
+  --code-bg: #2b2b2b;
+  --code-inline-bg: #3c3c3c;
+  --code-inline-text: #d0d0d0;
+  --link: #4daafc;
+  --quote-border: #616161;
+  --button-bg: #d97757;
+  --button-hover: #c96442;
+  --button-text: #ffffff;
+  --button2-bg: transparent;
+  --button2-text: #cccccc;
+  --button-border: #ffffff1a;
+  --toolbar-hover: #5a5d5e50;
+  --add-bg: #9bb95533;
+  --del-bg: #ff000033;
+  --working: #4daafc;
+  --attention: #fb923c;
+  --idle: #4ade80;
+  --offline: #7c7a73;
+  --attention-bg: #3a2516;
+  --scroll: #79797966;
 }
 :root[data-view="terminal"] {
   /* Terminal.app's Basic profile, with Claude Code's light theme */
@@ -153,46 +151,44 @@
   --offline: rgb(153, 153, 153);
   --attention-bg: transparent;
 }
-@media (prefers-color-scheme: dark) {
-  :root[data-view="terminal"] {
-    /* The same profile in dark mode, with Claude Code's dark theme */
-    --bg: #1e1e1e;
-    --panel: #1e1e1e;
-    --text: #dedede;
-    --strong: #ffffff;
-    --muted: rgb(153, 153, 153);
-    --dot: #ffffff;
-    --border: rgb(80, 80, 80);
-    --rule: rgb(136, 136, 136);
-    --hover: rgb(42, 42, 42);
-    --active: rgb(55, 55, 55);
-    --active-text: #ffffff;
-    --input-border: rgb(80, 80, 80);
-    --placeholder: rgb(110, 110, 110);
-    --code-inline-text: rgb(177, 185, 249);
-    --link: rgb(177, 185, 249);
-    --quote-border: rgb(136, 136, 136);
-    --button-bg: #dedede;
-    --button-hover: #ffffff;
-    --button-text: #1e1e1e;
-    --button2-text: #dedede;
-    --button-border: rgb(80, 80, 80);
-    --ok: rgb(78, 186, 101);
-    --err: rgb(255, 107, 128);
-    --error: rgb(255, 107, 128);
-    --warn: rgb(255, 193, 7);
-    --plan: rgb(72, 150, 140);
-    --auto-accept: rgb(175, 135, 255);
-    --add-bg: rgb(34, 92, 43);
-    --del-bg: rgb(122, 41, 54);
-    --user-bg: rgb(55, 55, 55);
-    --user-text: #ffffff;
-    --mark-bg: #000000;
-    --working: rgb(177, 185, 249);
-    --attention: rgb(255, 193, 7);
-    --idle: rgb(78, 186, 101);
-    --offline: rgb(110, 110, 110);
-  }
+:root[data-theme="dark"][data-view="terminal"] {
+  /* The same profile in dark mode, with Claude Code's dark theme */
+  --bg: #1e1e1e;
+  --panel: #1e1e1e;
+  --text: #dedede;
+  --strong: #ffffff;
+  --muted: rgb(153, 153, 153);
+  --dot: #ffffff;
+  --border: rgb(80, 80, 80);
+  --rule: rgb(136, 136, 136);
+  --hover: rgb(42, 42, 42);
+  --active: rgb(55, 55, 55);
+  --active-text: #ffffff;
+  --input-border: rgb(80, 80, 80);
+  --placeholder: rgb(110, 110, 110);
+  --code-inline-text: rgb(177, 185, 249);
+  --link: rgb(177, 185, 249);
+  --quote-border: rgb(136, 136, 136);
+  --button-bg: #dedede;
+  --button-hover: #ffffff;
+  --button-text: #1e1e1e;
+  --button2-text: #dedede;
+  --button-border: rgb(80, 80, 80);
+  --ok: rgb(78, 186, 101);
+  --err: rgb(255, 107, 128);
+  --error: rgb(255, 107, 128);
+  --warn: rgb(255, 193, 7);
+  --plan: rgb(72, 150, 140);
+  --auto-accept: rgb(175, 135, 255);
+  --add-bg: rgb(34, 92, 43);
+  --del-bg: rgb(122, 41, 54);
+  --user-bg: rgb(55, 55, 55);
+  --user-text: #ffffff;
+  --mark-bg: #000000;
+  --working: rgb(177, 185, 249);
+  --attention: rgb(255, 193, 7);
+  --idle: rgb(78, 186, 101);
+  --offline: rgb(110, 110, 110);
 }
 
 /* Text that differs by look is drawn twice; each look shows its own */
@@ -357,9 +353,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .brand-link:hover span { color: var(--strong); }
 /* (the two claws beside the name, as the icon has them, in the site's red: the lighter of its two on a dark page) */
 .brand svg { width: auto; height: 1.35em; flex: none; fill: #e2664a; }
-@media (prefers-color-scheme: light) {
-  .brand svg { fill: #c6452c; }
-}
+:root:not([data-theme="dark"]) .brand svg { fill: #c6452c; }
 /* (the dot is there only while the page does not hear the server) */
 .conn { display: none; width: 8px; height: 8px; border-radius: 50%; background: var(--offline); flex-shrink: 0; }
 .conn.live { background: var(--idle); }
@@ -451,10 +445,8 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
    style (fonts.css: its serif, its warm dark or its paper, by the device's own scheme). */
 .ns-open { --n-accent: #e2664a; --n-on: #1a120e; display: inline-flex; align-items: center; gap: .35em; flex-shrink: 0; align-self: center; margin: 0 2px; padding: .28em .8em .3em .62em; border: 0; border-radius: 99px; background: var(--n-accent); color: var(--n-on); font: inherit; font-size: .93em; font-weight: 600; line-height: 1.25; white-space: nowrap; }
 .ns-open:hover, .ns-open[aria-expanded="true"] { background: color-mix(in srgb, var(--n-accent) 84%, #fff); }
-@media (prefers-color-scheme: light) {
-  .ns-open { --n-accent: #c6452c; --n-on: #fffaf5; }
-  .ns-open:hover, .ns-open[aria-expanded="true"] { background: color-mix(in srgb, var(--n-accent) 88%, #000); }
-}
+:root:not([data-theme="dark"]) .ns-open { --n-accent: #c6452c; --n-on: #fffaf5; }
+:root:not([data-theme="dark"]) .ns-open:hover, :root:not([data-theme="dark"]) .ns-open[aria-expanded="true"] { background: color-mix(in srgb, var(--n-accent) 88%, #000); }
 .ns-plus { font-size: 1.2em; font-weight: 400; line-height: 1; margin-top: -.08em; }
 .ns-box {
   --n-bg: #1f1e1d; --n-well: #141413; --n-rise: #2a2927; --n-line: #353432; --n-text: #faf9f5; --n-soft: #c3c2b7; --n-muted: #9c9a92; --n-accent: #e2664a; --n-shade: rgba(0, 0, 0, .55);
@@ -462,13 +454,9 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
   border: 1px solid var(--n-line); border-radius: 16px; background: var(--n-bg); color: var(--n-text); box-shadow: 0 24px 60px -18px var(--n-shade), 0 2px 8px -2px var(--n-shade);
   font: 15px/1.5 var(--s-sans, system-ui, sans-serif); letter-spacing: 0;
 }
-@media (prefers-color-scheme: light) {
-  .ns-box { --n-bg: #faf9f5; --n-well: #ffffff; --n-rise: #f0eee6; --n-line: #dedcd1; --n-text: #141413; --n-soft: #3d3d3a; --n-muted: #5e5d59; --n-accent: #c6452c; --n-shade: rgba(60, 50, 30, .28); }
-}
+:root:not([data-theme="dark"]) .ns-box { --n-bg: #faf9f5; --n-well: #ffffff; --n-rise: #f0eee6; --n-line: #dedcd1; --n-text: #141413; --n-soft: #3d3d3a; --n-muted: #5e5d59; --n-accent: #c6452c; --n-shade: rgba(60, 50, 30, .28); }
 .ns-box::backdrop { background: rgba(0, 0, 0, .22); }
-@media (prefers-color-scheme: light) {
-  .ns-box::backdrop { background: rgba(40, 30, 10, .1); }
-}
+:root:not([data-theme="dark"]) .ns-box::backdrop { background: rgba(40, 30, 10, .1); }
 .ns-box form { position: relative; display: grid; padding: 22px 24px 10px; }
 .ns-close { position: absolute; top: 14px; right: 14px; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--n-muted); font: inherit; font-size: 15px; line-height: 1; }
 .ns-close:hover { background: var(--n-rise); color: var(--n-text); }
@@ -654,9 +642,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
    where what it does is not put back. */
 .ask-box { inset: 0; margin: auto; width: min(440px, calc(100vw - 32px)); height: fit-content; max-height: calc(100dvh - 32px); }
 .ask-box::backdrop { background: rgba(0, 0, 0, .5); }
-@media (prefers-color-scheme: light) {
-  .ask-box::backdrop { background: rgba(40, 30, 10, .32); }
-}
+:root:not([data-theme="dark"]) .ask-box::backdrop { background: rgba(40, 30, 10, .32); }
 .ask-box form { padding: 24px 24px 20px; }
 .ask-title { margin: 0; font-family: var(--s-serif, Georgia, serif); font-weight: 500; font-size: 22px; line-height: 1.22; letter-spacing: -.01em; color: var(--n-text); text-wrap: balance; overflow-wrap: anywhere; }
 .ask-says { margin-top: 10px; font-size: 15px; line-height: 1.5; color: var(--n-soft); overflow-wrap: anywhere; }
@@ -684,9 +670,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
    the right; and under both where in the tour one is, and the ways on and back. */
 .tour-box { inset: 0; margin: auto; width: min(760px, calc(100vw - 32px)); height: fit-content; max-height: calc(100dvh - 32px); }
 .tour-box::backdrop { background: rgba(0, 0, 0, .5); }
-@media (prefers-color-scheme: light) {
-  .tour-box::backdrop { background: rgba(40, 30, 10, .32); }
-}
+:root:not([data-theme="dark"]) .tour-box::backdrop { background: rgba(40, 30, 10, .32); }
 .tour-box form { grid-template-columns: minmax(0, 1fr) 228px; grid-template-areas: "words phone" "foot foot"; column-gap: 36px; padding: 48px 34px 22px 34px; }
 /* (what is said changes from step to step, over the code and the address, which stay where they are) */
 .tour-words { grid-area: words; display: flex; flex-direction: column; min-width: 0; }
@@ -797,9 +781,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .row-by[data-by="vscode"] .by-icon { width: .9em; height: .9em; }
 .row-by[data-by="manyclaws"] svg { fill: #e2664a; }
 .row.active .row-by { color: inherit; opacity: .8; }
-@media (prefers-color-scheme: light) {
-  .row-by[data-by="manyclaws"] svg { fill: #c6452c; }
-}
+:root:not([data-theme="dark"]) .row-by[data-by="manyclaws"] svg { fill: #c6452c; }
 .agents-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 16px; border-top: 1px solid var(--border); font-size: .9em; color: var(--muted); max-height: 5.5em; overflow-y: auto; flex-shrink: 0; }
 .agents-strip .agents-count { color: var(--working); font-weight: 600; }
 .agents-strip .agent { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
