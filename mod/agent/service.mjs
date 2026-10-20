@@ -318,12 +318,12 @@ export async function run(config, flags = {}) {
       const TASK = 'ManyClaws upgrade'
       const file = path.join(ownHome, 'upgrade-task.xml')
       const cmd = path.join(ownHome, 'upgrade-run.cmd')
-      const user = spawnSync('whoami', [], { encoding: 'utf8', windowsHide: true }).stdout.trim()
+      const user = (spawnSync('whoami', [], { encoding: 'utf8', windowsHide: true, timeout: 30_000 }).stdout ?? '').trim()
       fs.writeFileSync(cmd, taskCmd({ argv, env, log: path.join(ownHome, 'upgrade.log') }))
       taskFile(file, taskXml({ user, cmd, description: 'ManyClaws: the agent brought up to date, once' }))
-      spawnSync('schtasks', ['/delete', '/tn', TASK, '/f'], { stdio: 'ignore', windowsHide: true })
+      spawnSync('schtasks', ['/delete', '/tn', TASK, '/f'], { stdio: 'ignore', windowsHide: true, timeout: 30_000 })
       for (const args of [['/create', '/tn', TASK, '/xml', file, '/f'], ['/run', '/tn', TASK]]) {
-        const r = spawnSync('schtasks', args, { encoding: 'utf8', windowsHide: true })
+        const r = spawnSync('schtasks', args, { encoding: 'utf8', windowsHide: true, timeout: 30_000 })
         if (r.status !== 0) throw new Error('Task Scheduler would not start it: ' + String(r.stderr || r.stdout || '').trim())
       }
       return
