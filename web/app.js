@@ -669,6 +669,29 @@ document.fonts?.ready.then(fitTerminalGrid)
 
 for (const b of document.querySelectorAll('[data-set-view]')) b.addEventListener('click', () => setView(b.dataset.setView, { save: true }))
 
+// ---- Light or dark: as this device's system has it (to begin with), or the one picked here whatever the system has,
+// remembered on this device. site/theme.js puts it on the page before the page is drawn, and keeps to the system's as
+// it changes; here it is picked, and the settings say which it is.
+function markTheme() {
+  let chosen = null
+  try {
+    chosen = localStorage.getItem('mc.theme')
+  } catch {}
+  const now = chosen === 'light' || chosen === 'dark' ? chosen : 'system'
+  for (const b of document.querySelectorAll('[data-set-theme]')) b.setAttribute('aria-pressed', String(b.dataset.setTheme === now))
+}
+function setTheme(theme) {
+  try {
+    if (theme === 'light' || theme === 'dark') localStorage.setItem('mc.theme', theme)
+    else localStorage.removeItem('mc.theme')
+  } catch {}
+  window.applyTheme?.()
+  markTheme()
+}
+for (const b of document.querySelectorAll('[data-set-theme]')) b.addEventListener('click', () => setTheme(b.dataset.setTheme))
+addEventListener('storage', (ev) => ev.key === 'mc.theme' && markTheme())
+markTheme()
+
 // ---- The edge between the list and the chat: dragged, or moved with the arrow keys.
 // The width is kept on this device; a double-click gives the look's own width back.
 
