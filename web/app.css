@@ -416,14 +416,19 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 /* Under a session's name, what was last said in it: what its user last typed, marked ❯ as
    a prompt is and a shade nearer the name than the rest, over what Claude last said. Each
    on one line, cut short, unless this device has them take two or three (the settings:
-   data-tile-lines on the page). */
+   data-tile-lines on the page). Each is as high as its lines, with less to say or nothing
+   (and whatever font a glyph in it takes), so that a tile is as high whatever is said in it. */
 .row-prompt { display: flex; gap: .45em; min-width: 0; font-size: .9em; color: color-mix(in srgb, var(--text) 78%, var(--muted)); }
 .row-prompt-mark { flex: none; color: var(--muted); }
 .row-said { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row.active .row-prompt, .row.active .row-prompt-mark { color: inherit; }
 .row.active .row-prompt-mark { opacity: .8; }
+.row-prompt, .row-preview { height: 1lh; }
+.row-working { font-style: italic; }
 :is([data-tile-lines="2"], [data-tile-lines="3"]) :is(.row-said, .row-preview) { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
+:is([data-tile-lines="2"], [data-tile-lines="3"]) :is(.row-prompt, .row-preview) { height: 2lh; }
 [data-tile-lines="3"] :is(.row-said, .row-preview) { -webkit-line-clamp: 3; }
+[data-tile-lines="3"] :is(.row-prompt, .row-preview) { height: 3lh; }
 .unread { font-weight: 700; }
 
 /* Favorites: the star that keeps a session at the top of the list, and the grip one is moved by */

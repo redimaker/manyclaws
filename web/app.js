@@ -19,7 +19,7 @@ const trusted = window.trustedTypes?.createPolicy('manyclaws', {
 const rendered = (src) => (trusted ? trusted.createHTML(src) : markdown(src))
 // What a session's tile shows beside its name, until this device says otherwise (the settings): the project
 // and computer it is on, the last thing its user typed, the last thing Claude said, when it was last heard
-// from, and how many lines each thing said may take
+// from, and how many lines each thing said takes
 const TILE = { where: true, prompt: true, reply: true, time: true, claws: true, star: true, grip: true, edit: true, lines: 1 }
 // (the three on a tile that are pressed: each can be left off, and brought back by a long press or a double click)
 const TILE_OPTIONS = ['star', 'grip', 'edit']
@@ -3402,8 +3402,11 @@ function renderRow(s, { favorite = false, due = false } = {}) {
       h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.claws && agentMark(s), tile.time && rowTime(s), starButton(s)),
       (sub.length || s.agents?.length || soon) && h('div', { class: 'row-sub' }, sub, sub.length && s.agents?.length ? ' · ' : '', agentsMark(s), (sub.length || s.agents?.length) && soon ? ' · ' : '', soon),
       due && remindLine(mark),
-      typed && h('div', { class: 'row-prompt', title: 'The last thing you typed to it' }, h('span', { class: 'row-prompt-mark', 'aria-hidden': 'true' }, '❯'), h('span', { class: 'row-said' }, typed)),
-      s.state === 'attention' ? h('div', { class: 'row-preview' }, '⚠ ' + (s.detail || 'Needs your attention')) : said && h('div', { class: 'row-preview' }, said),
+      // (each line this device has its tiles show is there whether or not there is anything in it, so that a tile
+      // keeps its height as what is said in it comes and goes: blank, or, before Claude has said anything to a
+      // prompt it is working on, that it is working)
+      tile.prompt && h('div', { class: 'row-prompt', ...(typed ? { title: 'The last thing you typed to it' } : {}) }, typed && h('span', { class: 'row-prompt-mark', 'aria-hidden': 'true' }, '❯'), h('span', { class: 'row-said' }, typed)),
+      s.state === 'attention' ? h('div', { class: 'row-preview' }, '⚠ ' + (s.detail || 'Needs your attention')) : tile.reply && (said || s.state !== 'working' ? h('div', { class: 'row-preview' }, said) : h('div', { class: 'row-preview row-working' }, 'Working…')),
     ),
     due && doneButton(s),
     editButton(s, key),
