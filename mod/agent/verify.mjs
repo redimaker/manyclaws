@@ -25,29 +25,27 @@
 // else): what it can tell apart, it does. What a browser does itself: the page's HTML
 // names each script and style sheet by its hash, and the browser runs none that is
 // anything else, so the HTML is the one file to compare.
-import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
-import { pluginDigest, pluginOfList, notPlugin } from './seal.mjs'
+import { pluginDigest, pluginOfList, notPlugin, sshSigned } from './seal.mjs'
 
 const NAMESPACE = 'manyclaws-release'
 const sha256 = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex')
 
-// Whether a list is signed by one of the keys (`signers`: a file as ssh-keygen's allowed signers are written)
+// Whether a list is signed by one of the keys (`signers`: a file as ssh-keygen's allowed signers are written). Checked
+// here, in JavaScript (seal.mjs, sshSigned: the check the plugin and the page make), not by running ssh-keygen: the
+// agent checks the plugin's copies every minute, and a synchronous ssh-keygen that did not come back held its whole
+// event loop, so that it said nothing to the server for three and a half hours (the MacBook Pro, 2026-10-19). Its
+// namespace and principal are as `ssh-keygen -Y verify -I manyclaws -n manyclaws-release` would hold them.
 export function signedBy(listText, sigText, signers) {
-  const sigs = String(sigText ?? '').match(/-----BEGIN SSH SIGNATURE-----[\s\S]*?-----END SSH SIGNATURE-----\n?/g) ?? []
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-verify-'))
+  let signersText
   try {
-    return sigs.some((sig, i) => {
-      const file = path.join(dir, 'sig.' + i)
-      fs.writeFileSync(file, sig)
-      return spawnSync('ssh-keygen', ['-Y', 'verify', '-f', signers, '-I', 'manyclaws', '-n', NAMESPACE, '-s', file], { input: listText, encoding: 'utf8' }).status === 0
-    })
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true })
+    signersText = fs.readFileSync(signers, 'utf8')
+  } catch {
+    return false
   }
+  return sshSigned(String(listText ?? ''), String(sigText ?? ''), signersText, { principal: 'manyclaws', namespace: NAMESPACE })
 }
 
 // The files under a folder, by their paths from it
