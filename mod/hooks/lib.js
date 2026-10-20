@@ -2,7 +2,7 @@
 // load them directly. register.js holds everything that touches `$`.
 
 export const PROTOCOL = 2
-export const PLUGIN_VERSION = '6.1.0'
+export const PLUGIN_VERSION = '6.2.0'
 
 // Where the mod reports. ManyClaws has one server, so the plugin has no option for its
 // address and its dialog asks for none: MANYCLAWS_URL names another (a test's, or one
@@ -155,6 +155,33 @@ export function commandRefusal(name, args, found) {
   return `/${name} opens a panel in the terminal, so it can't run from here.`
 }
 
+// How long the prompt cache of a reply stays warm: an hour where the reply wrote its cache for an
+// hour (a plan's), five minutes where it wrote it for five; one that wrote none says nothing new
+export const HOUR_CACHE_MS = 3_600_000
+export const SHORT_CACHE_MS = 300_000
+export function cacheTtlOf(usage, before = HOUR_CACHE_MS) {
+  const made = usage?.cache_creation ?? usage?.cacheCreation
+  if (!made) return before
+  if (Number(made.ephemeral_1h_input_tokens ?? made.ephemeral1hInputTokens) > 0) return HOUR_CACHE_MS
+  if (Number(made.ephemeral_5m_input_tokens ?? made.ephemeral5mInputTokens) > 0) return SHORT_CACHE_MS
+  return before
+}
+
+// Why /effort <level> from the page would leave a terminal's session waiting, or '' when it would not.
+// Mid-conversation, while the prompt cache is warm, Claude Code in a terminal stops to ask "Change
+// effort level?" in a dialog only the terminal can answer, and all that is sent after it waits behind
+// it. It asks once this process has had a reply, until that reply's cache has gone cold, unless the
+// level is the one it has, or a change was answered there since the reply (one answer covers the rest).
+export function effortRefusal({ level, current, lastReplyAt, ttlMs, setSinceReply, now }) {
+  if (!lastReplyAt || setSinceReply) return ''
+  const left = lastReplyAt + ttlMs - now
+  if (left <= 0) return ''
+  const asked = String(level ?? '').trim().toLowerCase()
+  if (asked === (current ?? 'auto') || (asked === 'unset' && !current)) return ''
+  const minutes = Math.max(1, Math.ceil(left / 60_000))
+  return `mid-conversation, Claude Code asks about it in the terminal first, where nothing sent from here can answer, and everything sent after it would wait. Change it there with /effort, or here in ${minutes} minute${minutes === 1 ? '' : 's'}, once the conversation's cache has gone.`
+}
+
 // Strings capped, arrays and depth bounded, so any value can travel as JSON
 export function cap(value, max = 8000, depth = 0) {
   if (value === null || value === undefined) return value
@@ -218,12 +245,33 @@ export function settingSaid(text) {
   // eslint-disable-next-line no-control-regex
   const said = out[1].replace(/\x1b\[[0-9;]*m/g, '').trim()
   const level = '(low|medium|high|xhigh|max)\\b'
+  // Ultracode is a switch beside the level, not one of them (dynamic workflows on every task, at whichever level):
+  // "Ultracode on (this session only): dynamic workflows on every task. Effort stays high." and "Ultracode off.
+  // Effort stays high." are what /effort ultracode answers, with the level it leaves as it was
+  const ultra = /^Ultracode (on|off)\b/.exec(said)
+  if (ultra) {
+    const stays = new RegExp(`\\bEffort stays ${level}`).exec(said)
+    return { ultracode: ultra[1] === 'on', ...(stays ? { effort: stays[1] } : {}) }
+  }
   // (the last is a level over what the settings or the organization allow, brought down to one they do)
   const effort = new RegExp(`^(?:Set effort level to|Current effort level:) ${level}`).exec(said) ?? new RegExp(`^Effort level: auto \\(currently ${level}`).exec(said) ?? new RegExp(`^Effort '[a-z]+' exceeds [\\s\\S]*; set to '${level}`).exec(said)
   if (effort) return { effort: effort[1] }
   if (/^Effort level set to auto\b/.test(said)) return { effort: null }
   if (/^Set model to \S/.test(said)) return { model: true }
   return null
+}
+
+// What /effort answered in place of doing what was asked: it says no in the words it says yes in, with no error. To
+// Ultracode where that cannot be turned on (dynamic workflows are off in that computer's /config, or the model has
+// none), and to a word it does not take. The reason, as it gave it, or null where it did what was asked.
+export function settingRefused(command, text) {
+  if (command !== 'effort') return null
+  const out = /<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/.exec(String(text ?? ''))
+  // eslint-disable-next-line no-control-regex
+  const said = (out ? out[1] : String(text ?? '')).replace(/\x1b\[[0-9;]*m/g, '').trim()
+  if (!/^(?:Invalid argument\b|Ultracode needs |Ultracode isn't available )/.test(said)) return null
+  // (what it could have been asked instead is a list for a terminal: "… Valid options are: low, medium, …")
+  return said.split(/\.? Valid options are:/)[0].trim()
 }
 
 // A local command's answer without the colors it was drawn in for a terminal: they are dropped before it is cut to
@@ -246,6 +294,16 @@ export function flattenText(content) {
 // points (claude -p is sdk-cli, scripts are sdk-ts and sdk-py) are unattended.
 export function isAttended(isInteractive, entrypoint) {
   return !!isInteractive || !/^sdk-/.test(String(entrypoint ?? ''))
+}
+
+// What a turn took, as the terminal says it beneath the turn: how long it ran, and the
+// tokens it wrote where it made a request that counted (8m 5s · ↓ 8.0k tokens)
+export function took(e) {
+  const s = Math.round(Number(e.durationMs) / 1000)
+  if (!Number.isFinite(s) || s < 0) return ''
+  const time = s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : s + 's'
+  const n = e.usage?.output_tokens
+  return typeof n === 'number' && n > 0 ? `${time} · ↓ ${n < 1000 ? n : (n / 1000).toFixed(1) + 'k'} tokens` : time
 }
 
 export function randomId() {

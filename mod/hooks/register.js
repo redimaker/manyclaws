@@ -41,6 +41,9 @@ import {
   parseCapabilities,
   parseSlash,
   commandRefusal,
+  effortRefusal,
+  cacheTtlOf,
+  HOUR_CACHE_MS,
   TEXT_COMMANDS,
   VALUE_COMMANDS,
   cap,
@@ -48,8 +51,10 @@ import {
   colorless,
   flattenText,
   settingSaid,
+  settingRefused,
   isAttended,
   randomId,
+  took,
 } from './lib.js'
 import { seal, open, isSealed, openBytes, keysFromText, keysText, contentKey, nameOf, toB64, fromB64, sha256, isOrder, readOrder, takeOrder, orderMemory, devicesMemory, askedOf, OrderRefused, sshSigned, pluginDigest, pluginOfList, notPlugin, hexSha256, mayStart, pairStart, pairFinish, pairConfirmed, sealPaired, openPaired, pairCode } from './seal.js'
 import { messageRows, resultRow, historyRows, summarizeInput } from './rows.js'
@@ -71,6 +76,9 @@ const AGENT_IDLE_MS = 6 * 3600_000 // a subagent not heard of for this long is t
 const DEVICES_MS = 2000 // the list of the account's devices is not asked for again sooner than this after it was
 const DEVICES_EVERY_MS = 5 * 60_000 // and it is read this often with no order to go by: a device taken off it is seen to be, while the list without it is still what the server hands over
 const TOOL_PREFIX = 'mcp__manyclaws__'
+const RELAY_MS = 250 // how often the relay's folder is looked in, while a permission prompt may come by it (relayTick)
+const RELAY_MODE_MS = 3000 // and how often the permission mode it keeps is read
+const MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions'])
 
 const instance = randomId() // this load of the module, said in what `ping` answers (sealed, as every answer is) and nowhere else: a reload is a new one
 
@@ -123,12 +131,20 @@ let permissionMode = null // the permission mode, as last reported
 let classicHeard = false // a settings hook event (classic.*) has reached this plugin
 let managedHere = null // a promise of whether an organization manages Claude Code here (classicSkipped)
 let effortNow // the effort the session thinks at, as last reported: null when it has none, undefined until something says
+let ultracodeNow = null // whether Ultracode is on (dynamic workflows on every task, beside the effort), as /effort last said: null until it has
 let modelAskedUntil = 0 // a /model the page asked for is on its way: until then, the switch is not asked about again
+let lastReplyAt = 0 // when this process last had a reply of the main conversation (0: none yet)
+let replyCacheMs = HOUR_CACHE_MS // how long that reply's prompt cache stays warm
+let effortSetAt = 0 // when /effort last changed the effort
 const pendingList = [] // requests the band above the prompt offers to answer: { rid, kind, ... }
 const localAnswers = new Map() // rid -> the answer given at the terminal
 const localApprovals = new Map() // tool_use_id -> rid, for prompts left to the terminal's dialog
 const asking = [] // approvals the app is asking in its own dialog that the page may answer too: { rid, tool, input, request }
 const answeredBy = new Map() // rid -> who answered one of those first, when it wasn't the app's dialog
+const held = new Map() // tool_use_id -> { e, decided, watch, asked }: calls auto mode's classifier decides, until each has run or been refused
+const relayTaken = new Set() // the permission prompts the relay handed over that are taken up, by name
+let relayBusy = false // a look in the relay's folder is under way
+let relayModeAt = 0 // when the permission mode the relay keeps was last read
 const deltas = new Map() // streamed reply text not yet sent, by turn, step and block
 const added = new Set() // the names of its own tools that are before Claude (OWN_TOOLS)
 
@@ -172,6 +188,8 @@ export function register(on, options) {
       await currentSessionId($)
       runningTurn = e.turnId
       stepsDone.clear()
+      // (the prompt's own settings hook has just said the mode, where only the relay says it)
+      if (!e.agentId) await relayMode($, true)
       // (the turn the server asked the answer of is the first to start after it asked)
       if (answerAsked && !answerTurn) answerTurn = e.turnId
       await setState($, 'working')
@@ -207,7 +225,14 @@ export function register(on, options) {
     }
     // (a subagent's request says it is at work, and that there is one, where this process had not heard it start)
     if (e.agentId) agentHeard(e.agentId, { known: false })
-    else stepDone(e)
+    else {
+      stepDone(e)
+      // (a reply whose prompt cache a change of effort would throw away, for as long as it stays warm)
+      if (isDone) {
+        lastReplyAt = await $.clock.now()
+        replyCacheMs = cacheTtlOf(result?.usage, replyCacheMs)
+      }
+    }
     return result
   })
 
@@ -219,6 +244,8 @@ export function register(on, options) {
       else {
         sendDeltas()
         runningTurn = null
+        // (a call the classifier refused is not asked about after the turn)
+        for (const id of [...held.keys()]) settleHeld(id)
         await turnDone($, e)
         await setState($, 'idle', e.reason === 'answer' ? '' : e.reason)
       }
@@ -236,6 +263,8 @@ export function register(on, options) {
     agentHeard(agentId)
     const result = await next(e)
     agentHeard(agentId)
+    // (decided, however it was: a call left to auto mode's classifier is no longer one a dialog can come for)
+    settleHeld(toolUseId)
     // What the call came back with, as its row in the chat is made of it (rows.js): none for a subagent's call
     const end = { toolUseId, agentId }
     if (typeof result?.deny === 'string') end.deny = cap(result.deny, 2000)
@@ -273,6 +302,14 @@ export function register(on, options) {
     if (decided?.decision !== 'ask' || e.tool === 'AskUserQuestion') return decided
     // Its own two tools are as trusted as the plugin that put them there
     if (isOwnTool(e.tool)) return { decision: 'allow', reason: 'A ManyClaws tool' }
+    // In auto mode an "ask" is the classifier's to settle first: it lets most calls run, and puts the rest to a person
+    // (in the app's own dialog, where someone can be at it). The page is asked only then, by the PermissionRequest
+    // event (dialogUp), and not for what it lets run. Where nobody can be at the session (a machine's agent runs it,
+    // claude -p), that event comes all the same, and the page alone answers it.
+    if ((await modeNow($)) === 'auto') {
+      held.set(e.tool_use_id, { e, decided, watch: { done: false } })
+      return decided
+    }
     return approve($, e, decided, next)
   })
 
@@ -293,7 +330,7 @@ export function register(on, options) {
       // The app is asking in its own dialog. The engine runs this hook beside the dialog
       // and takes whichever answers first, so the page's answer, if it comes, is given here
       if (event === 'PermissionRequest') {
-        const decision = await pageDecision($, e, next)
+        const decision = await dialogUp($, e, next)
         if (decision) return { decision }
       }
       // A conversation started or resumed in this process (after /clear, /resume or
@@ -379,9 +416,21 @@ export function register(on, options) {
     return next(e)
   })
 
-  // The band above the prompt: answer a routed request at the terminal too
+  // The band above the prompt: answer a routed request at the terminal too; and while this computer waits to be
+  // connected, where its code is typed, as a link a click opens (the line in the transcript is plain text, which a
+  // terminal may or may not take for a link), and the code
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const current = pendingList[0]
+    if (!current && connecting) {
+      const { Box, Text, Link, Button } = $.ui.resolve(e)
+      const theirs = await next(e)
+      const at = connecting.url + '/app#/connect'
+      const row = Text({ key: 'mc-connect', children: ['ManyClaws: to connect this computer, open ', Link({ href: at }), ' and enter ', connecting.code] })
+      // (a terminal that draws no links, as macOS's own, has the button: a click, or 1 in an empty prompt, opens the page
+      // in this computer's browser)
+      const open = Button({ key: 'mc-open', hotkey: '1', label: 'Open it in this computer’s browser', plain: true, onPress: () => void openPage($, at) })
+      return Box({ flexDirection: 'column', children: theirs ? [row, open, theirs] : [row, open] })
+    }
     if (!config || !current) return next(e)
     const { Box, Text, Button } = $.ui.resolve(e)
     const theirs = await next(e)
@@ -483,6 +532,7 @@ async function begin($, e, given, keys) {
   // (taken up again, with another token or key, the loops of before stop: these are the ones that go on)
   const loop = ++loops
   $.clock.every(FLUSH_MS, () => loop === loops && flush($))
+  $.clock.every(RELAY_MS, () => loop === loops && relayTick($))
   $.clock.after(1, () => poll($, loop))
 }
 
@@ -558,6 +608,8 @@ function forgetSession() {
   subagents.clear()
   spawns = []
   stepsDone.clear()
+  for (const id of [...held.keys()]) settleHeld(id)
+  relayTaken.clear()
   answerAsked = ''
   answerTurn = null
 }
@@ -710,6 +762,7 @@ function cardNow() {
     ...usageNow,
     permissionMode,
     effort: effortNow ?? null,
+    ultracode: ultracodeNow,
     agents: [...subagents.values()].filter((a) => now - a.lastActivity < AGENT_IDLE_MS).sort((a, b) => a.startedAt - b.startedAt),
   }
 }
@@ -806,12 +859,14 @@ function tellPhones(kind, body, { title, prefix = '' } = {}) {
 }
 
 // A turn is over, and what there is to say of that is said here, where it can be read:
-// the chat's line where it did not end in an answer, word to a phone where it took a
-// while and nobody stopped it, and its answer where the server asked for it.
+// the chat's line where it did not end in an answer, and what it took, word to a phone
+// where it took a while and nobody stopped it, and its answer where the server asked for it.
 async function turnDone($, e) {
   partDone()
   if (e.reason === 'aborted') await emitRows($, [{ uuid: e.turnId + ':end', role: 'notice', text: 'Interrupted' }])
   else if (e.reason && e.reason !== 'answer') await emitRows($, [{ uuid: e.turnId + ':end', role: 'notice', text: 'Turn ended: ' + e.reason }])
+  const spent = took(e)
+  if (spent) await emitRows($, [{ uuid: e.turnId + ':took', role: 'notice', text: spent }])
   if (e.reason !== 'aborted' && !e.isAborted && Number(e.durationMs) >= DONE_WORTH_MS && attended) {
     if (e.reason && e.reason !== 'answer') tellPhones('done', 'Stopped: ' + e.reason)
     else if (typeof e.answer === 'string' && e.answer) tellPhones('done', e.answer, { prefix: 'Done: ' })
@@ -876,7 +931,14 @@ async function noteSetting($, content) {
   if (!text.includes('<local-command-stdout>')) return
   const said = settingSaid(text)
   if (!said) return
-  if ('effort' in said) noteEffort(said.effort)
+  if ('effort' in said) {
+    if (said.effort !== effortNow) effortSetAt = await $.clock.now()
+    noteEffort(said.effort)
+  }
+  if ('ultracode' in said && said.ultracode !== ultracodeNow) {
+    ultracodeNow = said.ultracode
+    cardChanged(true)
+  }
   if (said.model) await noteModel($)
 }
 
@@ -1051,6 +1113,7 @@ async function offerConnect($, e, { asked = false, again = false } = {}) {
   }
   const code = `${got.slot} ${secret.slice(0, 3)} ${secret.slice(3)}`
   connecting = { id: got.id, token: got.token, url, until: (await $.clock.now()) + CONNECT_MS, e: startedWith ?? e, start, code, name, paired: null }
+  $.ui.invalidate('ui.render')
   const said = `ManyClaws: ${again ? 'the server refused this computer’s API token (it was taken back, or ran out), so this session is not shown on your page. To connect it again' : 'this computer is not connected yet. To connect it'}, open ${url}/app#/connect on a phone or browser where you use ManyClaws and enter ${code}. The code works for ten minutes; /manyclaws connect makes another.`
   $.ui.log(said)
   $.ui.status(`ManyClaws: connect this computer with ${code}`)
@@ -1067,6 +1130,7 @@ const errorOf = (text) => {
 }
 function connectOver($, said) {
   connecting = null
+  $.ui.invalidate('ui.render')
   $.ui.status(undefined)
   if (said) $.ui.log(said)
 }
@@ -1118,6 +1182,13 @@ async function askConnect($) {
   await begin($, c.e, { url: c.url, token: got.token, key: got.key, label: was?.label ?? '', capabilities: was?.capabilities ?? 'default' }, keys)
   refusedSaid = false
 }
+// The page opened in this computer's own browser, as its system opens a link: said in the transcript where it could not be
+async function openPage($, url) {
+  const system = (await output($, ['uname', '-s'])).trim()
+  const argv = system === 'Darwin' ? ['open', url] : /^Linux/.test(system) ? ['xdg-open', url] : ['cmd', '/c', 'start', '""', url]
+  const r = await $.process.run(argv, { timeoutMs: 15_000 }).catch((err) => ({ exitCode: 1, stderr: String(err?.message ?? err) }))
+  if (r.exitCode !== 0) $.ui.log(`ManyClaws: this computer's browser could not be opened (${lastLine(r) || 'it said nothing'}): open ${url} on your phone or in a browser instead.`)
+}
 // Whether this plugin is a copy Claude Code installed from the marketplace (manyclaws@manyclaws), by its folder: the only
 // one whose options `claude plugin configure` changes. One loaded from elsewhere (--plugin-dir) is not, and changes none.
 async function installedHere($) {
@@ -1144,7 +1215,7 @@ async function manyclawsCommand($, e) {
     const claude = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
     const r = await $.process.run([claude, 'plugin', 'configure', PLUGIN, '--values-stdin'], { stdin: JSON.stringify({ token: NO_TOKEN, key: NO_TOKEN }), timeoutMs: 60_000 }).catch((err) => ({ exitCode: 1, stderr: String(err?.message ?? err) }))
     if (r.exitCode !== 0) return { text: 'Claude Code would not change the plugin\'s options: ' + lastLine(r) }
-    return { text: 'Disconnected: from the next session on, this computer reports to no account, and offers a code that connects it again. This session goes on as it is until it ends. Take its API token back on your page (Account, API tokens).' }
+    return { text: 'Disconnected: from the next session on, this computer reports to no account, and offers a code that connects it again. This session goes on as it is until it ends. Disconnect it on your page too (Account, Computers), which takes back its API token.' }
   }
   return { text: '/manyclaws connect: a link that connects this computer to your account, from your page. /manyclaws disconnect: this computer reports to no account from the next session on.' }
 }
@@ -1161,7 +1232,6 @@ async function manyclawsCommand($, e) {
 // itself up to date on an order (manyclaws.update), and holds what Claude Code fetched to its list before any session
 // loads it; and it sets the agent up from its own folder, where the agent is carried (manyclaws.agent).
 const SELF_CHECK_MS = 10_000
-const NOT_TO_START = "keeping this computer's ManyClaws plugin and agent up to date is asked for only from one of your own devices that may start sessions, and this was asked from one that may not (Account, Devices)"
 // The plugin's own folder: what Claude Code says it is
 const ownRoot = ($) => $.plugin.root ?? ''
 // A plugin's folder held against the list it carries: { release, plugin, digest, signed, as }
@@ -1211,7 +1281,7 @@ async function selfCheck($) {
   } catch {}
 }
 const CLASSIC_SKIPPED =
-  "ManyClaws: an organization manages Claude Code here, and Claude Code doesn't pass a plugin a person installed its settings hook events (classic.*). So the page can't answer a permission prompt VS Code asks in its own dialog, doesn't see the session's permission mode, and gets no notifications from it; the rest works. An administrator who lists ManyClaws in the organization's managed settings brings them back."
+  "ManyClaws: an organization manages Claude Code here, and Claude Code doesn't pass a plugin a person installed its settings hook events (classic.*). So the page can't answer a permission prompt VS Code asks in its own dialog, and gets no notifications from it; the rest works (the permission mode, and a prompt asked in the terminal, come by the plugin's own settings hooks). An administrator who lists ManyClaws in the organization's managed settings brings them back."
 // Whether the settings hook events pass this plugin over: where an organization manages Claude Code (it has settings in
 // force here), they reach only a plugin it lists itself. One that has come says this plugin is such a one, or that the
 // organization manages nothing
@@ -1258,15 +1328,30 @@ async function updatePlugin($) {
 // folders sessions may be started in are the ones a person has used Claude Code in, within the installer's limits. It
 // asks for nothing: it takes the token and the key from this plugin, which leaves them for it.
 async function installAgent($, args) {
-  if (!/^(Darwin|Linux)\b/.test(meta.platform ?? '')) throw new Error('the ManyClaws agent runs on macOS and Linux, and this computer is neither')
+  const windows = /^(MSYS|MINGW|CYGWIN)/.test(meta.platform ?? '')
+  if (!windows && !/^(Darwin|Linux)\b/.test(meta.platform ?? '')) throw new Error('the ManyClaws agent runs on macOS, Linux and Windows, and this computer is none of them')
   if (!attended) throw new Error('this session is one a program runs: the agent is set up from a session started on the computer itself, in a terminal, an editor or the desktop app')
   const root = ownRoot($)
-  const r = await $.process.run(['bash', root + '/agent/install.sh', '--from', root, ...(args?.autoFolders === false ? [] : ['--auto-folders'])], { timeoutMs: 300_000 })
+  // (on Windows the installer is run by Git Bash, the one Claude Code itself runs, by its full path: a bash found on the
+  // PATH there may be WSL's, which is another computer as far as this one is concerned)
+  const bash = windows ? await gitBash($) : 'bash'
+  if (!bash) throw new Error('Git Bash was not found on this computer (Claude Code on Windows runs with it: CLAUDE_CODE_GIT_BASH_PATH names it), and the agent is installed by it')
+  const r = await $.process.run([bash, root + '/agent/install.sh', '--from', root, ...(args?.autoFolders === false ? [] : ['--auto-folders'])], { timeoutMs: 300_000 })
   if (r.exitCode !== 0) throw new Error('the agent was not set up: ' + lastLine(r))
   // (and given the token and the key now, not in half a minute)
   agentLookedAt = 0
   await tellAgent($)
   return { said: String(r.stdout ?? '').trim().split('\n').slice(-8) }
+}
+
+// Git Bash on Windows, as Claude Code finds it: where CLAUDE_CODE_GIT_BASH_PATH says, else beside git, else where Git for
+// Windows puts it. null where it is none of those
+async function gitBash($) {
+  const named = await $.env.get('CLAUDE_CODE_GIT_BASH_PATH')
+  const git = String((await output($, ['where', 'git'])).split(/\r?\n/)[0] ?? '').trim()
+  const nearGit = git ? git.replace(/[\\/]cmd[\\/]git\.exe$/i, '\\bin\\bash.exe') : ''
+  for (const candidate of [named, nearGit, 'C:\\Program Files\\Git\\bin\\bash.exe']) if (candidate && (await $.fs.exists(candidate).catch(() => false))) return candidate
+  return null
 }
 
 // One line in the transcript the first time something goes wrong, not on every retry
@@ -1445,7 +1530,15 @@ async function execute($, command) {
     if (!caps.has(capability)) throw new Error(`${method} needs the "${capability}" capability, which this machine's ManyClaws config doesn't grant`)
     // (what keeps this computer up to date, the plugin and the agent, is asked for only by one of the owner's own devices
     // that may start sessions: the agent is what starts them)
-    if (capability === 'upkeep' && !mayStart(devices.list?.devices?.find((d) => d.key === by))) throw new Error(NOT_TO_START)
+    if (capability === 'upkeep') {
+      // (named by what the list calls it, with why it may not, as the agent says it)
+      const d = devices.list?.devices?.find((x) => x.key === by)
+      if (!mayStart(d)) {
+        const who = d?.name ? `${d.name}, which asked,` : 'the device that asked'
+        const why = !d ? 'the device that asked is not on the list of your devices this computer has' : d.until !== undefined ? `${who} was added as not your own (one of your account's devices for a day)` : `starting sessions is turned off for ${d.name || 'the device that asked'} (Account, Browsers)`
+        throw new Error(`this computer's ManyClaws plugin and agent are kept up to date only when that is asked from one of your own devices that may start sessions, and ${why}`)
+      }
+    }
     const value = await call($, method, args)
     await emit($, 'result', { id, ok: true, value: cap(value, MAX_RESULT) })
   } catch (err) {
@@ -1615,9 +1708,35 @@ async function runCommand($, args) {
     const refusal = commandRefusal(command, commandArgs, found)
     if (refusal) throw new Error(refusal)
   }
+  // (in a terminal, a change of effort Claude Code would stop to ask about there is not sent)
+  // (Ultracode is no level: /effort ultracode on or off leaves the level as it is, and Claude Code asks nothing of it)
+  if (command === 'effort' && commandArgs && !/^ultracode\b/i.test(commandArgs.trim()) && !args.force && (await $.session.surfaces()).includes('terminal')) {
+    const refusal = effortRefusal({ level: commandArgs, current: effortNow, lastReplyAt, ttlMs: replyCacheMs, setSinceReply: effortSetAt > lastReplyAt, now: await $.clock.now() })
+    if (refusal) throw new Error(refusal)
+  }
   if (command === 'model' && commandArgs) modelAskedUntil = Date.now() + 15_000
   const result = await $.command.run({ command, args: commandArgs })
+  // (/effort says no as it says yes, with no error: where it did not do what was asked, the page is told why)
+  const refused = settingRefused(command, result?.text)
+  if (refused) throw new Error(refused)
+  if (command === 'effort' && commandArgs) vscodeNote($, commandArgs)
   return { text: cap(result?.text, policy.maxField), context: cap(result?.context, 4000) }
+}
+
+// VS Code's own Effort row and Ultracode switch show what VS Code itself last set: it reads the session's again only
+// when it connects, changes model, or sends a command of its own, never after one this plugin ran for the page. The
+// change has taken effect all the same (the next request is sent at the new level, tried 2026-10-19), and nothing in VS
+// Code asks the session what it is (/effort alone says how to use it, /status is not there): so it is said in the
+// conversation, as a line Claude does not read, with where to see it
+function vscodeNote($, asked) {
+  if (meta.entrypoint !== 'claude-vscode') return
+  const ultra = /^ultracode\b/i.test(asked.trim())
+  const text = ultra
+    ? "VS Code's Ultracode switch doesn't show a change made from outside VS Code. It took effect: Claude Code's line above says so, and Claude runs its next task as workflows."
+    : "VS Code's Effort menu doesn't show a change made from outside VS Code. It took effect: Claude Code's line above says so, and the ManyClaws page shows the level each reply is sent at."
+  Promise.resolve()
+    .then(() => $.ui.log(text))
+    .catch(() => {})
 }
 
 // ---- Requests the page answers: approvals and questions
@@ -1657,14 +1776,14 @@ function forget(rid) {
 // The page's answer to a permission prompt the app is asking in its own dialog, as a
 // classic PermissionRequest decision; null when the dialog was answered first (or the
 // turn was interrupted, or this prompt isn't one the page was shown).
-async function pageDecision($, e, hook) {
+async function pageDecision($, e, hook, watch) {
   const input = JSON.stringify(e.tool_input ?? null)
   const mine = asking.filter((a) => a.tool === e.tool_name)
   const found = mine.find((a) => JSON.stringify(a.input ?? null) === input) ?? (mine.length === 1 ? mine[0] : null)
   if (!found) return null
   forget(found.rid)
   await flush($)
-  const answer = await awaitAnswer($, found.rid, hook, found.request, 0)
+  const answer = await awaitAnswer($, found.rid, hook, found.request, 0, watch)
   if (answer.decision !== 'allow' && answer.decision !== 'deny') return null
   // (what came of it is reported when the call ends, as for one answered in the dialog)
   answeredBy.set(found.rid, answer.by ?? 'server')
@@ -1673,10 +1792,112 @@ async function pageDecision($, e, hook) {
   return { behavior: 'deny', message: 'The user denied this from ManyClaws' + (answer.reason ? ': ' + answer.reason : '') }
 }
 
-async function approve($, e, decided, hook) {
+// A permission prompt the app is asking in its own dialog, as its PermissionRequest event says (by the settings hook
+// events where they reach this plugin, or by its relay where they pass it over): the page's answer to it, or null.
+// One for a call auto mode's classifier put to a person is asked on the page now, beside that dialog, unless the page
+// is to be told only (the policy's "terminal only"); the dialog is up already, so the band above the prompt is not.
+// Where nobody can be at the session there is no dialog: the page is asked alone, as for any of its prompts.
+async function dialogUp($, e, hook, watch) {
+  const input = JSON.stringify(e.tool_input ?? null)
+  const mine = [...held.values()].filter((h) => !h.asked && h.e.tool === e.tool_name)
+  const found = mine.find((h) => JSON.stringify(h.e.input ?? null) === input) ?? (mine.length === 1 ? mine[0] : null)
+  if (found) {
+    // (held until the call is decided, however it is: that ends the page's wait too)
+    found.asked = true
+    const local = policy.approvals === 'local' || !caps.has('approve')
+    if (!attended && !local) {
+      const d = await approve($, found.e, found.decided, hook, 'remote')
+      if (d?.decision === 'allow') return { behavior: 'allow' }
+      if (d?.decision === 'deny') return { behavior: 'deny', message: d.reason }
+      return null
+    }
+    await approve($, found.e, found.decided, hook, local ? 'local' : 'both')
+  }
+  return pageDecision($, e, hook, watch ?? found?.watch)
+}
+// A call left to auto mode's classifier has been decided: whatever waits on a dialog for it stops
+function settleHeld(toolUseId) {
+  const h = held.get(toolUseId)
+  if (h) h.watch.done = true
+  held.delete(toolUseId)
+}
+
+// The session's permission mode as of now: what the settings hook events said last, or where they pass this plugin
+// over, what its relay keeps
+async function modeNow($) {
+  await relayMode($)
+  return permissionMode
+}
+
+// Where the plugin's own settings hooks (relay.sh) leave what they are given for this session
+async function relayFolder($) {
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || ((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '') + '/.claude'
+  return configDir + '/manyclaws/relay/' + (await currentSessionId($))
+}
+
+// The permission mode the relay keeps, read where the settings hook events do not reach this plugin (where they do,
+// they say it themselves, and more often): at most every few seconds, unless `now`
+async function relayMode($, now = false) {
+  if (classicHeard || !config || (!now && Date.now() - relayModeAt < RELAY_MODE_MS)) return
+  relayModeAt = Date.now()
+  let said = ''
+  try {
+    said = String(await $.fs.read((await relayFolder($)) + '/mode')).trim()
+  } catch {
+    return
+  }
+  if (MODES.has(said) && said !== permissionMode) {
+    permissionMode = said
+    cardChanged(true)
+  }
+}
+
+// A look in the relay's folder: for a permission prompt, while one may come there (a call left to auto mode's
+// classifier, or one asked in the app's dialog and on the page), and for the mode now and then
+async function relayTick($) {
+  if (relayBusy || !config || !sessionId) return
+  relayBusy = true
+  try {
+    await relayMode($)
+    if (!held.size && !asking.length) return
+    const folder = await relayFolder($)
+    const asks = (await $.fs.list(folder)).map((x) => x.name).filter((n) => n.endsWith('.ask') && !relayTaken.has(n))
+    for (const name of asks) {
+      relayTaken.add(name)
+      const base = folder + '/' + name.slice(0, -'.ask'.length)
+      await $.fs.write(base + '.taken', '')
+      let e = null
+      try {
+        e = JSON.parse(await $.fs.read(folder + '/' + name))
+      } catch {}
+      void relayAnswer($, base, e)
+    }
+  } catch {
+    // (no folder yet: no settings hook of this session's has run)
+  } finally {
+    relayBusy = false
+  }
+}
+
+// The answer to a permission prompt the relay handed over, written where it waits: the page's, or none (the dialog's
+// alone). Where the settings hook events reach this plugin, the PermissionRequest event answers it, and this does not.
+async function relayAnswer($, base, e) {
+  let decision = null
+  try {
+    if (!classicHeard && e?.hook_event_name === 'PermissionRequest' && e.session_id === sessionId) decision = await dialogUp($, e, null)
+  } catch {}
+  const said = decision ? JSON.stringify({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } }) : ''
+  try {
+    await $.fs.write(base + '.answer', said)
+    await $.fs.write(base + '.done', '')
+  } catch {}
+}
+
+// (`route`: where it is asked, where that is settled already: see dialogUp)
+async function approve($, e, decided, hook, route) {
   const rid = requestId()
   const summary = summarizeInput(e.input)
-  const route = await routeOf($, 'approvals')
+  route ??= await routeOf($, 'approvals')
   const remote = route === 'remote'
   const request = {
     rid,

@@ -1,6 +1,6 @@
 // The mod's pure helpers
 import { expect, test } from 'claude-code/testing'
-import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, colorless } from '../hooks/lib.js'
+import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, effortRefusal, cacheTtlOf, HOUR_CACHE_MS, SHORT_CACHE_MS, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, settingRefused, colorless, took } from '../hooks/lib.js'
 import { summarizeInput, messageRows } from '../hooks/rows.js'
 
 test('capabilities: default, all, additions and exact lists', async () => {
@@ -36,6 +36,27 @@ test('slash commands: parsed, and panel commands refused', async () => {
   expect(commandRefusal('status', '', { name: 'status', source: 'builtin' })).toMatch(/opens a panel/)
   expect(commandRefusal('my-skill', '', { name: 'my-skill', source: 'plugin' })).toBe('')
   expect(commandRefusal('nope', '', undefined)).toMatch(/no \/nope command/)
+})
+
+test("a change of effort a terminal would stop to ask about: after a reply, while its cache is warm, to another level, and not answered there since", async () => {
+  const at = 1_000_000
+  const asks = (more: any) => effortRefusal({ level: 'max', current: 'high', lastReplyAt: at, ttlMs: HOUR_CACHE_MS, setSinceReply: false, now: at + 1000, ...more })
+  expect(asks({})).toMatch(/^mid-conversation, Claude Code asks about it in the terminal first, .* or here in 60 minutes, /)
+  // (no reply in this process yet; the cache gone cold, an hour on or five minutes on; the level it has; one answered there)
+  expect(asks({ lastReplyAt: 0 })).toBe('')
+  expect(asks({ now: at + HOUR_CACHE_MS })).toBe('')
+  expect(asks({ now: at + HOUR_CACHE_MS - 30_000 })).toMatch(/here in 1 minute, /)
+  expect(asks({ ttlMs: SHORT_CACHE_MS, now: at + SHORT_CACHE_MS })).toBe('')
+  expect(asks({ ttlMs: SHORT_CACHE_MS })).toMatch(/here in 5 minutes, /)
+  expect(asks({ level: 'HIGH' })).toBe('')
+  expect(asks({ level: 'auto', current: null })).toBe('')
+  expect(asks({ level: 'auto' })).not.toBe('')
+  expect(asks({ setSinceReply: true })).toBe('')
+  // How long a reply's cache stays warm is what it wrote its cache for; one that wrote none keeps what was known
+  expect(cacheTtlOf({ cache_creation: { ephemeral_1h_input_tokens: 5, ephemeral_5m_input_tokens: 0 } }, SHORT_CACHE_MS)).toBe(HOUR_CACHE_MS)
+  expect(cacheTtlOf({ cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 5 } })).toBe(SHORT_CACHE_MS)
+  expect(cacheTtlOf({ cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 } }, SHORT_CACHE_MS)).toBe(SHORT_CACHE_MS)
+  expect(cacheTtlOf(null)).toBe(HOUR_CACHE_MS)
 })
 
 test('cap bounds strings, arrays, depth and odd values', async () => {
@@ -92,6 +113,23 @@ test('what /effort and /model answer is read off the transcript', async () => {
   expect(settingSaid(out('Cancelled'))).toBe(null)
 })
 
+test("Ultracode is a switch beside the effort, read off what /effort ultracode answers, with the level it leaves as it was; and what /effort refuses is said as a refusal", async () => {
+  const out = (said: string) => `<local-command-stdout>${said}</local-command-stdout>`
+  // (as Claude Code 2.1.303 says them)
+  expect(settingSaid(out('Ultracode on (this session only): dynamic workflows on every task. Effort stays high.'))).toEqual({ ultracode: true, effort: 'high' })
+  expect(settingSaid(out('Ultracode off. Effort stays xhigh.'))).toEqual({ ultracode: false, effort: 'xhigh' })
+  expect(settingSaid(out('\x1b[1mUltracode on\x1b[0m (this session only): dynamic workflows on every task.'))).toEqual({ ultracode: true })
+  // A level set leaves it as it was: nothing is said of it
+  expect(settingSaid(out('Set effort level to high (saved as your default for new sessions): Comprehensive implementation'))).toEqual({ effort: 'high' })
+  // Refused where it cannot be turned on, in /effort's own words, without the list a terminal is given
+  expect(settingRefused('effort', out('Ultracode needs dynamic workflows enabled (see /config). Valid options are: low, medium, high'))).toBe('Ultracode needs dynamic workflows enabled (see /config)')
+  expect(settingRefused('effort', out("Ultracode isn't available on Haiku 5.5"))).toBe("Ultracode isn't available on Haiku 5.5")
+  expect(settingRefused('effort', 'Invalid argument: heroic. Valid options are: low, medium')).toBe('Invalid argument: heroic')
+  // What it did is no refusal, and nor is another command's answer
+  expect(settingRefused('effort', out('Ultracode off. Effort stays high.'))).toBe(null)
+  expect(settingRefused('model', out("Ultracode isn't available on Haiku 5.5"))).toBe(null)
+})
+
 test("a local command's answer drawn in color for a terminal is its answer on the page, however much color: the colors go before it is cut to what is sent", async () => {
   // As /context answers in 2.1.30x: a grid of colored cells, four times what a field holds with its colors
   const cell = '\x1b[38;5;244m⛁\x1b[39m '
@@ -107,4 +145,14 @@ test("a local command's answer drawn in color for a terminal is its answer on th
   const cut = messageRows({ uuid: 'c2', door: 'command', blocks: [{ type: 'text', text: '<local-command-stdout>Context Usage\nlong' }] })
   expect(cut.map((r: any) => [r.role, r.text])).toEqual([['output', 'Context Usage\nlong']])
   expect(colorless('\x1b[1mbold\x1b[22m plain')).toBe('bold plain')
+})
+
+test('what a turn took reads as the terminal says it: its length, and the tokens it wrote where any counted', () => {
+  expect(took({ durationMs: 485_000, usage: { output_tokens: 8012 } })).toBe('8m 5s · ↓ 8.0k tokens')
+  expect(took({ durationMs: 27_167, usage: { output_tokens: 451 } })).toBe('27s · ↓ 451 tokens')
+  expect(took({ durationMs: 3_725_000, usage: { output_tokens: 120_400 } })).toBe('1h 2m · ↓ 120.4k tokens')
+  // (an interrupt or an API error counts nothing: its length alone)
+  expect(took({ durationMs: 90_000 })).toBe('1m 30s')
+  expect(took({ durationMs: 400, usage: { output_tokens: 0 } })).toBe('0s')
+  expect(took({})).toBe('')
 })

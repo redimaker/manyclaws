@@ -1,6 +1,6 @@
 {
   "name": "manyclaws",
-  "version": "6.1.0",
+  "version": "6.2.0",
   "description": "Connects this session to a ManyClaws server: its chat, state and approvals on one web page for every machine and account, with replies from anywhere",
   "author": {
     "name": "Deon Brewis"
@@ -9,7 +9,7 @@
     "token": {
       "type": "string",
       "title": "API token",
-      "description": "Filled in for you as this computer is connected with the code the plugin shows in a new session. It signs this computer in, and is taken back on your page (Account, API tokens) to disconnect it",
+      "description": "Filled in for you as this computer is connected with the code the plugin shows in a new session. It signs this computer in, and is taken back as this computer is disconnected on your page (Account, Computers)",
       "sensitive": true
     },
     "label": {
@@ -20,7 +20,7 @@
     "key": {
       "type": "string",
       "title": "Encryption key",
-      "description": "Filled in for you as this computer is connected with the code the plugin shows in a new session: there is nothing to type here. It is your account's key, written out (mcf_…), which everything this computer's sessions say is sealed with before it is sent, so only your own devices can read it. Without it nothing is sent, and the link is shown. ManyClaws has no passphrase: anything here that is not a key is no key",
+      "description": "Filled in for you as this computer is connected with the code the plugin shows in a new session: there is nothing to type here. It is your account's key, written out (mcf_…), with which everything this computer's sessions say is end-to-end encrypted before it is sent. Without it nothing is sent, and the link is shown. ManyClaws has no passphrase: anything here that is not a key is no key",
       "sensitive": true
     },
     "capabilities": {

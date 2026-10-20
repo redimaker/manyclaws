@@ -5,7 +5,7 @@
 This repository holds every part of it that runs on your own devices:
 
 - **The plugin** (`mod/`): a Claude Code plugin. It reports each session to the ManyClaws server and does what your own devices ask of that session. It carries the agent, and the signed list of every file it was released with (`mod/release.json`).
-- **The agent** (`mod/agent/`): a small background service, one per computer, which the plugin installs from its own folder when you ask from the page. It indexes that computer's Claude Code transcripts so past sessions can be read and searched, starts or resumes sessions when you ask from the page, each in a terminal of its own there (a Terminal window on a Mac, tmux on Linux) that outlives the agent, and checks the plugin there against the release it carries.
+- **The agent** (`mod/agent/`): a small background service, one per computer, which the plugin installs from its own folder when you ask from the page. It indexes that computer's Claude Code transcripts so past sessions can be read and searched, starts or resumes sessions when you ask from the page, and checks the plugin there against the release it carries.
 - **The page** (`web/`): what your browser and your phone run, as the server hands it out. It is where your account's key is made and kept, and where every device is approved, so it is published here with the rest, and what a server hands you can be held against it (see "Checking what you run").
 
 The server is not in this repository. It stores and forwards what your devices encrypted.
@@ -65,15 +65,14 @@ The key reads what your sessions say. It cannot sign the list of your devices, s
 | `mod/tests/` | The plugin's own tests |
 | `mod/agent/agent.mjs` | The agent's command line: `run`, `index`, `search`, `sessions`, `read`, `configure`, `verify` |
 | `mod/agent/service.mjs` | The agent as a service: its connection to the server, what it answers, the plugin's measure and its own upgrade |
-| `mod/agent/host.mjs` | Sessions the agent starts or resumes, each opened in a terminal of its own (and searches, which it runs itself), and the rules for which it may, and where |
-| `mod/agent/launch.mjs` | What runs a session in the console window the agent opens for it on Windows |
+| `mod/agent/host.mjs` | Sessions the agent starts or resumes itself, and the rules for which it may, and where |
 | `mod/agent/indexer.mjs`, `store.mjs`, `transcript.mjs` | The index of this computer's transcripts (SQLite, with full-text search) |
 | `mod/agent/files.mjs` | Opening a file that a link in a chat names |
 | `mod/agent/cswap.mjs` | Switching between Claude accounts with `cswap`, where it is installed |
 | `mod/agent/rows.mjs`, `mod/agent/seal.mjs` | Identical copies of the plugin's `rows.js` and `seal.js` |
 | `mod/agent/secrets.mjs` | Where the agent keeps its token and your key: the keychain on a Mac |
 | `mod/agent/verify.mjs` | Holds what is installed, the plugin Claude Code installed, and what a server hands a browser, against the signed release |
-| `mod/agent/install.sh` | Installs the agent as a service of your own user (launchd on macOS, systemd on Linux), from a signed release and nothing else |
+| `mod/agent/install.sh` | Installs the agent as a service of your own user (launchd on macOS, systemd on Linux, on Windows a task of Task Scheduler's at sign-in, run by Git Bash), from a signed release and nothing else |
 | `mod/release.json`, `mod/release.json.sig` | The release: every file of the plugin, the agent and the page with its SHA-256, and that list signed |
 | `web/` | The page: `index.html`, `app.js`, `keys.js`, `seal.js` and what they show; and the two guides Claude Code can follow, `setup.md` and `upgrade.md` |
 | `release.mjs` | Makes a release, writes the page's integrity values, and tags the commit a release is in |
@@ -94,7 +93,7 @@ Updates are offered on your page, for each computer, and you approve each one th
 
 **A computer whose plugin or agent is from before 6.0.0** is moved once, by <https://manyclaws.dev/upgrade> (`web/upgrade.md` here), which the page sends an account to; from then on it is kept up to date from the page. **To install from source**, so that what runs is what you read: the guide's "Installing from source" checks out a release by its tag (`release-N`), checks its signature and every file with `ssh-keygen` and `shasum`, and has Claude Code load the plugin from that folder as it is.
 
-The plugin needs Claude Code 2.1.287 or later. The agent needs Node.js 22.13 or later and `ssh-keygen` (which comes with OpenSSH), and nothing else; it is for macOS and Linux.
+The plugin needs Claude Code 2.1.287 or later. The agent needs Node.js 22.13 or later and `ssh-keygen` (which comes with OpenSSH), and nothing else; it is for macOS, Linux and Windows. On Windows it is installed by Git Bash, which Claude Code runs with there, and kept running by a task of Task Scheduler's that starts it as you sign in, with no window of its own (`ManyClaws agent`; what it runs is `~/.manyclaws/agent-run.cmd`, which starts the agent again five seconds after it stops). Its token and key are in `agent.json`, which only you can read, as on Linux.
 
 ### Releases are signed
 
@@ -132,7 +131,7 @@ What ends up on your computer is these files, so you can also compare them yours
 Both parts are limited by what the computer's owner sets, on that computer:
 
 - **The plugin** does only what its **capabilities** option allows. By default a session can be inspected, sent prompts, sent notifications and messages, and have its permission prompts answered. The rest are off until turned on there, among them reading files directly (`+files`) and running commands (`+exec`); the full list is in `mod/hooks/lib.js`.
-- **The agent** starts sessions only in the folders it was installed with (`--spawn`), and, where its owner allows it (`--auto-folders`, or from the page), in the folders a person has used Claude Code in on that computer in the last 90 days: never the home folder or one above it, a temporary one, or one inside a folder whose name starts with a dot, and no new folder is made in those. Without either it only reads and searches. It starts one only for a device of yours that may start sessions: one you said is your own, unless you turned that off for it under Account, Devices. It starts them in any of Claude Code's permission modes but `bypassPermissions`, in which a session does whatever it is prompted to with nobody asked: that one is allowed only where the computer's owner named it (`--mode bypassPermissions`, or the list `spawn.modes` in `~/.manyclaws/agent.json`).
+- **The agent** starts sessions only in the folders it was installed with (`--spawn`), and, where its owner allows it (`--auto-folders`, or from the page), in the folders a person has used Claude Code in on that computer in the last 90 days: never the home folder or one above it, a temporary one, or one inside a folder whose name starts with a dot, and no new folder is made in those. Without either it only reads and searches. It starts one only for a device of yours that may start sessions: one you said is your own, unless you turned that off for it under Account, Devices. It starts them in any of Claude Code's permission modes, `bypassPermissions` too, in which a session does whatever it is prompted to with nobody asked, unless the computer's owner narrows them (`--mode`, or the list `spawn.modes` in `~/.manyclaws/agent.json`).
 - **Files** are opened for your devices only from inside those same folders, or the ones named for it (`--files`, or `"files": [...]` in `agent.json`; `"files": false` opens none). Where a file really is decides: a link inside those folders that leads out of them opens nothing.
 - **Files are taken** from your devices into the folders sessions may be started in (`--spawn`), and nowhere else: one you upload to a session's folder, one you attach to a reply (kept in `.manyclaws-uploads` under that folder, which git ignores), or one you opened, changed on the page and saved back. A folder named only for opening files (`--files`) is read and not written, unless `agent.json` says `"upload": true`; `"upload": false` has none taken anywhere. A new file never takes the place of one that is there, and a file saved back is written only over the file you opened: where it has changed on the computer since, it is left alone until you say to save over what is there now. Nothing is written among the agent's own files.
 

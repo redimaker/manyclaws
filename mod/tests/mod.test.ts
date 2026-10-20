@@ -183,6 +183,41 @@ const paired = (clock: any, there: () => boolean) => until(clock, there, 1000)
 
 // ---- A session is told of sealed, or not at all
 
+test('while the computer waits to be connected, the band above the prompt has where its code is typed as a link a click opens, and the code, and a button that opens it in this computer\'s browser; and not once it is over', async ($, on) => {
+  const ran: string[][] = []
+  const run = (argv: string[]) => {
+    ran.push(argv)
+    return argv[0] === 'uname' ? { exitCode: 0, stdout: 'Darwin\n', stderr: '' } : argv[0] === 'open' ? { exitCode: 0, stdout: '', stderr: '' } : null
+  }
+  const { clock, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: WORDS }, run })
+  await start($)
+  await clock.advance(1000)
+  const code = / enter (482 \d{3} \d{3})\./.exec(said.map((l) => String(JSON.parse(l).text ?? JSON.parse(l)))[0])![1]
+  const band = () =>
+    $.ui.mount({
+      plugin: 'manyclaws',
+      component: 'AbovePrompt',
+      requestId: 'band',
+      surface: 'terminal',
+      viewport: { columns: 120, rows: 40 },
+      props: { hasSurvey: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+    } as any)
+  const ui = await band()
+  const link: any = await ui.find({ type: 'Link' })
+  expect(link?.props?.href).toBe('https://mc.test/app#/connect')
+  expect((await ui.find({ type: 'Text', text: /to connect this computer/ }))?.text).toBe(`ManyClaws: to connect this computer, open https://mc.test/app#/connect and enter ${code}`)
+  // (a terminal that draws no links, as macOS's own: the button opens the page in this computer's browser)
+  await ui.press({ key: 'mc-open' })
+  await clock.advance(10)
+  expect(ran).toContainEqual(['open', 'https://mc.test/app#/connect'])
+  await ui.unmount()
+  // (ten minutes on, the code has run out, and the band has nothing of it)
+  await clock.advance(11 * 60_000)
+  const after = await band()
+  expect(await after.find({ type: 'Link' })).toBeUndefined()
+  await after.unmount()
+})
+
 test('without a token the mod sends nothing of the session: it shows a code that connects this computer, of which only the first three digits, which the server gave, go anywhere; and asks the server how it is going, for ten minutes', async ($, on) => {
   const { clock, sent, said } = setup(on, { env: { MANYCLAWS_URL: 'https://mc.test', MANYCLAWS_KEY: WORDS } })
   await start($)
@@ -519,6 +554,133 @@ test('told once on this computer that the settings hook events pass the plugin o
   expect(s.said.filter((l: string) => l.includes('an organization manages Claude Code here'))).toEqual([])
 })
 
+// The folder the plugin's own settings hooks (relay.sh) leave what they are given in, for this session: the permission
+// mode, and the permission prompts the app is asking in its own dialog, each `N.ask`. What the plugin writes there (that
+// it is answering one, and its answer) is in `wrote`, by name.
+function relay(on: any, { mode = 'auto' as string | null, asks = {} as Record<string, any> } = {}) {
+  const dir = '/.claude/manyclaws/relay/sess-1'
+  const state = { mode, asks }
+  const wrote = new Map<string, string>()
+  const name = (path: string) => (path.startsWith(dir + '/') ? path.slice(dir.length + 1) : null)
+  on('fs.read', ($: any, e: any) => {
+    const n = name(e.path)
+    if (n === 'mode' && state.mode !== null) return { value: state.mode }
+    if (n && state.asks[n]) return { value: JSON.stringify(state.asks[n]) }
+    return { deny: 'ENOENT' }
+  })
+  on('fs.list', ($: any, e: any) => (e.path === dir ? { value: Object.keys(state.asks).map((n) => ({ name: n, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) } : { deny: 'ENOENT' }))
+  on('fs.write', ($: any, e: any) => {
+    wrote.set(name(e.path) ?? e.path, e.text)
+    return { value: undefined }
+  })
+  return { state, wrote }
+}
+const PERMISSION_REQUEST = (command: string) => ({ session_id: 'sess-1', hook_event_name: 'PermissionRequest', permission_mode: 'auto', tool_name: 'Bash', tool_input: { command } })
+
+test("in auto mode where the settings hook events pass the plugin over, its own settings hooks say the mode: the card shows it, and an ask is left to the classifier, with nothing asked on the page", async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  on('tool.call', () => ({ result: 'done' }))
+  const m = await made()
+  relay(on)
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'auto' }, commands: [] }] })
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  expect(opened(s, m).cards.at(-1).permissionMode).toBe('auto')
+  const d = await $.tool.check({ tool: 'Bash', input: { command: 'make' }, tool_use_id: 'ta1' })
+  expect(d.decision).toBe('ask')
+  // (the classifier lets it run: nothing was asked, and nothing is told)
+  await $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'ta1' } as any)
+  await s.clock.advance(300)
+  expect([opened(s, m).requests, opened(s, m).resolved]).toEqual([[], []])
+})
+
+test('in auto mode, a call the classifier puts to a person is asked on the page as its dialog is up, by the relay, and the page answering first is the answer the relay is given', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  const m = await made()
+  const r = relay(on)
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'auto' }, commands: [] }], decision: () => answer() })
+  const answer = answerTo(s, m, (q) => ({ decision: 'allow', order: order(m, 'answer', { decision: 'allow', rid: q.rid, asked: askedOf(q) }) }))
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  await $.tool.check({ tool: 'Bash', input: { command: 'rm x' }, tool_use_id: 'ta2' })
+  await s.clock.advance(300)
+  expect(opened(s, m).requests).toEqual([])
+  // The dialog is up: its PermissionRequest event, as the relay leaves it
+  r.state.asks['1-2-3.ask'] = PERMISSION_REQUEST('rm x')
+  await until(s.clock, () => r.wrote.has('1-2-3.done'))
+  expect(r.wrote.get('1-2-3.taken')).toBe('')
+  expect(opened(s, m).requests[0]).toMatchObject({ kind: 'approval', tool: 'Bash', route: 'both' })
+  expect(JSON.parse(r.wrote.get('1-2-3.answer')!)).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
+})
+
+test('in auto mode, a dialog answered at the terminal first: the relay is given no answer, and the page is told how it went', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  on('tool.call', () => ({ result: 'done' }))
+  const m = await made()
+  const r = relay(on)
+  // (the page says nothing, a wait at a time)
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'auto' }, commands: [] }], decision: async (clock: any) => (await clock.sleep(20_000), { pending: true }) })
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  await $.tool.check({ tool: 'Bash', input: { command: 'rm y' }, tool_use_id: 'ta3' })
+  r.state.asks['4-5-6.ask'] = PERMISSION_REQUEST('rm y')
+  await until(s.clock, () => opened(s, m).requests.length > 0)
+  // Allowed in the dialog: the call runs
+  await $.tool.call({ tool: 'Bash', command: 'rm y', tool_use_id: 'ta3' } as any)
+  await until(s.clock, () => r.wrote.has('4-5-6.done'), 1000)
+  expect(r.wrote.get('4-5-6.answer')).toBe('')
+  await s.clock.advance(300)
+  expect(opened(s, m).resolved[0]).toMatchObject({ decision: 'allow', by: 'terminal' })
+})
+
+test('in auto mode with the page set to "terminal only", a prompt in the dialog is told to the page as asked there, and not answered from it', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  const m = await made()
+  const r = relay(on)
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'local' }, commands: [] }] })
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  await $.tool.check({ tool: 'Bash', input: { command: 'rm z' }, tool_use_id: 'ta4' })
+  r.state.asks['7-8-9.ask'] = PERMISSION_REQUEST('rm z')
+  await until(s.clock, () => r.wrote.has('7-8-9.done'))
+  expect(r.wrote.get('7-8-9.answer')).toBe('')
+  await s.clock.advance(300)
+  expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'local' })
+})
+
+test('in auto mode where nobody can be at the session (a machine\'s agent runs it), the classifier settles an ask first too, and one it puts to a person is asked on the page alone, by its PermissionRequest event', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  const m = await made()
+  const r = relay(on)
+  const s: any = session(on, m, { ...HEADLESS, decision: () => answer() })
+  const answer = answerTo(s, m, (q) => ({ decision: 'allow', order: order(m, 'answer', { decision: 'allow', rid: q.rid, asked: askedOf(q) }) }))
+  await $.session.start({ surface: null, isInteractive: false, cwd: '/work' })
+  await s.clock.advance(3_300)
+  expect((await $.tool.check({ tool: 'Bash', input: { command: 'rm h' }, tool_use_id: 'ta6' })).decision).toBe('ask')
+  await s.clock.advance(300)
+  expect(opened(s, m).requests).toEqual([])
+  r.state.asks['2-2-2.ask'] = PERMISSION_REQUEST('rm h')
+  await until(s.clock, () => r.wrote.has('2-2-2.done'))
+  expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'remote' })
+  expect(JSON.parse(r.wrote.get('2-2-2.answer')!)).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } })
+})
+
+test('in any other mode, an ask is the page\'s as before (here, in a terminal: the page and the band above the prompt), and the relay\'s prompts are not taken up', async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask' }))
+  const m = await made()
+  const r = relay(on, { mode: 'default' })
+  const s: any = session(on, m, { poll: [{ policy: { version: 1, approvals: 'auto' }, commands: [] }] })
+  await starting($, s.clock)
+  await s.clock.advance(3_300)
+  expect(opened(s, m).cards.at(-1).permissionMode).toBe('default')
+  void $.tool.check({ tool: 'Bash', input: { command: 'rm w' }, tool_use_id: 'ta5' })
+  await s.clock.advance(300)
+  expect(opened(s, m).requests[0]).toMatchObject({ tool: 'Bash', route: 'remote' })
+  r.state.asks['1-1-1.ask'] = PERMISSION_REQUEST('rm w')
+  await s.clock.advance(1_000)
+  expect(r.wrote.has('1-1-1.taken')).toBe(false)
+})
+
 // ---- The key: given to this computer written out (mcf_…) as it is connected, and taken as it is. There is no passphrase.
 
 test('the key written out among its options is used as it is: the session starts at once, sealed, saying nothing of which key, and the server is asked nothing of whose computer this is', { options: { key: '' } }, async ($, on) => {
@@ -604,6 +766,95 @@ test('a model switch made in the app is the app\'s to ask about, and so is one a
   expect(results()[0]).toMatchObject({ id: 'c1', ok: true })
   const asked = await ($ as any).classic.PreModelSwitch(SWITCH)
   expect(asked?.permissionDecision).toBeUndefined()
+})
+
+// Mid-conversation, Claude Code in a terminal asks "Change effort level?" there before a change, while the reply's
+// prompt cache is warm, and what is sent after it waits behind it (deon, 2026-10-19: a session the page set to max sat
+// at that dialog with two messages behind it). From the page such a change is refused, and said why.
+test('from the page, a change of effort a terminal would stop to ask about is refused and said why; one it would not ask about is run', async ($, on) => {
+  const m = await made(WORDS)
+  const ran: string[] = []
+  on('command.run', ($: any, e: any) => {
+    ran.push(e.args)
+    return { value: { text: '' } }
+  })
+  let cache: any = { ephemeral_1h_input_tokens: 9000, ephemeral_5m_input_tokens: 0 }
+  on('turn.step', async function* ($: any, e: any) {
+    return { turnId: e.turnId, index: e.index, answer: 'one', stopReason: 'end_turn', usage: { output_tokens: 3, cache_creation: cache }, toolUses: [] }
+  } as any)
+  engine(on)
+  // (the page's /effort, a poll at a time, as it is asked for)
+  const asked: string[] = []
+  let seq = 0
+  const next = async (clock: any) => {
+    while (!asked.length) await clock.sleep(500)
+    seq++
+    return { commands: [prompt(seq, { order: order(m, 'call', { method: 'command.run', args: { command: 'effort', args: asked.shift() } }) })] }
+  }
+  const where = ['terminal']
+  const { clock, results } = session(on, m, { surfaces: where, poll: Array.from({ length: 12 }, () => next) })
+  await start($)
+  await clock.advance(1000)
+  const effort = async (level: string) => {
+    asked.push(level)
+    await clock.advance(2000)
+    return results().at(-1)
+  }
+  let turns = 0
+  const reply = async () => {
+    const turnId = 't' + ++turns
+    await ($ as any).turn.start({ turnId, text: 'Reply with just: one' })
+    for await (const _ of ($ as any).turn.step({ turnId, index: 0, model: 'claude-test', effort: 'high', messages: [] })) void _
+    await ($ as any).turn.complete({ turnId, reason: 'answer', isAborted: false, durationMs: 10, answer: 'one' })
+  }
+  // Before this process has had a reply, it does not ask
+  expect(await effort('xhigh')).toMatchObject({ ok: true })
+  await reply()
+  // After one, it would: not sent, and why said, with when it would go from here
+  const refused = await effort('max')
+  expect(refused.ok).toBe(false)
+  expect(refused.error).toMatch(/^mid-conversation, Claude Code asks about it in the terminal first, where nothing sent from here can answer, and everything sent after it would wait\. Change it there with \/effort, or here in 60 minutes, once the conversation's cache has gone\.$/)
+  // (nor is Ultracode, a switch beside the level: Claude Code asks nothing of it, and the level stays as it is)
+  expect(await effort('ultracode on')).toMatchObject({ ok: true })
+  // (the level it has already is not asked about)
+  expect(await effort('high')).toMatchObject({ ok: true })
+  // Answered in the terminal once, it is not asked about again until the next reply
+  await ($ as any).session.append(said('e1', 'command', 'user', [{ type: 'text', text: '<local-command-stdout>Set effort level to low: Quick</local-command-stdout>' }]))
+  expect(await effort('medium')).toMatchObject({ ok: true })
+  await reply()
+  expect(await effort('max')).toMatchObject({ ok: false })
+  // A reply that wrote its cache for five minutes is asked about for five (and once it has gone, not: see lib.test.ts)
+  cache = { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 9000 }
+  await reply()
+  expect((await effort('low')).error).toMatch(/here in 5 minutes,/)
+  // Where no terminal draws the session (an app or the agent hosts it), it is sent as it is
+  await reply()
+  where.length = 0
+  expect(await effort('medium')).toMatchObject({ ok: true })
+  expect(ran).toEqual(['xhigh', 'ultracode on', 'high', 'medium', 'medium'])
+})
+
+test("in a session VS Code hosts, an effort or Ultracode set from the page is said in the conversation not to show in VS Code's own menu, with where to see it took effect; in a terminal nothing is said", async ($, on) => {
+  on('command.run', ($: any, e: any) => ({ value: { text: e.args.startsWith('ultracode') ? 'Ultracode on (this session only): dynamic workflows on every task. Effort stays high.' : 'Set effort level to xhigh (this session only): Deeper reasoning' } }))
+  const m = await made()
+  const run = (seq: number, args: string) => prompt(seq, { order: order(m, 'call', { method: 'command.run', args: { command: 'effort', args } }) })
+  const s: any = session(on, m, { ...VSCODE, poll: [{ commands: [run(1, 'xhigh'), run(2, 'ultracode on')] }] })
+  await startHosted($)
+  await s.clock.advance(1000)
+  expect(s.results().map((r: any) => r.ok)).toEqual([true, true])
+  const said = s.said.map((l: string) => String(JSON.parse(l).text ?? JSON.parse(l)))
+  expect(said).toContain("VS Code's Effort menu doesn't show a change made from outside VS Code. It took effect: Claude Code's line above says so, and the ManyClaws page shows the level each reply is sent at.")
+  expect(said).toContain("VS Code's Ultracode switch doesn't show a change made from outside VS Code. It took effect: Claude Code's line above says so, and Claude runs its next task as workflows.")
+})
+
+test('in a terminal, an effort set from the page is not said to be anywhere else: its footer shows it', async ($, on) => {
+  on('command.run', () => ({ value: { text: 'Set effort level to xhigh (this session only): Deeper reasoning' } }))
+  const m = await made()
+  const s: any = session(on, m, { poll: [{ commands: [prompt(1, { order: order(m, 'call', { method: 'command.run', args: { command: 'effort', args: 'xhigh' } }) })] }] })
+  await start($)
+  await s.clock.advance(1000)
+  expect(s.results()[0]).toMatchObject({ ok: true })
+  expect(s.said.some((l: string) => l.includes("doesn't show a change made from outside"))).toBe(false)
 })
 
 // ---- A session's chat, sent as it starts and whenever the server asks for it
@@ -1362,6 +1613,7 @@ test('of a session nothing is in the open but which session, the order things ca
     ['assistant', 'Counting.', undefined, undefined],
     ['tool', 'count herons', 'Bash', 'tu1'],
     ['result', 'seven herons', undefined, 'tu1'],
+    ['notice', '2s', undefined, undefined],
   ])
   // (a row's name is made of what it is called here, with the key: the same row has the same name each time, and the name says nothing)
   expect(got.rows[0].id).toBe(nameOf('u1', contentKey(m.key)))
@@ -1432,7 +1684,7 @@ test('a session tells the account\'s phones itself, sealed: when it starts to ne
   await s.clock.advance(10)
   await ($ as any).turn.start({ turnId: 't1', text: 'Build it' })
   expect((await check($)).decision).toBe('allow')
-  await ($ as any).turn.complete({ turnId: 't1', reason: 'answer', isAborted: false, durationMs: 45_000, answer: 'Built, with\n  three warnings.' })
+  await ($ as any).turn.complete({ turnId: 't1', reason: 'answer', isAborted: false, durationMs: 45_000, answer: 'Built, with\n  three warnings.', usage: { input_tokens: 10, output_tokens: 2412, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'm' } })
   await s.clock.advance(2000)
   const { notes, all } = opened(s, m)
   expect(notes.map((n) => [n.kind, n.prefix, n.body])).toEqual([['needs', 'Needs you: ', 'Permission: Bash make'], ['done', 'Done: ', 'Built, with three warnings.']])
@@ -1444,7 +1696,8 @@ test('a session tells the account\'s phones itself, sealed: when it starts to ne
   await ($ as any).turn.complete({ turnId: 't2', reason: 'aborted', isAborted: true, durationMs: 90_000 })
   await s.clock.advance(2000)
   expect(opened(s, m).notes.length).toBe(2)
-  expect(opened(s, m).rows.map((r) => [r.role, r.text])).toEqual([['notice', 'Interrupted']])
+  // (each turn says in the chat what it took, as the terminal does: the stopped one counted no tokens)
+  expect(opened(s, m).rows.map((r) => [r.role, r.text])).toEqual([['notice', '45s · ↓ 2.4k tokens'], ['notice', 'Interrupted'], ['notice', '1m 30s']])
 })
 
 test('the reply as it is written goes in sealed pieces, and word that they are done with when the reply is in the chat', async ($, on) => {
@@ -1551,6 +1804,23 @@ test('the permission mode and the effort are on the card as soon as they change:
   const card = opened(s, m).cards.at(-1)
   expect([card.permissionMode, card.effort]).toEqual(['plan', 'high'])
   expect(JSON.stringify(s.events())).not.toMatch(/"plan"|"high"|PostToolUse/)
+})
+
+test('Ultracode is on the card as /effort says it, beside the effort; and /effort refusing it, from the page, is a refusal with its reason', async ($, on) => {
+  const m = await made()
+  const s = session(on, m)
+  await start($)
+  await s.clock.advance(300)
+  expect(opened(s, m).cards.at(-1).ultracode).toBe(null)
+  const answer = (id: string, text: string) => ($ as any).session.append(said(id, 'command', 'user', [{ type: 'text', text: `<local-command-stdout>${text}</local-command-stdout>` }]))
+  await answer('c1', 'Ultracode on (this session only): dynamic workflows on every task. Effort stays high.')
+  await s.clock.advance(300)
+  expect([opened(s, m).cards.at(-1).ultracode, opened(s, m).cards.at(-1).effort]).toEqual([true, 'high'])
+  await answer('c2', 'Ultracode off. Effort stays high.')
+  await s.clock.advance(300)
+  expect(opened(s, m).cards.at(-1).ultracode).toBe(false)
+  // (and nothing of it in the open)
+  expect(JSON.stringify(s.events())).not.toMatch(/ultracode|Ultracode/i)
 })
 
 // ---- What is left in the open of a session is what the server cannot do without: nothing that numbers, sizes or
@@ -1772,7 +2042,8 @@ function folders(on: any, { own, at = {}, files = {} }: { own: Record<string, st
     const bytes = e.as === 'bytes' || e.options?.as === 'bytes' || e.init?.as === 'bytes'
     return { value: bytes ? { base64: std64(enc.encode(text)) } : text }
   })
-  on('fs.exists', ($: any, e: any) => ({ value: files[e.path] !== undefined || !!where(e.path) }))
+  // (a Windows path, which the engine running these on a Mac or Linux finds under its working folder, is the same file)
+  on('fs.exists', ($: any, e: any) => ({ value: files[e.path] !== undefined || Object.keys(files).some((f) => /^[A-Za-z]:\\/.test(f) && e.path.endsWith('/' + f)) || !!where(e.path) }))
   on('fs.write', ($: any, e: any) => {
     written.push({ path: e.path, text: e.text })
     return { value: undefined }
@@ -1861,6 +2132,36 @@ test('the agent set up from the plugin\'s own folder, where it is carried: its i
   expect([done.ok, done.value.said]).toEqual([true, ['The ManyClaws agent is installed']])
 })
 
+// (Windows, as Claude Code's own Git Bash says it is, and where Claude Code says that Git Bash is)
+const WINDOWS = (argv: string[]) => (argv[0] === 'uname' ? { exitCode: 0, stdout: 'MSYS_NT-10.0-26200 x86_64\n', stderr: '' } : null)
+const GIT_BASH = 'C:\\Program Files\\Git\\usr\\bin\\bash.exe'
+
+test('on Windows the agent is set up the same way, by the Git Bash Claude Code runs (CLAUDE_CODE_GIT_BASH_PATH) and not a bash found on the PATH, which may be WSL\'s', async ($, on) => {
+  const m = await made()
+  const ran: string[][] = []
+  // (Git Bash is there, where Claude Code says)
+  const fsNow = folders(on, { own: released(9).files, files: { [GIT_BASH]: '' } })
+  const s = session(on, m, { env: { ...AT_HOME, CLAUDE_CODE_GIT_BASH_PATH: GIT_BASH }, poll: [upkeep(m, 'manyclaws.agent')], run: (argv: string[]) => (ran.push(argv), WINDOWS(argv) ?? (argv[0] === GIT_BASH ? { exitCode: 0, stdout: 'The ManyClaws agent is installed\n', stderr: '' } : null)) })
+  await starting($, s.clock)
+  await s.clock.advance(3000)
+  const installer = ran.find((a) => a[0] === GIT_BASH)
+  const root = fsNow.root() || installer?.[3]
+  expect(installer).toEqual([GIT_BASH, root + '/agent/install.sh', '--from', root, '--auto-folders'])
+  expect(ran.some((a) => a[0] === 'bash')).toBe(false)
+  expect(s.results().find((r) => r.id === 'u1')).toMatchObject({ ok: true, value: { said: ['The ManyClaws agent is installed'] } })
+})
+
+test('on Windows with no Git Bash to be found, the agent is not set up, and it is said why', async ($, on) => {
+  const m = await made()
+  const ran: string[][] = []
+  folders(on, { own: released(9).files })
+  const s = session(on, m, { env: AT_HOME, poll: [upkeep(m, 'manyclaws.agent')], run: (argv: string[]) => (ran.push(argv), WINDOWS(argv)) })
+  await starting($, s.clock)
+  await s.clock.advance(3000)
+  expect(s.results().find((r) => r.id === 'u1')).toMatchObject({ ok: false, error: expect.stringContaining('Git Bash was not found on this computer') })
+  expect(ran.some((a) => /bash/i.test(a[0]))).toBe(false)
+})
+
 test('neither is done for a device that may not start sessions, nor the agent set up from a session a program runs', async ($, on) => {
   const m = await made()
   const borrowed = newDevice()
@@ -1875,7 +2176,8 @@ test('neither is done for a device that may not start sessions, nor the agent se
   })
   await starting($, s.clock)
   await s.clock.advance(3000)
-  for (const id of ['u1', 'u2']) expect(s.results().find((r) => r.id === id)).toMatchObject({ ok: false, error: expect.stringContaining('only from one of your own devices that may start sessions') })
+  // (named by what the list calls it, with why it may not)
+  for (const id of ['u1', 'u2']) expect(s.results().find((r) => r.id === id)).toMatchObject({ ok: false, error: "this computer's ManyClaws plugin and agent are kept up to date only when that is asked from one of your own devices that may start sessions, and Borrowed, which asked, was added as not your own (one of your account's devices for a day)" })
   expect(ran.filter((a) => a[0] === 'bash' || a[1] === 'plugin')).toEqual([])
 })
 

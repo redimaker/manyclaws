@@ -20,7 +20,7 @@ const rendered = (src) => (trusted ? trusted.createHTML(src) : markdown(src))
 // What a session's tile shows beside its name, until this device says otherwise (the settings): the project
 // and computer it is on, its session id (not to begin with), the last thing its user typed, the last thing
 // Claude said, when it was last heard from, and how many lines each thing said takes
-const TILE = { where: true, id: false, prompt: true, reply: true, time: true, claws: true, star: true, grip: true, edit: true, lines: 1 }
+const TILE = { where: true, id: false, prompt: true, reply: true, time: true, by: true, star: true, grip: true, edit: true, lines: 1 }
 // (the three on a tile that are pressed: each can be left off, and brought back by a long press or a double click)
 const TILE_OPTIONS = ['star', 'grip', 'edit']
 // How long a session this page saw go quiet stays among the active ones in the list (renderList)
@@ -76,6 +76,7 @@ const app = {
   latest: {}, // the plugin and the agent the server hands out now: { plugin, agent }, each a version or null
   footMenu: null, // what is open over the reply box: { kind: 'modes' | 'model' | 'effort' }
   modeMenu: null, // the modes that menu offers: { mode, allowed, onPick }
+  modeRestart: null, // a mode picked there for a session in a terminal, which is said how to start again in it: { sid, mode }
   setting: null, // a model or effort asked for and not yet shown by the session: { sid, kind, value }
   modelRows: new Map(), // session id -> { value, options }: its models, as its own settings list them
   catalog: new Map(), // machine id -> { sessions, more, at }: its past sessions, newest first
@@ -225,11 +226,13 @@ function sessionOf(s, devices) {
     // (false where its plugin is passed over by the settings hook events, which alone say the mode: see renderHeader)
     classicHooks: typeof card.classicHooks === 'boolean' ? card.classicHooks : null,
     effort: card.effort ?? null,
+    // (Ultracode, beside the effort: true or false where the session has said, null until it has)
+    ultracode: typeof card.ultracode === 'boolean' ? card.ultracode : null,
     since: card.since ?? s.lastActivity,
     shaped: true,
     machine: s.machine ?? onHost,
-    // Someone can be there to reply to: a terminal, VS Code, Desktop; not claude -p, or a search the machine's agent runs
-    attended: card.attended ?? card.interactive !== false,
+    // Someone can be there to reply to: a terminal, VS Code, Desktop; not claude -p. One the machine's agent runs takes replies through the agent.
+    attended: (card.attended ?? card.interactive !== false) || !!s.hosted,
     // (the server says only that it has ended or is not heard from: while it is heard from, its card says how it stands)
     state: s.state === 'ended' || s.state === 'offline' ? s.state : (card.state ?? 'idle'),
     agents: s.ended || !s.online || !Array.isArray(card.agents) ? [] : card.agents,
@@ -431,9 +434,9 @@ const blockedFor = (to) => {
 }
 const orderFor = async (to, what, rest = {}) => (app.key && !blockedFor(to) ? vault.makeOrder({ to, do: what, with: rest }, app.key) : undefined)
 // A prompt for a session, signed for the one that is to run it: the session's own plugin,
-// or, for a session its machine's agent is to start again (`viaAgent`), that machine's
-// agent. One order has one runner, and so one memory of having been run: what was signed
-// for the one is refused by the other, and by every other machine.
+// or, for a session its machine's agent runs or is to start again (`viaAgent`), that
+// machine's agent. One order has one runner, and so one memory of having been run: what
+// was signed for the one is refused by the other, and by every other machine.
 const promptOrder = (sid, machine, viaAgent, rest) => (viaAgent ? orderFor(machine, 'prompt', { ...rest, sid }) : orderFor(sid, 'prompt', rest))
 // What follows "?" when a machine is asked to read something: one sealed thing (`c`).
 // Which session, which folder, what words and how many are not the server's to read, and
@@ -669,6 +672,29 @@ document.fonts?.ready.then(fitTerminalGrid)
 
 for (const b of document.querySelectorAll('[data-set-view]')) b.addEventListener('click', () => setView(b.dataset.setView, { save: true }))
 
+// ---- Light or dark: as this device's system has it (to begin with), or the one picked here whatever the system has,
+// remembered on this device. site/theme.js puts it on the page before the page is drawn, and keeps to the system's as
+// it changes; here it is picked, and the settings say which it is.
+function markTheme() {
+  let chosen = null
+  try {
+    chosen = localStorage.getItem('mc.theme')
+  } catch {}
+  const now = chosen === 'light' || chosen === 'dark' ? chosen : 'system'
+  for (const b of document.querySelectorAll('[data-set-theme]')) b.setAttribute('aria-pressed', String(b.dataset.setTheme === now))
+}
+function setTheme(theme) {
+  try {
+    if (theme === 'light' || theme === 'dark') localStorage.setItem('mc.theme', theme)
+    else localStorage.removeItem('mc.theme')
+  } catch {}
+  window.applyTheme?.()
+  markTheme()
+}
+for (const b of document.querySelectorAll('[data-set-theme]')) b.addEventListener('click', () => setTheme(b.dataset.setTheme))
+addEventListener('storage', (ev) => ev.key === 'mc.theme' && markTheme())
+markTheme()
+
 // ---- The edge between the list and the chat: dragged, or moved with the arrow keys.
 // The width is kept on this device; a double-click gives the look's own width back.
 
@@ -786,7 +812,9 @@ function enter() {
 }
 
 // A server that charges has a front door (home.html). The cards to sign in, to make an
-// account and to pay are dressed as it is (site/join.css).
+// account and to pay are dressed as it is (site/join.css), and so are they on a server that
+// says it is the site without charging (ManyClaws' beta): there without the step that is the
+// plan, or the small print, which are the front door's.
 async function dress() {
   const plans = await fetch('/api/plans')
     .then((r) => r.json())
@@ -794,10 +822,11 @@ async function dress() {
   // (whether this server sends mail: it is what a forgotten password is got past by)
   app.mail = !!plans?.verify
   showRecover()
-  if (!plans?.on) return
+  if (!plans?.site) return
   document.documentElement.dataset.site = '1'
   el('join-art').hidden = false
-  el('signup-terms').hidden = false
+  if (plans.on) el('signup-terms').hidden = false
+  else el('join-art').querySelector('.join-steps li:last-child')?.remove()
   for (const h of document.querySelectorAll('#login [data-site-says]')) h.textContent = h.dataset.siteSays
 }
 
@@ -1476,9 +1505,11 @@ function connect() {
     for (const s of app.sessions.values()) if (s.machine === m.id) settle(s)
     lookAgain()
     seeToUpgrade()
-    // Its sessions are read again when it comes online, and when what it runs changes: not more than every three seconds,
-    // and then once those are up, so that what it said within them is not left unread
-    if (m.online) catalogSoon(m.id)
+    // Its sessions are read again when it comes online, and when what it runs changes
+    if (m.online && Date.now() - (app.catalog.get(m.id)?.at ?? 0) > 3000) {
+      loadCatalog(m.id)
+      if (app.pastBy === 'project') loadProjects(m.id)
+    }
     renderListSoon()
     if (el('ns-box').open) drawNewDevices()
     if (app.computer?.mid === m.id) renderComputer()
@@ -2196,30 +2227,37 @@ function rowTime(s) {
   const typed = app.sortBy === 'prompt' ? app.promptAt.get(s.id) : 0
   return typed ? h('span', { class: 'row-time', title: 'You last typed to it ' + whenText(typed) }, ago(typed)) : h('span', { class: 'row-time' }, ago(s.lastActivity))
 }
-// What started a session that is running, for its tile: its person, there, in a terminal or an editor, said in a word
-// after the project and the computer, with the rest for whoever points at it; or the computer's own agent, which runs
-// it itself (a search from this page: the ones Exit ends), which is said by ManyClaws' own mark before the time
-// (agentMark). Of a session that is not running there is nothing to say.
+// What started a session that is running, for its tile: an icon at the end of the tile's first line, before the time
+// (unless this device's settings leave it off), and what it means for whoever points at it or has it read out. ManyClaws'
+// own mark, the two claws beside the page's name, for one its computer's agent runs itself (one started or taken up
+// again from this page: the ones Exit ends). Otherwise where its person started it, there: in a terminal, in VS Code, in
+// the Desktop app, or by a script with nobody at it. Of a session that is not running there is nothing to say.
+const BY_AGENT = 'Started from this page: the ManyClaws agent on its computer runs it, and Exit ends it'
 function startedBy(s) {
-  if (!s || s.ended || !s.online || s.hosted) return null
+  if (!s || s.ended || !s.online) return null
   const e = s.entrypoint ?? ''
-  const [word, says] = /vscode/.test(e) ? ['VS Code', 'in VS Code'] : /desktop/.test(e) ? ['Desktop app', 'in the Desktop app'] : s.interactive === false ? ['headless', 'by a script or claude -p, with nobody at it'] : ['terminal', 'in a terminal']
-  return h('span', { class: 'row-by', title: 'Started on its computer, ' + says }, word)
+  const [by, says] = s.hosted ? ['manyclaws', BY_AGENT] : /vscode/.test(e) ? ['vscode', 'in VS Code'] : /desktop/.test(e) ? ['desktop', 'in the Desktop app'] : s.interactive === false ? ['headless', 'by a script or claude -p, with nobody at it'] : ['terminal', 'in a terminal']
+  const title = by === 'manyclaws' ? says : 'Started on its computer, ' + says
+  return h('span', { class: 'row-by', 'data-by': by, role: 'img', 'aria-label': title, title }, by === 'manyclaws' ? document.querySelector('.brand svg').cloneNode(true) : byIcon(by))
 }
-
-// ManyClaws' mark on the tile of a running session that was started from this page: one its computer's agent opened in
-// a terminal there, or a search the agent runs itself. The two claws beside the page's name, small, at the end of the
-// tile's first line, before the time (unless this device's settings leave it off). What it means is said to whoever
-// points at it, or has it read out.
-const BY_AGENT = 'A search started from this page: the ManyClaws agent on its computer runs it, and Exit ends it'
-const FROM_PAGE = 'Started from this page: it is open in a terminal on its computer, and is closed there'
-function agentMark(s) {
-  if (!s || s.ended || !s.online || !(s.hosted || openedHere(s))) return null
-  const says = s.hosted ? BY_AGENT : FROM_PAGE
-  return h('span', { class: 'row-agent', role: 'img', 'aria-label': says, title: says }, document.querySelector('.brand svg').cloneNode(true))
+// (the others, drawn as the page's own icons are: a terminal's prompt; VS Code's mark, filled; a computer's screen; a script)
+const BY_ICONS = {
+  terminal: 'M4 4.5h12A1.5 1.5 0 0 1 17.5 6v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 14V6A1.5 1.5 0 0 1 4 4.5ZM6 8l2.25 2L6 12m4 0h4',
+  vscode: 'M23.15 2.587 18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .326 8.74L3.899 12 .326 15.26a1 1 0 0 0 .001 1.479L1.65 17.94a.999.999 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 14.861L10.826 12l7.178-5.448v10.896z',
+  desktop: 'M4 3.5h12A1.5 1.5 0 0 1 17.5 5v7.5A1.5 1.5 0 0 1 16 14H4a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 4 3.5ZM7 17h6m-3-3v3',
+  headless: 'M6.5 2.5h5L15 6v10a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 5 16V4a1.5 1.5 0 0 1 1.5-1.5ZM11.5 2.5V6H15M7.75 10h4.5m-4.5 3h4.5',
 }
-// Whether the computer's agent opened this session, as that computer says of the sessions open there
-const openedHere = (s) => !!s?.fromPage || !!app.machines.get(s?.machine)?.open?.[s?.id]?.started
+function byIcon(by) {
+  const NS = 'http://www.w3.org/2000/svg'
+  const svg = document.createElementNS(NS, 'svg')
+  // (VS Code's is its own mark, filled, on a grid of 24)
+  const filled = by === 'vscode'
+  for (const [k, v] of Object.entries({ class: 'by-icon', viewBox: filled ? '0 0 24 24' : '0 0 20 20', fill: filled ? 'currentColor' : 'none', stroke: filled ? 'none' : 'currentColor', 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(k, v)
+  const path = document.createElementNS(NS, 'path')
+  path.setAttribute('d', BY_ICONS[by])
+  svg.append(path)
+  return svg
+}
 
 // A session's id, on a line of its own on its tile, where this device has its tiles show it (the settings)
 const idLine = (s) => app.tile.id && h('div', { class: 'row-id', title: 'Its session id' }, s.id)
@@ -2775,7 +2813,7 @@ function drawNewDevices(keep = true) {
   newBusy(busy)
   drawNewWays()
   drawNewProjects()
-  drawNewOpens()
+  drawNewListed()
   if (busy) return
   if (!able.length) newNote(NO_DEVICE[online.length ? 1 : 0], true)
   else if (NO_DEVICE.includes(el('ns-note').textContent)) newNote('')
@@ -2827,17 +2865,27 @@ async function drawNewProjects() {
   select.value = every.find((cwd) => from?.cwd && sameFolder(cwd, from.cwd)) ?? every.find((cwd) => name && folderName(cwd).toLowerCase() === name) ?? every[0]
 }
 
-// Where a session started on a computer opens: in a terminal there, which is not the agent's, as the computer says
-// (a terminal app's name on a Mac, tmux, or a console window on Windows)
-function opensIn(m) {
-  const t = m?.spawn?.terminal
-  const there = m ? ` on ${machineName(m)}` : ''
-  if (t === 'tmux') return `It opens in tmux${there} (tmux ls lists it there), and runs until it is closed there.`
-  if (t === 'console') return `It opens in a console window${there}, and runs until it is closed there.`
-  return `It opens in ${t && t !== 'Terminal' ? 'a ' + t : 'a Terminal'} window${there}, and runs until it is closed there.`
+// Whether Claude Code's own list of sessions to resume (VS Code's) is to show a session
+// started from here. It leaves out the ones a program started, which is how a machine's
+// agent starts them; asked to, the agent marks the new one's transcript as an ordinary
+// session's, and the list shows it. Shown unless turned off, and as it was last left.
+const LISTED_HINT = "VS Code leaves out sessions a program started, as these are. Ticked, this one is marked on its computer as an ordinary session, so it is listed there."
+const wantsListed = () => {
+  try {
+    return localStorage.getItem('mc.listed') !== '0'
+  } catch {
+    return true
+  }
 }
-function drawNewOpens() {
-  el('ns-opens').textContent = app.machines.has(el('ns-device').value) ? opensIn(app.machines.get(el('ns-device').value)) : ''
+function keepListed(on) {
+  try {
+    localStorage.setItem('mc.listed', on ? '1' : '0')
+  } catch {}
+}
+function drawNewListed() {
+  el('ns-listed').checked = wantsListed()
+  el('ns-listed').disabled = el('ns-box').dataset.busy === '1'
+  el('ns-listed-hint').textContent = LISTED_HINT
 }
 
 // One with a reference to this session is offered on this session's own computer alone: it is told of a file there
@@ -2868,7 +2916,7 @@ function newBusy(on) {
   if (on) box.dataset.busy = '1'
   else delete box.dataset.busy
   const none = !el('ns-device').value
-  for (const id of ['ns-device', 'ns-project', 'ns-name', 'ns-favorite']) el(id).disabled = on
+  for (const id of ['ns-device', 'ns-project', 'ns-name', 'ns-favorite', 'ns-listed']) el(id).disabled = on
   for (const b of box.querySelectorAll('[data-how]')) b.disabled = on || none
 }
 
@@ -2927,6 +2975,7 @@ async function newSession(how) {
   if (!from || !m) return
   // (the project chosen, if its device's projects were read and it's that device's still)
   const cwd = el('ns-project').dataset.machine === mid ? el('ns-project').value : ''
+  const listed = { listed: el('ns-listed').checked }
   const dress = newDress()
   // Signed: for the computer the new session is to be on, all that it is to be (in the
   // mode the first is in, where that one allows it); and for the session asked to write
@@ -2935,14 +2984,14 @@ async function newSession(how) {
   const was = modeOf(asking)
   const mode = m.spawn?.modes?.includes(was) ? was : undefined
   const there = app.machines.get(from.machine)
-  if (how === 'refer') return newReferring(from, m, { cwd: cwd || from.cwd, mode }, dress)
+  if (how === 'refer') return newReferring(from, m, { cwd: cwd || from.cwd, mode, ...listed }, dress)
   // (that machine's own copy of a session, in the project it is in: anything else is its transcript carried, to another machine or another project)
   const fork = from.machine === mid && (!cwd || folderKey(cwd) === folderKey(from.cwd))
   const carried = how === 'clone' && !fork && !!from.machine
   const signed = {
-    order: await orderFor(mid, 'branch', { how, from: from.id, like: from.cwd, cwd: cwd || undefined, mode }),
-    // (asked of the session itself where it is running with someone at it; through its machine's agent where the agent has to start it again)
-    ...(how === 'handoff' ? { askOrder: await promptOrder(from.id, from.machine, !(asking && !asking.ended && asking.online), { text: HANDOFF_ASK, mode: there?.spawn?.modes?.includes(was) ? was : undefined }) } : {}),
+    order: await orderFor(mid, 'branch', { how, from: from.id, like: from.cwd, cwd: cwd || undefined, mode, ...listed }),
+    // (asked of the session itself where it is running with someone at it; through its machine's agent where the agent runs it or has to start it again)
+    ...(how === 'handoff' ? { askOrder: await promptOrder(from.id, from.machine, !(asking && !asking.ended && asking.online && !asking.hosted), { text: HANDOFF_ASK, mode: there?.spawn?.modes?.includes(was) ? was : undefined }) } : {}),
     // (a machine hands a transcript over only for whoever signed for it: which session's is in the order)
     ...(carried ? { fromOrder: await orderFor(from.machine, 'export', { sid: from.id }) } : {}),
   }
@@ -2950,7 +2999,7 @@ async function newSession(how) {
   // (whether a session can be asked now is on its card, which the server cannot read: so it is looked at here)
   if (how === 'handoff' && asking && !asking.ended && asking.online) {
     if (asking.state !== 'idle') return newNote('This session is busy: ask for a handoff when it has finished what it is doing.', true)
-    if (!asking.attended) return newNote('This is a headless session (claude -p, an SDK script or a search): nothing is waiting for a prompt.', true)
+    if (!asking.hosted && !asking.attended) return newNote('This is a headless session (claude -p or an SDK script): nothing is waiting for a prompt.', true)
   }
   newBusy(true)
   newNote(how === 'new' ? `Starting on ${machineName(m)}…` : how === 'clone' ? `Copying this session to ${machineName(m)}…` : 'Asking this session for a handoff…')
@@ -3051,11 +3100,12 @@ el('ns-box').addEventListener('close', () => el('ns-open').setAttribute('aria-ex
 el('ns-device').addEventListener('change', () => {
   drawNewWays()
   drawNewProjects()
-  drawNewOpens()
+  drawNewListed()
 })
 // (Enter in the name is not a way chosen: the box stays as it is)
 el('ns-name').addEventListener('keydown', (ev) => ev.key === 'Enter' && !ev.isComposing && ev.preventDefault())
 for (const id of ['ns-name', 'new-name']) el(id).placeholder = NAME_ASKS
+el('ns-listed').addEventListener('change', () => keepListed(el('ns-listed').checked))
 el('ns-form').addEventListener('click', (ev) => {
   const how = ev.target.closest('[data-how]')?.dataset.how
   if (how) newSession(how)
@@ -3371,7 +3421,7 @@ function typedHere(sid, rows) {
 function renderRow(s, { favorite = false, due = false } = {}) {
   const tile = app.tile
   // The project it's in, the machine, and what started it: what it's about is its title, or the name it was given here
-  const sub = tile.where ? dotted(s.project !== s.title ? s.project : null, whereLabel(whereOf(s), s.machine), startedBy(s)) : []
+  const sub = tile.where ? dotted(s.project !== s.title ? s.project : null, whereLabel(whereOf(s), s.machine)) : []
   const mark = markOf(s.id)
   const soon = !due && remindSoon(mark)
   const name = nameOf(s)
@@ -3401,7 +3451,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
       'div',
       { class: 'row-main' },
       // (the first line: its name, its label, ManyClaws' mark, when, and the star, at the end)
-      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.claws && agentMark(s), tile.time && rowTime(s), starButton(s)),
+      h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.by && startedBy(s), tile.time && rowTime(s), starButton(s)),
       (sub.length || s.agents?.length || soon) && h('div', { class: 'row-sub' }, sub, sub.length && s.agents?.length ? ' · ' : '', agentsMark(s), (sub.length || s.agents?.length) && soon ? ' · ' : '', soon),
       idLine(s),
       due && remindLine(mark),
@@ -3543,7 +3593,7 @@ function connectAsk(body, id, paired, name) {
     fill(
       body,
       h('p', { 'data-part': 'connect-done', class: 'guide-status connected' }, '✓ ', h('b', null, name), ' is connecting. Its session is in your list in a moment, and Claude Code there says which account it joined.'),
-      h('p', null, 'It signs in with an API token of its own, named for it under Account, API tokens: take that back to disconnect it.'),
+      h('p', null, 'It signs in with an API token of its own, and is listed under Account, Computers: disconnect it there.'),
       h('p', null, h('a', { href: '#' }, 'Back to your sessions')),
     )
   })
@@ -3566,7 +3616,7 @@ function tileKept() {
     kept = JSON.parse(localStorage.getItem('mc.tile'))
   } catch {}
   const tile = { ...TILE }
-  for (const k of ['where', 'id', 'prompt', 'reply', 'time', 'claws', ...TILE_OPTIONS]) if (typeof kept?.[k] === 'boolean') tile[k] = kept[k]
+  for (const k of ['where', 'id', 'prompt', 'reply', 'time', 'by', ...TILE_OPTIONS]) if (typeof kept?.[k] === 'boolean') tile[k] = kept[k]
   if ([1, 2, 3].includes(kept?.lines)) tile.lines = kept.lines
   return tile
 }
@@ -3587,7 +3637,7 @@ const TILE_SAMPLE = {
   host: 'Mac Studio',
   // (running, and started from this page: its tile has ManyClaws' mark, where this device's tiles have it)
   online: true,
-  fromPage: true,
+  hosted: true,
   lastPrompt: 'Find out why the login test is flaky on CI and fix it. Run the suite fifty times before you call it done, and tell me what the cause was.',
   lastReply: 'Reproduced it: the test taps before the keyboard has finished animating. Waiting on the field’s focus fixes it, and fifty runs in a row pass now where one in six failed before.',
 }
@@ -3769,8 +3819,12 @@ function releaseOn(c) {
 // session's plugin says of itself, or what it found Claude Code had fetched for it. The first that is, or null
 function noReleaseOn(c) {
   if (c.m?.checks) {
-    const p = c.m.plugins.find((x) => x.checked && !x.as && x.digest && !allowedHere(c, x.digest))
+    // (a copy Claude Code only keeps, beside the installed one, is no matter until a session runs it: below)
+    const p = c.m.plugins.find((x) => x.where !== 'cached' && x.checked && !x.as && x.digest && !allowedHere(c, x.digest))
     if (p) return { digest: p.digest, by: 'agent', release: p.release, signed: !!p.signed }
+    // (a session still running a copy from before an update: its agent measured that copy too, and holds it to its list)
+    const kept = c.live.map((s) => c.m.plugins.find((x) => x.where === 'cached' && x.digest && x.digest === s.release?.digest)).find((x) => x && !x.as && !allowedHere(c, x.digest))
+    if (kept) return { digest: kept.digest, by: 'agent', release: kept.release, signed: !!kept.signed }
     // (and a session's plugin that says it is another than any its agent measured: one of the two is not as it says)
     const known = new Set(c.m.plugins.map((x) => x.digest))
     const other = c.live.find((s) => s.release?.digest && c.m.plugins.length && !known.has(s.release.digest) && !allowedHere(c, s.release.digest))
@@ -3849,7 +3903,7 @@ function needsOf(c) {
   const newest = app.release?.digest ? app.release : null
   const runs = releaseOn(c)
   if (!bad && !moving && newest && runs?.digest && runs.digest !== newest.digest && (runs.release ?? 0) < newest.release && !c.m?.upgrade) needs.push({ kind: 'update', has: runs.release, newest: newest.release, by: runs.by })
-  // An upgrade there waiting for the searches its agent runs to be done
+  // An upgrade there waiting for the sessions its agent runs to be done
   if (c.m?.upgrade) needs.push({ kind: 'upgrade-waiting', release: c.m.upgrade.release, sessions: c.m.hosted?.length ?? 0 })
   // No agent at all (its sessions' plugins say none is beside them): one can be set up, from the plugin there
   if (!c.m && !moving && c.live.length && c.live.every((s) => s.agentBeside === null)) needs.push({ kind: 'agent-setup' })
@@ -3935,17 +3989,6 @@ function looseNodes(c) {
 // A machine's past sessions, newest first; `more` adds the next page
 // What is said under a computer whose answer this browser's key does not open
 const OTHER_KEY = 'This computer answered with something this browser cannot open: it has another key than this browser’s. Connect it again, with the code its plugin shows.'
-const catalogWaits = new Map() // mid -> the timer a computer's sessions are read again by
-function catalogSoon(mid) {
-  const wait = 3000 - (Date.now() - (app.catalog.get(mid)?.at ?? 0))
-  if (wait > 0) {
-    if (!catalogWaits.has(mid)) catalogWaits.set(mid, setTimeout(() => (catalogWaits.delete(mid), app.machines.get(mid)?.online && catalogSoon(mid)), wait + 50))
-    return
-  }
-  loadCatalog(mid)
-  if (app.pastBy === 'project') loadProjects(mid)
-}
-
 async function loadCatalog(mid, more = false) {
   // (a machine reads only what was sealed for it: where this device has no key, there is nothing to ask it with)
   if (!app.key) return void (app.catalog.set(mid, { sessions: [], more: false, loaded: false, failed: false, locked: true, at: Date.now() }), renderList())
@@ -4641,7 +4684,7 @@ async function askHaiku() {
 async function haikuStart(hk, run) {
   const m = app.machines.get(run.mid)
   const mode = m?.spawn?.modes?.includes('default') ? 'default' : undefined
-  const order = await orderFor(run.mid, 'start', { prompt: haikuAsk(hk.q, run.folders), model: 'haiku', ...(hk.effort ? { effort: hk.effort } : {}), mode, name: 'Haiku search', background: true })
+  const order = await orderFor(run.mid, 'start', { prompt: haikuAsk(hk.q, run.folders), model: 'haiku', ...(hk.effort ? { effort: hk.effort } : {}), mode, name: 'Haiku search', listed: false })
   const r = order ? await fetch(`/api/machines/${run.mid}/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order }) }).catch(() => null) : null
   const data = (await r?.json().catch(() => ({}))) ?? {}
   if (run.state !== 'starting') return
@@ -5001,6 +5044,20 @@ function modePicker({ id, allowed, mode, title, onPick }) {
   drawFootMenu()
 }
 
+// The mode of a session the machine's agent is running, changed as it runs. Refused
+// (the machine doesn't allow it, the model doesn't have it), the reason is shown and
+// the picker goes back to what the session is in.
+async function setSessionMode(s, mode) {
+  // (which mode is in an order for the machine, signed here: where this device cannot sign, nothing is sent)
+  const order = await orderFor(s.machine, 'mode', { sid: s.id, mode })
+  const r = order ? await fetch(`/api/machines/${s.machine}/sessions/${encodeURIComponent(s.id)}/mode`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order }) }).catch(() => null) : null
+  if (r?.ok) return void (app.modeError = null)
+  const { error } = order ? ((await r?.json().catch(() => ({}))) ?? {}) : { error: NO_KEY }
+  app.modeError = { sid: s.id, text: 'The mode was not changed: ' + (error ?? 'the machine did not answer') + '.', until: Date.now() + 15_000 }
+  delete el('foot-mode').dataset.modes
+  if (app.current === s.id) renderHeader()
+}
+
 // A reply to a past session: the machine's agent starts Claude Code on it again. One
 // that's open in a terminal there is continued in a copy instead.
 async function resumePast(text) {
@@ -5019,7 +5076,7 @@ async function resumePast(text) {
   // The reply goes signed, and nothing beside it: for the machine, to open the session
   // with it; or, where the session is running after all, for the session (one order and
   // not both: either would be run by whoever was handed it)
-  const signed = isReporting(p.sid) && !fork ? { reply: await promptOrder(p.sid, p.mid, false, { text, mode }) } : { order: await orderFor(p.mid, 'open', { sid: p.sid, prompt: text, mode, fork }) }
+  const signed = isReporting(p.sid) && !fork ? { reply: await promptOrder(p.sid, p.mid, !!app.sessions.get(p.sid)?.hosted, { text, mode }) } : { order: await orderFor(p.mid, 'open', { sid: p.sid, prompt: text, mode, fork }) }
   // (where this device cannot sign, nothing is sent)
   const unsigned = !signed.reply && !signed.order
   const r = unsigned ? null : await fetch(`/api/machines/${p.mid}/sessions/${encodeURIComponent(p.sid)}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signed) }).catch(() => null)
@@ -5112,7 +5169,8 @@ async function openNew(mid) {
   fill(el('new-mode'), (m?.spawn?.modes ?? ['default']).map((mode) => [mode, PERMISSION_MODES[mode]?.[0] ?? mode]), last.mode)
   fill(el('new-model'), MODELS, last.model)
   fill(el('new-effort'), EFFORTS, last.effort)
-  el('new-opens').textContent = opensIn(m)
+  el('new-listed').checked = wantsListed()
+  el('new-listed-row').title = LISTED_HINT
   el('new-name').value = ''
   el('new-favorite').checked = false
   const project = el('new-project')
@@ -5161,6 +5219,7 @@ el('new-project').addEventListener('change', () => {
   if (!el('new-other').hidden) el('new-cwd').focus()
 })
 
+el('new-listed').addEventListener('change', () => keepListed(el('new-listed').checked))
 
 el('new-form').addEventListener('submit', async (ev) => {
   ev.preventDefault()
@@ -5171,7 +5230,7 @@ el('new-form').addEventListener('submit', async (ev) => {
   el('new-error').hidden = true
   // What the computer is to start is signed, and its first prompt goes in the order alone, which the server can't
   // read. Where this device cannot sign, nothing is sent.
-  const order = await orderFor(mid, 'start', { cwd, prompt: el('new-prompt').value, ...picked, create: other && el('new-create').checked })
+  const order = await orderFor(mid, 'start', { cwd, prompt: el('new-prompt').value, ...picked, create: other && el('new-create').checked, listed: el('new-listed').checked })
   const r = order ? await fetch(`/api/machines/${mid}/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order }) }).catch(() => null) : null
   const data = order ? ((await r?.json().catch(() => ({}))) ?? {}) : { error: NO_KEY_MACHINE }
   if (!r?.ok) {
@@ -5230,17 +5289,20 @@ function renderHeader() {
   renderBanner(s)
   setWorking(s.state === 'working')
 
-  // The session's permission mode. One running in a terminal or an editor is switched
-  // there: a mod can't set it. That is every one a person can be at, the ones started
-  // from this page among them, which are in terminals of their own.
+  // The session's permission mode. One the machine's agent is running can be switched
+  // from here, to a mode the machine allows, as an editor switches the one it hosts.
+  // One running in a terminal or an editor is switched there: a mod can't set it.
   const inMode = modeOf(s) ?? 'default'
   const m = app.machines.get(s.machine)
+  const modes = m?.spawn?.modes ?? []
   // One that has exited is started again by a reply, where its machine's agent can do
   // that: in the mode picked here, as one opened from its transcript is
   const resumes = s.ended && !!m?.online && !!m.spawn
   el('composer').dataset.permissionMode = inMode
   if (resumes) {
     renderResumeMode(m, s)
+  } else if (s.hosted && s.online && !s.ended && modes.length) {
+    modePicker({ id: 'session-mode', allowed: modes.includes(inMode) ? modes : [inMode, ...modes], mode: inMode, title: 'What this session may do without asking. A change takes effect at once.', onPick: (to) => setSessionMode(s, to) })
   } else {
     // One whose plugin is not told its mode says it is not known, not that it is Manual: where an organization manages
     // Claude Code, the settings hook events that say it pass over a plugin a person installed
@@ -5410,9 +5472,13 @@ const put = (node, ...children) => node.replaceChildren(...children.flat().filte
 
 // Whether a session's model and effort can be set from here: it is running and reachable,
 // and its computer lets the page run commands in it
-const canSetOptions = (s) => !!s && !app.past && !!s.online && !s.ended && s.attended && (s.capabilities ?? []).includes('chat')
+const canSetOptions = (s) => !!s && !app.past && !!s.online && !s.ended && (s.attended || s.hosted) && (s.capabilities ?? []).includes('chat')
 // The one asked for and not yet shown by the session, if it is of this kind
 const asked = (s, kind) => (s && app.setting?.sid === s.id && app.setting.kind === kind ? app.setting.value : null)
+
+// Whether Ultracode is on in a session (dynamic workflows on every task, beside the effort and not one of its levels):
+// what was asked for here until the session says, then what it says. Off where it has said nothing of it
+const ultracodeOf = (s) => (!s ? false : asked(s, 'ultracode') ? asked(s, 'ultracode') === 'on' : s.ultracode === true)
 
 // VS Code's button for the mode: the menu of modes opens from it, with the effort under them
 function modeButton(mode, title) {
@@ -5430,20 +5496,22 @@ function renderFootOptions(s) {
   // (the model by its name alone, as VS Code's pill has it: "Opus 5.5", whatever its context window)
   const name = live ? (asked(live, 'model') ? modelChoice(asked(live, 'model'))[0] : (prettyModel(live.model)?.replace(/ \(1M context\)$/, '') ?? null)) : null
   const level = live ? (asked(live, 'effort') ?? live.effort) : null
+  const ultra = ultracodeOf(live)
   // (drawn already: drawing them again would take them from under a finger)
-  const drawn = JSON.stringify([live?.id, name, level, can, !!app.setting])
+  const drawn = JSON.stringify([live?.id, name, level, ultra, can, !!app.setting])
   if (pill.dataset.drawn !== drawn) {
     pill.dataset.drawn = drawn
     pill.hidden = !name
     pill.disabled = !can
     pill.classList.toggle('pending', !!asked(live, 'model'))
     pill.title = !name ? '' : `${prettyModel(live.model) ?? name}. ` + (can ? 'Press to change the model, or how hard it thinks.' : 'The model this session runs on, and how hard it thinks.')
-    put(pill, h('b', null, name ?? ''), level ? h('span', { class: 'for-vscode' + (asked(live, 'effort') ? ' pending' : '') }, effortName(level)) : null, h('span', { class: 'for-terminal foot-hint' }, ' · /model'))
+    put(pill, h('b', null, name ?? ''), level ? h('span', { class: 'for-vscode' + (asked(live, 'effort') ? ' pending' : '') }, effortName(level)) : null, ultra ? h('span', { class: 'for-vscode foot-ultra' + (asked(live, 'ultracode') ? ' pending' : '') }, 'Ultracode') : null, h('span', { class: 'for-terminal foot-hint' }, ' · /model'))
     hint.hidden = !live || (!level && !can)
     hint.disabled = !can
     hint.classList.toggle('pending', !!asked(live, 'effort'))
     hint.title = can ? 'How hard the model thinks. Press to change it.' : 'How hard the model thinks'
-    put(hint, level ? `${EFFORT_MARKS[level] ?? '●'} ${level}` : '/effort', level ? h('span', { class: 'foot-hint' }, ' · /effort') : null)
+    // (as a terminal says them under its prompt: "● high · ultracode · /effort")
+    put(hint, level ? `${EFFORT_MARKS[level] ?? '●'} ${level}` : '/effort', level && ultra ? ' · ultracode' : null, level ? h('span', { class: 'foot-hint' }, ' · /effort') : null)
   }
   if (!live && app.footMenu && app.footMenu.kind !== 'modes') app.footMenu = null
   drawAuto(live)
@@ -5462,6 +5530,7 @@ function openFootMenu(kind) {
 function closeFootMenu() {
   const had = app.footMenu
   app.footMenu = null
+  app.modeRestart = null
   drawFootMenu()
   if (had && !matchMedia('(pointer: coarse)').matches) el('input').focus({ preventScroll: true })
 }
@@ -5491,11 +5560,43 @@ function menuRow({ title, says, mark, on, pending, disabled, onclick, ...data })
 }
 
 // Under the modes, where none of them can be picked. A session that runs in an app (VS
-// Code, a terminal) has its mode changed there: a mod can't set it.
+// Code, a terminal) has its mode changed there: a mod can't set it. A clone of it is run
+// by a machine's agent, which can, so the way to one is offered: the New session box, as
+// the button in the header opens it, with Full context clone the one Enter presses
 const MODE_CHANGED_WITH = { 'VS Code': ', with the mode button', 'the terminal': ', with shift+tab' }
-function modeNote(s) {
+function modeNote(s, clones) {
   if (!s || s.hosted) return h('p', { class: 'menu-note' }, 'A session in a terminal or an editor has its mode changed there: shift+tab in a terminal, this menu in an editor.')
-  return h('p', { class: 'menu-note' }, `This session runs in ${appName(s)}, so its mode is changed there${MODE_CHANGED_WITH[appName(s)] ?? ''}.`)
+  const where = appName(s)
+  const clone = () => {
+    closeFootMenu()
+    openNewBox()
+    el('ns-box').querySelector('[data-how="clone"]')?.focus()
+  }
+  // (one in a terminal: a mode picked here says how to start it again in that mode)
+  const said = inTerminal(s)
+    ? 'This session runs in the terminal, so its mode is changed there, with shift+tab. Or pick one here to see how to start it again in that mode.'
+    : `This session runs in ${where}, so its mode is changed there${MODE_CHANGED_WITH[where] ?? ''}.`
+  return h(
+    'p',
+    { class: 'menu-note' },
+    said,
+    ...(clones ? [' ', h('button', { type: 'button', class: 'menu-link', onclick: clone }, 'Clone it to a new session'), ` outside ${where === 'its own app' ? 'it' : where} to change the mode from here.`] : []),
+  )
+}
+// A session in a terminal, which nothing but its keyboard can switch to another mode as it runs (Claude Code gives a
+// plugin no way to): it can be ended there and resumed in the mode picked, by its id, in its own folder
+const inTerminal = (s) => !!s && !s.hosted && !s.ended && appName(s) === 'the terminal'
+const quoted = (text) => "'" + String(text).replace(/'/g, "'\\''") + "'"
+const resumeIn = (s, mode) => (s.cwd ? `cd ${quoted(s.cwd)} && ` : '') + `claude --resume ${s.id} --permission-mode ${mode}`
+function restartNote(s, mode) {
+  const command = resumeIn(s, mode)
+  return h(
+    'div',
+    { class: 'menu-note mode-restart' },
+    h('p', null, `To switch it to ${PERMISSION_MODES[mode]?.[0] ?? mode}, end Claude Code in its terminal (/exit, or Ctrl+C twice) and start it again in that mode, with what it said before:`),
+    h('code', { class: 'mode-command' }, command),
+    h('button', { type: 'button', class: 'link', 'data-copy': 'mode', onclick: (ev) => void copyText(command).then(() => (ev.target.textContent = 'Copied')) }, 'Copy'),
+  )
 }
 
 // What is open over the reply box, drawn in the look's own way
@@ -5517,10 +5618,11 @@ function drawFootMenu() {
   const modes = app.modeMenu ?? { mode: 'default', allowed: [], onPick: null }
   const row = live ? app.modelRows.get(live.id) : null
   // (a clone needs a device that is online and starts sessions)
+  const clones = [...app.machines.values()].some((m) => m.online && !cantTake(m))
   // (drawn already: drawing it again would take it from under a finger)
   // Auto approve, under the modes: whether it is on for this session, how long yet, and why it cannot be where it cannot
   const auto = live ? { on: !!autoUntil(live.id), left: autoUntil(live.id) ? autoLeft(live.id) : '', bars: autoBars(live) } : null
-  const drawn = JSON.stringify([kind, app.view, live?.id, live?.model, level, can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto])
+  const drawn = JSON.stringify([kind, app.view, live?.id, live?.model, level, ultracodeOf(live), can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto, clones, app.modeRestart, live?.cwd])
   if (box.dataset.drawn === drawn) return
   box.dataset.drawn = drawn
   box.dataset.kind = kind
@@ -5555,12 +5657,35 @@ function drawFootMenu() {
       h('span', { class: 'effort-names' }, ...EFFORT_LEVELS.map((l) => h('button', { ...level5(l), class: marks(l).trim(), title: EFFORT_SAYS[l] }, l))),
     )
   }
+  // Ultracode, under the effort as VS Code has it: a switch, for this session only, whatever the level
+  const ultraOn = ultracodeOf(live)
+  const ultraRow = () =>
+    live &&
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'menu-row menu-ultra' + (ultraOn ? ' on' : '') + (asked(live, 'ultracode') ? ' pending' : ''),
+        role: 'switch',
+        'aria-checked': String(ultraOn),
+        'data-ultracode': ultraOn ? 'on' : 'off',
+        disabled: !can || undefined,
+        title: can ? `Turn Ultracode ${ultraOn ? 'off' : 'on'}: /effort ultracode ${ultraOn ? 'off' : 'on'} in the session` : 'It can be changed while the session is running and reachable.',
+        onclick: () => setOption(live, 'ultracode', ultraOn ? 'off' : 'on'),
+      },
+      h('span', { class: 'menu-icon' }),
+      h('span', { class: 'menu-text' }, h('span', { class: 'menu-title' }, 'Ultracode'), h('span', { class: 'menu-say' }, 'Dynamic workflows on every task, at any effort. This session only.')),
+      h('span', { class: 'ultra-switch', 'aria-hidden': 'true' }),
+    )
   // What is listed scrolls when there is more of it than room; the effort under it stays in sight
   const list = (...children) => h('div', { class: 'menu-list' }, ...children)
   const foot = (...children) => (live ? h('div', { class: 'menu-foot' }, ...children) : null)
   if (kind === 'modes') {
     const shown = [...new Set([...Object.keys(PERMISSION_MODES).filter((m) => m !== 'dontAsk'), ...modes.allowed, modes.mode])]
-    const pickable = (m) => !!modes.onPick && modes.allowed.includes(m)
+    // (one in a terminal: a mode picked says how to start it again in that mode)
+    const restarts = !modes.onPick && inTerminal(live)
+    const pickable = (m) => (!!modes.onPick && modes.allowed.includes(m)) || restarts
+    const restart = restarts && app.modeRestart?.sid === live.id ? app.modeRestart.mode : null
     put(
       box,
       list(
@@ -5571,15 +5696,20 @@ function drawFootMenu() {
             says: PERMISSION_MODES[m]?.[2],
             mark: icon(m),
             on: m === modes.mode,
+            pending: m === restart,
             disabled: !pickable(m) && m !== modes.mode,
             'data-mode': m,
             onclick: () => {
+              if (restarts && m !== modes.mode) {
+                app.modeRestart = { sid: live.id, mode: m }
+                return drawFootMenu()
+              }
               if (pickable(m) && m !== modes.mode) modes.onPick(m)
               closeFootMenu()
             },
           }),
         ),
-        modes.onPick ? null : modeNote(live),
+        modes.onPick ? null : restart && restart !== modes.mode ? restartNote(live, restart) : modeNote(live, clones),
         // Not one of the session's own modes: what this browser does about what the session asks, in whichever mode it is
         auto && h('div', { class: 'menu-sep', role: 'separator' }),
         auto &&
@@ -5597,10 +5727,10 @@ function drawFootMenu() {
             },
           }),
       ),
-      foot(dots(), can ? h('p', { class: 'menu-note' }, saved) : null),
+      foot(dots(), can ? h('p', { class: 'menu-note' }, saved) : null, ultraRow()),
     )
   } else if (kind === 'effort') {
-    put(box, list(h('div', { class: 'menu-head' }, 'Effort'), line(), h('p', { class: 'menu-note' }, can ? 'Pick a level · Esc to cancel. ' + saved : 'It can be changed while the session is running and reachable.')))
+    put(box, list(h('div', { class: 'menu-head' }, 'Effort'), line(), h('p', { class: 'menu-note' }, can ? 'Pick a level · Esc to cancel. ' + saved : 'It can be changed while the session is running and reachable.'), ultraRow()))
   } else {
     const options = row?.options ?? ['default', ...MODELS.map(([value]) => value).filter(Boolean)]
     // (which one it is set to is the session's to say; until it has, none is ticked)
@@ -5616,7 +5746,7 @@ function drawFootMenu() {
           return menuRow({ title, says, on: alias === now, pending: alias === asked(live, 'model'), disabled: !can, 'data-model': alias, onclick: () => (alias === now ? closeFootMenu() : setOption(live, 'model', alias)) })
         }),
       ),
-      foot(app.view === 'terminal' ? [h('div', { class: 'menu-head' }, 'Effort'), line()] : dots(), h('p', { class: 'menu-note' }, ...both(can ? saved : '', 'Pick one · Esc to cancel'))),
+      foot(app.view === 'terminal' ? [h('div', { class: 'menu-head' }, 'Effort'), line()] : dots(), h('p', { class: 'menu-note' }, ...both(can ? saved : '', 'Pick one · Esc to cancel')), ultraRow()),
     )
   }
 }
@@ -5634,15 +5764,18 @@ async function setOption(s, kind, value) {
     app.setting = null
     if (app.current === s.id) renderHeader()
   }
-  const args = { command: kind, args: value }
+  // (Ultracode is set by /effort too: "ultracode on" or "ultracode off")
+  const args = kind === 'ultracode' ? { command: 'effort', args: 'ultracode ' + value } : { command: kind, args: value }
   // (it goes as its order and nothing beside it: which command, and with what, are in what this device signed.
   // Where it cannot sign, nothing is sent.)
   const order = await orderFor(s.id, 'call', { method: 'command.run', args })
   const r = order ? await sendJson(`/api/sessions/${encodeURIComponent(s.id)}/call`, { order, timeoutMs: 20_000 }) : { ok: false, error: NO_KEY }
   const failed = !r.ok ? r.error : r.data?.status === 'done' && !r.data.ok ? r.data.error || 'Claude Code refused it.' : null
   if (failed) {
-    app.modeError = { sid: s.id, text: `The ${kind} was not changed: ${failed}`, until: Date.now() + 10_000 }
-    setTimeout(() => app.current === s.id && renderHeader(), 10_100)
+    // (shown for long enough to read: a why with what to do instead is longer than "not on this plan")
+    const showMs = Math.max(10_000, String(failed).length * 100)
+    app.modeError = { sid: s.id, text: kind === 'ultracode' ? `Ultracode was not turned ${value}: ${failed}` : `The ${kind} was not changed: ${failed}`, until: Date.now() + showMs }
+    setTimeout(() => app.current === s.id && renderHeader(), showMs + 100)
     return done()
   }
   // Run: the session says what it has in a moment. Still waiting: Claude is mid-turn, and
@@ -7133,7 +7266,7 @@ async function send() {
   entry.said = !files.length ? 'See the attached photo.' : photos.length || files.length > 1 ? 'See what is attached.' : 'See the attached file.'
   const plain = [text || entry.said, ...photos.map(photoNote), ...files.map(fileNoteOf)].join('\n\n').trim()
   const to = app.sessions.get(sid) ?? s
-  const order = await promptOrder(sid, to?.machine, !!to?.ended, { text: plain, mode })
+  const order = await promptOrder(sid, to?.machine, !!(to?.ended || to?.hosted), { text: plain, mode })
   if (!order) {
     node.querySelector('.from').textContent = 'not sent: ' + (blockedFor(sid) || NO_KEY)
     return
@@ -7758,7 +7891,7 @@ async function startOnComputer() {
   // (what it is to be called here, and whether it is a favorite from the first: put on it when it is made, as the box over a chat does)
   const dress = { name: c.name.trim(), favorite: c.favorite }
   // (signed for that computer: where this device cannot sign, nothing is sent)
-  const order = await orderFor(c.mid, 'branch', { how: 'new', cwd, mode })
+  const order = await orderFor(c.mid, 'branch', { how: 'new', cwd, mode, listed: wantsListed() })
   if (!order) return say(blockedFor(c.mid) ? sentence(blockedFor(c.mid)) : NO_KEY_MACHINE)
   c.starting = true
   c.error = ''
@@ -7826,7 +7959,7 @@ function upkeepNode(c, n) {
       'div',
       { class: 'needs-alarm', 'data-need': 'alarm', role: 'alert' },
       h('p', null, h('b', null, `${name} is running a ManyClaws plugin that matches no signed release (${n.digest.slice(0, 12)}).`), ' This page sends it nothing until you decide.'),
-      h('p', null, n.by === 'fetched' ? 'It is what Claude Code fetched when it was asked to update the plugin: no session has loaded it yet. ' : n.by === 'plugin' ? 'That is the plugin’s own word of itself: there is no agent there to look from outside. ' : '', 'If you did not change it yourself, someone else may have: take back its access, and start afresh with a new key (Account, Encryption key) if you think it could have read your sessions.'),
+      h('p', null, n.by === 'fetched' ? 'It is what Claude Code fetched when it was asked to update the plugin: no session has loaded it yet. ' : n.by === 'plugin' ? 'That is the plugin’s own word of itself: there is no agent there to look from outside. ' : '', 'If you did not change it yourself, someone else may have: take back its access, and start afresh with a new key (Account, Browsers) if you think it could have read your sessions.'),
       h('div', { class: 'needs-do' }, h('a', { href: '#/account', class: 'button-link primary', 'data-part': 'alarm-revoke' }, `Take back ${name}’s access`), ' ', button('alarm-keep', 'Keep it blocked', () => ((stateOf(c).keptBlocked = true), renderComputer()), { primary: false })),
       stateOf(c).keptBlocked && h('p', { class: 'muted', 'data-part': 'alarm-kept' }, `Kept blocked: nothing is sent to ${name}, and no session is started on it.`),
       h('p', null, h('button', { type: 'button', class: 'link', 'data-part': 'alarm-allow', onclick: () => allowPlugin(c, n.digest) }, 'I changed the plugin myself: allow it')),
@@ -7868,7 +8001,7 @@ function upkeepNode(c, n) {
     return h(
       'div',
       { 'data-need': 'upgrade-waiting' },
-      h('p', null, h('b', null, `An update of ${name} to release ${n.release} is waiting.`), n.sessions ? ` Updating now ends the ${n.sessions === 1 ? 'search' : n.sessions + ' searches'} its agent is running for this page.` : ' It is done in a moment.'),
+      h('p', null, h('b', null, `An update of ${name} to release ${n.release} is waiting.`), n.sessions ? ` Updating now ends the ${n.sessions === 1 ? 'session' : count(n.sessions, 'session')} started from this page; a reply resumes ${n.sessions === 1 ? 'it' : 'them'}.` : ' It is done in a moment.'),
       n.sessions ? h('div', { class: 'needs-do' }, button('update-now', 'Update now', () => upgradeComputer(c, { now: true, release: n.release }))) : null,
       ...told,
     )
@@ -7903,7 +8036,7 @@ async function allowPlugin(c, digest) {
 }
 
 // A computer brought up to the newest release, on an order for it: its agent has Claude Code fetch the plugin, holds
-// it to that release, and replaces itself, at once (`now`) or once the searches it runs are done. Where it has no agent, a
+// it to that release, and replaces itself, at once (`now`) or once its sessions are done. Where it has no agent, a
 // session's own plugin there does the plugin, and holds what was fetched to its list.
 async function upgradeComputer(c, { now, release }) {
   const newest = app.release
@@ -7912,7 +8045,7 @@ async function upgradeComputer(c, { now, release }) {
   const hosted = c.m?.hosted?.length ?? 0
   const via = c.m ? null : c.live.find((s) => s.attended && s.online)
   const says = c.m
-    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions there keep running, the ones started from this page among them, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The search' : hosted + ' searches'} its agent is running for this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : ', once done'}.` : ''}`
+    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions you started there in a terminal, VS Code or the desktop app keep running, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The session' : count(hosted, 'session')} started from this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : ', once they are done'}; a reply resumes ${hosted === 1 ? 'it' : 'them'}.` : ''}`
     : `Updates the ManyClaws plugin on ${name}, through the Claude Code session in ${via?.project ?? 'its folder'}. Nothing running ends: each session uses the new plugin when it is next started.`
   if (!(await ask(`Update ${name}?`, { says, yes: now ? 'Update now' : hosted ? 'Update when they’re done' : `Update ${name}` }))) return
   stateOf(c).upkeep = { kind: release ? 'upgrade-waiting' : 'update', busy: true, done: 'Updating…' }
@@ -7926,7 +8059,7 @@ async function upgradeComputer(c, { now, release }) {
     ? { kind: stateOf(c).upkeep.kind, error: sentence(failed) }
     : {
         kind: stateOf(c).upkeep.kind,
-        done: !c.m ? `Updated: new sessions on ${name} use release ${v?.release ?? newest.release}.` : v?.agent === 'now' ? `Updating: the agent on ${name} starts again in a moment, on release ${v.release}.` : v?.agent === 'unchanged' ? `Updated: new sessions on ${name} use release ${v.release}.` : `The plugin on ${name} is release ${v?.release ?? newest.release}; its agent follows once the searches it runs are done.`,
+        done: !c.m ? `Updated: new sessions on ${name} use release ${v?.release ?? newest.release}.` : v?.agent === 'now' ? `Updating: the agent on ${name} starts again in a moment, on release ${v.release}.` : v?.agent === 'unchanged' ? `Updated: new sessions on ${name} use release ${v.release}.` : `The plugin on ${name} is release ${v?.release ?? newest.release}; its agent follows once its sessions are done.`,
       }
   renderComputer()
   renderList()
@@ -8063,6 +8196,7 @@ function renderComputer() {
   set('computer-mode', c.mode)
   set('computer-session-name', c.name)
   if (el('computer-favorite')) el('computer-favorite').checked = c.favorite
+  if (el('computer-listed')) el('computer-listed').checked = wantsListed()
 }
 
 // The folders sessions may be started in from here: the ones set on the computer, and, where its owner allows them, the
@@ -8210,10 +8344,11 @@ function newPart(c, m) {
       h('label', { class: 'guide-field' }, 'Permissions', h('select', { id: 'computer-mode', disabled: c.starting, onchange: (ev) => (c.mode = ev.target.value) }, ...modes.map((mode) => h('option', { value: mode }, PERMISSION_MODES[mode]?.[0] ?? mode)))),
       h('label', { class: 'guide-field' }, 'Name', h('input', { id: 'computer-session-name', maxlength: '80', autocomplete: 'off', spellcheck: 'false', placeholder: NAME_ASKS, disabled: c.starting, oninput: (ev) => (c.name = ev.target.value) })),
       h('label', { class: 'guide-check' }, h('input', { type: 'checkbox', id: 'computer-favorite', disabled: c.starting, onchange: (ev) => (c.favorite = ev.target.checked) }), 'Favorite: kept at the top of the list'),
+      h('label', { class: 'guide-check', title: LISTED_HINT }, h('input', { type: 'checkbox', id: 'computer-listed', disabled: c.starting, onchange: (ev) => keepListed(ev.target.checked) }), "Show in VS Code's resume list"),
       h('div', { class: 'guide-end' }, h('button', { type: 'submit', class: 'primary', id: 'computer-start', disabled: c.starting || !all.length }, c.starting ? `Starting on ${name}…` : 'New')),
       c.error && h('p', { class: 'form-note error', role: 'alert', id: 'computer-error' }, c.error),
     ),
-    h('p', { class: 'muted' }, 'An empty session in that project, which waits for its first prompt: it opens here, and ' + opensIn(m).replace(/^It opens in /, 'in ') + ' ', h('a', { href: '#/new/' + m.id, id: 'computer-longer' }, 'Start one with a first prompt, a model, or in another folder')),
+    h('p', { class: 'muted' }, 'An empty session in that project: it opens here, and waits for its first prompt. ', h('a', { href: '#/new/' + m.id, id: 'computer-longer' }, 'Start one with a first prompt, a model, or in another folder')),
   )
 }
 
@@ -8349,41 +8484,24 @@ function connectedLine() {
 
 // ---- What a computer is given: an API token to sign in with, and the account's key. Both
 // are handed to it sealed, as it is connected with its code (openConnect): the token is made
-// for it, named for it, and is what is taken back to disconnect it. Drawn on Account.
+// for it, named for it, and is what is taken back to disconnect it. Drawn on Account, under
+// Computers: a connected computer is its token.
 
 const dayOf = (ts) => new Date(ts).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-const TOKEN_LIVES = [['30', '30 days'], ['90', '90 days'], ['365', 'A year'], ['0', 'Never runs out']]
+// (a day and the time of it, the year only where it is not this one)
+const whenOf = (ts) => new Date(ts).toLocaleString(undefined, { ...(new Date(ts).getFullYear() === new Date().getFullYear() ? {} : { year: 'numeric' }), month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
-// The account's API tokens, each with how it ends and when it was last used, a way to
-// take it back, and the form that makes another. A token is shown once, as it is made.
-function tokensPart(redraw) {
+// The account's computers, by their tokens: each with when it was connected and last heard
+// from, and Disconnect, which takes its token back. A token is made only as a computer is
+// connected with its code: nothing else could give a computer the key that goes with it.
+function computersPart(redraw) {
   const a = app.account
   const note = h('span', { class: 'form-note error' })
-  const nameBox = h('input', { 'data-part': 'token-name', placeholder: 'A name for it (optional)', maxlength: '60', autocomplete: 'off' })
-  const life = h('select', { 'data-part': 'token-days' }, ...TOKEN_LIVES.map(([days, text]) => h('option', { value: days, ...(days === '90' ? { selected: '' } : {}) }, text)))
-  const make = h(
-    'button',
-    {
-      type: 'button',
-      class: 'primary',
-      'data-part': 'token-make',
-      onclick: async () => {
-        make.disabled = true
-        const r = await sendJson('/api/account/tokens', { name: nameBox.value, days: Number(life.value) })
-        make.disabled = false
-        if (!r.ok) return (note.textContent = r.error)
-        app.madeToken = r.data
-        await loadAccount()
-        redraw()
-      },
-    },
-    'Make a token',
-  )
   const rows = (a.tokens ?? []).map((t) =>
     h(
       'div',
       { class: 'token-row api-token' + (t.expired ? ' off' : ''), 'data-token': t.id },
-      h('div', null, h('b', null, t.name), h('div', { class: 'muted' }, [`ends …${t.hint}`, `made ${dayOf(t.createdAt)}`, t.expiresAt ? (t.expired ? `ran out ${dayOf(t.expiresAt)}` : `good until ${dayOf(t.expiresAt)}`) : 'never runs out', t.lastUsedAt ? `last used ${dayOf(t.lastUsedAt)}` : 'not used yet'].join(' · '))),
+      h('div', null, h('b', null, t.name), h('div', { class: 'muted' }, [`since ${whenOf(t.createdAt)}`, t.lastUsedAt ? `last heard from ${whenOf(t.lastUsedAt)}` : 'not heard from yet', t.expiresAt && (t.expired ? `its token ran out ${dayOf(t.expiresAt)}` : `its token is good until ${dayOf(t.expiresAt)}`), `token ends …${t.hint}`].filter(Boolean).join(' · '))),
       h(
         'div',
         { class: 'token-actions' },
@@ -8393,25 +8511,23 @@ function tokensPart(redraw) {
             type: 'button',
             class: 'ghost token-revoke',
             onclick: async () => {
-              if (!(await ask(`Take back "${t.name}"?`, { says: 'Whatever signs in with it is refused from now on.', yes: 'Take it back', danger: true }))) return
+              if (!(await ask(`Disconnect ${t.name}?`, { says: 'The API token it signs in with is taken back: from then on it is refused, and its plugin offers a code that connects it again.', yes: 'Disconnect', danger: true }))) return
               const r = await fetch('/api/account/tokens/' + t.id, { method: 'DELETE' }).catch(() => null)
               if (!r?.ok) return (note.textContent = (await r?.json().catch(() => null))?.error ?? 'The server could not be reached.')
-              if (app.madeToken?.id === t.id) app.madeToken = null
               await loadAccount()
               redraw()
             },
           },
-          'Take back',
+          'Disconnect',
         ),
       ),
     ),
   )
-  const made = app.madeToken && (a.tokens ?? []).some((t) => t.id === app.madeToken.id) ? app.madeToken : null
   return [
-    made && h('div', { class: 'token-made' }, h('p', null, h('b', null, 'Your new API token.'), ' Copy it now, or leave this open until the device has it: it is not shown again.'), h('div', { 'data-part': 'token-made' }, codeBox(made.token))),
+    h('p', { class: 'muted', 'data-part': 'computers-says' }, 'Each computer is given an API token of its own as it is connected, named for it, and signs in with that. A token only reports sessions here; it cannot sign in to this page. Disconnect a computer to take its token back.'),
     ...rows,
-    !rows.length && h('p', { class: 'muted', 'data-part': 'tokens-none' }, 'No tokens yet. A device signs in with one.'),
-    h('div', { class: 'token-new' }, nameBox, life, make, ' ', note),
+    !rows.length && h('p', { class: 'muted', 'data-part': 'tokens-none' }, 'No computer is connected yet.'),
+    note,
   ]
 }
 
@@ -9079,7 +9195,7 @@ async function startAfresh() {
   startOver()
 }
 
-// Account, Encryption key: what this browser holds, and what it can do with it
+// Account, Browsers: what this browser holds of the key, and what it can do with it
 function keyPart(redraw) {
   const box = h('div', { 'data-part': 'key-part' })
   if (!app.key) {
@@ -9208,7 +9324,7 @@ function devicesPart(redraw) {
     const yes = await ask(here ? 'Remove this device from your devices?' : `Remove ${name} from your devices?`, {
       says: [
         here ? 'This browser lets go of your key, and what it asks of your computers is refused from then on. To use it again, approve it again from another of your devices.' : `What ${name} asks of your computers is refused from then on, and it is signed out. Your computers and your other devices are not touched.`,
-        !here && 'Your encryption key stays as it is. If that device may be in someone else’s hands, start afresh with a new key afterwards as well (Account, Encryption key): a device that kept the old one cannot read with that.',
+        !here && 'Your encryption key stays as it is. If that device may be in someone else’s hands, start afresh with a new key afterwards as well (Account, Browsers): a device that kept the old one cannot read with that.',
         'Your passkey is asked for: the list of your devices is signed with your key.',
       ],
       yes: 'Remove',
@@ -9429,7 +9545,7 @@ function renderAccount() {
   // Signing out of this device: its key stays or goes by whose device it was said to be, as it was approved
   const signOutPart = () => [
     h('p', null, 'This signs out this device only: your computers go on reporting, and your other devices stay signed in. Alerts stop here until you sign in again.'),
-    app.key && h('p', { class: 'muted', 'data-part': 'logout-key' }, app.key.own ? 'Your key stays on this device, as you said it is yours, and opens your sessions as soon as you sign in here again. To take it off, remove this device under Devices.' : 'Your key goes from this device as you sign out, as it is borrowed: it is approved again the next time.'),
+    app.key && h('p', { class: 'muted', 'data-part': 'logout-key' }, app.key.own ? 'Your key stays on this device, as you said it is yours, and opens your sessions as soon as you sign in here again. To take it off, remove this device under Browsers.' : 'Your key goes from this device as you sign out, as it is borrowed: it is approved again the next time.'),
     h('div', { class: 'guide-end' }, h('button', { type: 'button', id: 'account-logout', class: 'ghost', onclick: () => signOut() }, 'Sign out')),
   ]
   fill(
@@ -9442,18 +9558,16 @@ function renderAccount() {
       ...passwordPart(),
     ),
     subscriptionPart(a.billing),
-    accountPart('Computers', { id: 'computers' }, h('p', null, sessions || a.machines ? `${sessions} session${sessions === 1 ? '' : 's'} and ${a.machines} computer${a.machines === 1 ? '' : 's'} with the agent are yours here. ` : 'Nothing is connected to this account yet. ', h('a', { href: '#/setup' }, 'Set up a computer')), connectBox('account', { head: 'Add a computer' })),
-    accountPart('Stored sessions', { id: 'kept' }, ...keptPart(renderAccount)),
     accountPart(
-      'API tokens',
-      { id: 'api-tokens' },
-      h('p', { class: 'muted' }, 'What your computers sign in with: each is given one of its own as it is connected, named for it. A token only reports sessions here; it cannot sign in to this page. Take one back to disconnect its computer.'),
-      // (a token is made to set a device up with: the way to how that is done, the server's own guide, from where tokens are made)
-      h('p', null, h('a', { href: a.server + '/setup', target: '_blank', rel: 'noopener', 'data-part': 'tokens-guide' }, 'How to set up a device')),
-      ...tokensPart(renderAccount),
+      'Computers',
+      { id: 'computers' },
+      h('p', null, sessions || a.machines ? `${sessions} session${sessions === 1 ? '' : 's'} and ${a.machines} computer${a.machines === 1 ? '' : 's'} with the agent are yours here. ` : 'Nothing is connected to this account yet. ', h('a', { href: '#/setup' }, 'Set up a computer')),
+      ...computersPart(renderAccount),
+      connectBox('account', { head: 'Add a computer' }),
     ),
-    accountPart('Encryption key', { id: 'key' }, ...keyPart(renderAccount)),
-    accountPart('Devices', { id: 'devices' }, ...devicesPart(renderAccount)),
+    // (the account's key, as this browser holds it, and the phones and browsers that have it)
+    accountPart('Browsers', { id: 'browsers' }, ...keyPart(renderAccount), ...devicesPart(renderAccount)),
+    accountPart('Stored sessions', { id: 'kept' }, ...keptPart(renderAccount)),
     a.agentToken && accountPart('This server', { id: 'server-token' }, secretRow('Server token', a.agentToken, 'This server’s own agent token, from its environment file. It works in the plugin as an API token does, and is changed there.')),
     accountPart('Sign out', { id: 'sign-out' }, ...signOutPart()),
     u.admin && accountPart('People', { id: 'admin' }, h('p', { class: 'muted' }, 'Reading…')),

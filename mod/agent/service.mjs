@@ -12,7 +12,7 @@ import path from 'node:path'
 import { Store } from './store.mjs'
 import { Indexer } from './indexer.mjs'
 import { Transcript } from './transcript.mjs'
-import { Host, HostError, CARRY_MAX, expandHome, findClaude, sessionEnv } from './host.mjs'
+import { Host, HostError, CARRY_MAX, expandHome, findClaude, findGitBash, sessionEnv, taskCmd, taskXml, taskFile } from './host.mjs'
 import { Cswap } from './cswap.mjs'
 import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused, WIRE, mayStart, allowedOn, pluginDigest } from './seal.mjs'
 import { pluginRelease, pluginFiles, installedPlugins } from './verify.mjs'
@@ -20,7 +20,7 @@ import { historyRows } from './rows.mjs'
 import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, FILE_MAX } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '6.1.0'
+export const VERSION = '6.2.0'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
@@ -111,7 +111,9 @@ const OPEN_ANSWER = {
   'session.resume': ['sid'],
   'session.seed': ['sid'],
   'session.import': ['sid'],
+  'session.send': ['sid'],
   'session.stop': ['sid'],
+  'session.mode': ['sid'],
   'session.export': ['id', 'parts', 'sealed'],
   'session.export.part': ['data'],
   'session.import.part': ['part'],
@@ -163,7 +165,7 @@ export async function run(config, flags = {}) {
   }
   let announce = () => {}
   let tokenRefused = false // the server would not take this machine's token (401): the plugin's is taken in its place
-  const host = new Host(config, { store, log, onChange: () => announce(), startedFile: path.join(process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws'), 'started.json'), launchDir: path.join(process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws'), 'launch') })
+  const host = new Host(config, { store, log, onChange: () => announce(), startedFile: path.join(process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws'), 'started.json') })
   const cswap = new Cswap(config, { fail: (text) => new HostError(text) })
   // What it signs in with and what it seals with. With all three it is this account's
   // machine; without one of them it says nothing to anybody, and waits (see the end).
@@ -234,6 +236,17 @@ export async function run(config, flags = {}) {
     // (the one the sessions this agent starts load, where that is named on their command line; then what Claude Code installed)
     add(hostedPlugin(), 'started')
     for (const root of config.roots) for (const one of installedPlugins(root)) add(one.dir, 'installed')
+    // (and every other copy Claude Code keeps beside the installed one: a session started before an update runs the copy
+    // it was started with until it ends, and leaves no note where it began before this agent was here; so what it says
+    // it is, is something measured here, and held to its list as any copy is)
+    for (const root of config.roots)
+      for (const one of installedPlugins(root)) {
+        let versions = []
+        try {
+          versions = fs.readdirSync(path.dirname(one.dir))
+        } catch {}
+        for (const v of versions) add(path.join(path.dirname(one.dir), v), 'cached')
+      }
     let names = []
     try {
       names = fs.readdirSync(ownHome).filter((n) => /^plugin-[0-9a-f]{16}\.json$/.test(n))
@@ -281,9 +294,9 @@ export async function run(config, flags = {}) {
   }
   // ---- An upgrade, on an order for it: the plugin as Claude Code fetches it, held against the release the order names
   // before anything of it is gone by; then, where that release has other files for the agent, this agent's own, by the
-  // installer the release carries, in a job of its own: stopping the agent ends whatever runs under it, so what
-  // replaces it does not. That is done once the agent runs no searches (the sessions it started are in terminals of
-  // their own, and go on), or at once where the order says so (it ends them: the page said how many). The installer puts the agent before it back where the new one does not
+  // installer the release carries, in a job of its own: stopping the agent ends whatever the agent started, so what
+  // replaces it does not run under it. That is done once the agent runs no sessions, or at once where the order says
+  // so (it ends them: the page said how many). The installer puts the agent before it back where the new one does not
   // start. What is waiting to be done is kept (upgrade.json), and said, sealed.
   const upgradeFile = path.join(ownHome, 'upgrade.json')
   let waitingUpgrade = null
@@ -307,12 +320,27 @@ export async function run(config, flags = {}) {
       p.on('exit', (code) => (clearTimeout(timer), done({ code, out })))
     })
   const agentFilesOf = (list) => JSON.stringify(Object.entries(list?.files ?? {}).filter(([f]) => f.startsWith('mod/agent/')))
-  // A job of this user's own, apart from the agent's: launchd's on a Mac, systemd's elsewhere. (MANYCLAWS_JOB_RUNNER, a
-  // program that starts what it is given on its own: what the tests run in their place.)
+  // A job of this user's own, apart from the agent's: launchd's on a Mac, a task of Task Scheduler's on Windows, systemd's
+  // elsewhere. (MANYCLAWS_JOB_RUNNER, a program that starts what it is given on its own: what the tests run in their place.)
   const JOB = 'com.manyclaws.upgrade'
   const startJob = async (argv) => {
     const env = { MANYCLAWS_HOME: ownHome, HOME: os.homedir(), PATH: host.shellEnv().PATH ?? process.env.PATH ?? '/usr/bin:/bin', ...(process.env.MANYCLAWS_SIGNERS ? { MANYCLAWS_SIGNERS: process.env.MANYCLAWS_SIGNERS } : {}) }
     if (process.env.MANYCLAWS_JOB_RUNNER) return void spawn(process.env.MANYCLAWS_JOB_RUNNER, argv, { detached: true, stdio: 'ignore', env: { ...process.env, ...env } }).unref()
+    if (process.platform === 'win32') {
+      // (a task of its own, run once now: not a child of the agent's, which ending the agent's task would end with it)
+      const TASK = 'ManyClaws upgrade'
+      const file = path.join(ownHome, 'upgrade-task.xml')
+      const cmd = path.join(ownHome, 'upgrade-run.cmd')
+      const user = (spawnSync('whoami', [], { encoding: 'utf8', windowsHide: true, timeout: 30_000 }).stdout ?? '').trim()
+      fs.writeFileSync(cmd, taskCmd({ argv, env, log: path.join(ownHome, 'upgrade.log') }))
+      taskFile(file, taskXml({ user, cmd, description: 'ManyClaws: the agent brought up to date, once' }))
+      spawnSync('schtasks', ['/delete', '/tn', TASK, '/f'], { stdio: 'ignore', windowsHide: true, timeout: 30_000 })
+      for (const args of [['/create', '/tn', TASK, '/xml', file, '/f'], ['/run', '/tn', TASK]]) {
+        const r = spawnSync('schtasks', args, { encoding: 'utf8', windowsHide: true, timeout: 30_000 })
+        if (r.status !== 0) throw new Error('Task Scheduler would not start it: ' + String(r.stderr || r.stdout || '').trim())
+      }
+      return
+    }
     if (process.platform === 'darwin') {
       const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       const plist = path.join(ownHome, 'upgrade.plist')
@@ -323,21 +351,24 @@ export async function run(config, flags = {}) {
       )
       const uid = process.getuid()
       // (the one before it, done, is let go of first: launchd takes no second job by the same name)
-      spawnSync('launchctl', ['bootout', `gui/${uid}/${JOB}`], { stdio: 'ignore' })
+      spawnSync('launchctl', ['bootout', `gui/${uid}/${JOB}`], { stdio: 'ignore', timeout: 30_000 })
       for (let tries = 0; ; tries++) {
-        const r = spawnSync('launchctl', ['bootstrap', `gui/${uid}`, plist], { encoding: 'utf8' })
+        const r = spawnSync('launchctl', ['bootstrap', `gui/${uid}`, plist], { encoding: 'utf8', timeout: 30_000 })
         if (r.status === 0) return
         if (tries >= 8) throw new Error('launchd would not start it: ' + String(r.stderr ?? '').trim())
         await new Promise((done) => setTimeout(done, 300))
       }
     }
-    const r = spawnSync('systemd-run', ['--user', '--collect', '--unit', `manyclaws-upgrade-${Date.now()}`, ...Object.entries(env).flatMap(([k, v]) => ['--setenv', `${k}=${v}`]), ...argv], { encoding: 'utf8' })
+    const r = spawnSync('systemd-run', ['--user', '--collect', '--unit', `manyclaws-upgrade-${Date.now()}`, ...Object.entries(env).flatMap(([k, v]) => ['--setenv', `${k}=${v}`]), ...argv], { encoding: 'utf8', timeout: 30_000 })
     if (r.status !== 0) throw new Error('systemd would not start it: ' + String(r.stderr ?? '').trim())
   }
   const replaceAgent = async (w, { endSessions }) => {
     w.tried = Date.now()
-    log(`the agent is to be replaced by release ${w.release}'s, from ${w.dir}${endSessions ? ', ending the searches it runs' : ''}`)
-    await startJob(['/bin/bash', path.join(w.dir, 'agent', 'install.sh'), '--update', '--from', w.dir, '--wait-start', '60', ...(endSessions ? ['--end-sessions'] : [])])
+    log(`the agent is to be replaced by release ${w.release}'s, from ${w.dir}${endSessions ? ', ending the sessions it runs' : ''}`)
+    // (on Windows by Git Bash, by its full path)
+    const bash = process.platform === 'win32' ? findGitBash(host.shellEnv()) : '/bin/bash'
+    if (!bash) throw new Error('Git Bash was not found on this computer, and the agent is brought up to date by it (CLAUDE_CODE_GIT_BASH_PATH names it)')
+    await startJob([bash, path.join(w.dir, 'agent', 'install.sh'), '--update', '--from', w.dir, '--wait-start', '60', ...(endSessions ? ['--end-sessions'] : [])])
   }
   // (waiting for its sessions to be done: tried once there are none, and again a while later where it is still here)
   setInterval(() => {
@@ -636,7 +667,7 @@ export async function run(config, flags = {}) {
       incoming.set(id, got)
       return { part }
     },
-    'session.import': ({ id, like, mode, model, effort } = {}) => {
+    'session.import': ({ id, like, mode, model, effort, listed } = {}) => {
       const got = held(incoming).get(id)
       incoming.delete(id)
       if (!got) throw new HostError('no transcript arrived to start from')
@@ -645,12 +676,12 @@ export async function run(config, flags = {}) {
       if (!isSealedBytes(packed)) throw new HostError('the transcript did not come sealed, so it was not taken')
       const opened = openBytes(new Uint8Array(packed), sealKey)
       if (!opened) throw new HostError(NO_KEY)
-      return host.importSession({ packed: Buffer.from(opened), like, mode, model, effort })
+      return host.importSession({ packed: Buffer.from(opened), like, mode, model, effort, listed })
     },
     // A new session that starts from words: a handoff another session wrote (`text`), or
     // what the server kept of a chat whose transcript can't be had (`rows`). They arrive
     // here opened, where they were sealed.
-    'session.seed': ({ like, text, rows, mode, model, effort } = {}) => {
+    'session.seed': ({ like, text, rows, mode, model, effort, listed } = {}) => {
       if (unopened(text) || unopened(rows)) throw new HostError(NO_KEY)
         // (a session's handoff comes as its turn ended, with how it ended: whether it is one is said here, where it can be read)
       if (text && typeof text === 'object') {
@@ -660,10 +691,11 @@ export async function run(config, flags = {}) {
       }
       const said = (Array.isArray(rows) ? chatText(rows) : typeof text === 'string' ? text : '').trim()
       if (!said) throw new HostError('there is nothing to start the new session from')
-      return host.start({ like, prompt: (Array.isArray(rows) ? CHAT_LEAD : HANDOFF_LEAD) + '\n\n---\n\n' + said, mode, model, effort })
+      return host.start({ like, prompt: (Array.isArray(rows) ? CHAT_LEAD : HANDOFF_LEAD) + '\n\n---\n\n' + said, mode, model, effort, listed })
     },
-    // (a search the agent runs, and no other session: the rest are their terminals')
+    'session.send': (args) => host.send(args ?? {}),
     'session.stop': (args) => host.stop(args ?? {}),
+    'session.mode': (args) => host.setMode(args ?? {}),
     // cswap, where the machine has it: the Claude accounts here, and a switch to one of them
     'cswap.list': () => cswap.list(),
     'cswap.switch': ({ to } = {}) => cswap.switchTo(to),
@@ -704,29 +736,32 @@ export async function run(config, flags = {}) {
     const about = {
       roots: config.roots,
       // (the folders the owner listed, and the ones a person used where those are allowed, with the ones turned off)
-      // (and what a session started here opens in: a terminal app's name, tmux, or a console window)
-      spawn: host.canStart() || host.spawnConfig.auto ? { folders: host.spawnConfig.enabled ? host.spawnConfig.folders : [], auto: host.spawnConfig.auto ? host.autoList : null, autoOff: host.spawnConfig.autoOff ?? [], modes: host.spawnConfig.modes, terminal: process.platform === 'win32' ? 'console' : String(host.spawnConfig.terminal || 'tmux') } : null,
+      spawn: host.canStart() || host.spawnConfig.auto ? { folders: host.spawnConfig.enabled ? host.spawnConfig.folders : [], auto: host.spawnConfig.auto ? host.autoList : null, autoOff: host.spawnConfig.autoOff ?? [], modes: host.spawnConfig.modes } : null,
       // (what the plugin here is, and what release this agent is)
       plugins: measure().map(({ wrong, extra, ...m }) => ({ ...m, wrong: wrong?.length ?? 0, extra: extra?.length ?? 0 })),
       release: agentRelease(),
       checks: checks(),
-      // (an upgrade of this agent waiting for the searches it runs to be done)
+      // (an upgrade of this agent waiting for its sessions to be done)
       upgrade: waitingUpgrade ? { release: waitingUpgrade.release, at: waitingUpgrade.at } : null,
       // (the folders a file may be opened from, and the ones a file is taken into)
       files: filesFrom ?? [],
       upload: takesInto ?? [],
       stats: { ...store.stats(), pending: indexer.pending.length, bytesLeft: Math.max(0, indexer.bytesLeft) },
+      // (how its installer is run by hand here, for the page to say so exactly: this agent's folder, where agent.json is,
+      // and on Windows the Git Bash that runs it, found as Claude Code finds it, or null where there is none)
+      installer: { home: ownHome, bash: process.platform === 'win32' ? findGitBash(host.shellEnv()) : null },
     }
     // What the machine is called and what its agent can do are the account's to see as a
     // device of its own, and are in the open: among them that it seals all it says (2),
     // and does what it is asked on a signed order alone. Its folders, what it has indexed,
     // and everything of the sessions it runs or has open are sealed: of those the server
-    // is told which sessions they are, and nothing of them.
+    // is told which sessions they are (it passes a reply on to the machine that runs
+    // one), and nothing of them.
     return {
       ...machine,
       agent: VERSION,
       node: process.version,
-      capabilities: ['sessions', 'search', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
+      capabilities: ['sessions', 'search', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
       sealed: 3,
       spawn: host.canStart(),
       card: seal(about, sealKey),
@@ -817,11 +852,15 @@ export async function run(config, flags = {}) {
   const asks = (order) => readOrder(order, sealKey, devices.list)?.do
   // A session is started here only for one of the account's own devices that may start them (mayStart): not one that
   // was added as not its owner's own, which is one of the account's for a day, and not one its owner turned that off
-  // for, signed with the account's root (Account, Devices). A reply to a session that is running is not starting one.
-  const NOT_TO_START = "this computer starts a session only when that is asked from one of your own devices that may start them, and this was asked from one that may not: it was added as not your own (one of your account's devices for a day), or starting sessions is turned off for it (Account, Devices)"
-  const startedBy = (o) => {
-    if (!mayStart(devices.list?.devices?.find((d) => d.key === o.by))) throw new HostError(NOT_TO_START)
-    return o
+  // for, signed with the account's root (Account, Browsers). A reply to a session that is running is not starting one.
+  // What is said where one may not, naming the device that asked by what the list calls it, and why it may not: what is
+  // refused is said as what it is (`does`: it starts a session, it is updated, it starts sessions in more folders)
+  const startedBy = (o, does = 'starts a session') => {
+    const d = devices.list?.devices?.find((x) => x.key === o.by)
+    if (mayStart(d)) return o
+    const who = d?.name ? `${d.name}, which asked,` : 'the device that asked'
+    const why = !d ? 'the device that asked is not on the list of your devices this computer has' : d.until !== undefined ? `${who} was added as not your own (one of your account's devices for a day)` : `starting sessions is turned off for ${d.name || 'the device that asked'} (Account, Browsers)`
+    throw new HostError(`this computer ${does} only when that is asked from one of your own devices that may start sessions, and ${why}`)
   }
   // A new session from another, on the order for it: which says how it is to be made (new,
   // clone or handoff), so that one asked for empty is not made from words instead
@@ -860,11 +899,18 @@ export async function run(config, flags = {}) {
   // session it is about: one signed for a session's own plugin, or for another machine's
   // agent, is not taken here, so an order has one runner and that runner's memory of it.
   const ORDERED = {
+    // A reply, for a session this machine runs
+    'session.send': (a) => {
+      const w = take(a.order, machine.id, ['prompt']).with
+      return { sid: String(w.sid ?? ''), text: String(w.text ?? '') }
+    },
     'session.resume': (a) => {
       const what = asks(a.order)
-      // A reply to a session that has exited, which starts it again
+      // A reply to a session that has exited, which starts it again (a reply to one this machine is running goes to it)
       if (what === 'prompt') {
-        const w = startedBy(take(a.order, machine.id, ['prompt'])).with
+        const o = take(a.order, machine.id, ['prompt'])
+        const w = o.with
+        if (!host.hosted.has(String(w.sid ?? ''))) startedBy(o)
         return { sid: String(w.sid ?? ''), prompt: String(w.text ?? ''), mode: w.mode }
       }
       // One opened from its transcript: signed for this machine
@@ -874,24 +920,23 @@ export async function run(config, flags = {}) {
       }
       // A copy of one that is here
       const w = branch(a, 'clone')
-      return { sid: w.from, fork: true, idle: true, mode: w.mode }
+      return { sid: w.from, fork: true, idle: true, mode: w.mode, listed: w.listed }
     },
     'session.start': (a) => {
       if (asks(a.order) === 'branch') {
         const w = branch(a, 'new')
-        return { ...(w.cwd ? { cwd: w.cwd } : { like: w.like }), idle: true, mode: w.mode }
+        return { ...(w.cwd ? { cwd: w.cwd } : { like: w.like }), idle: true, mode: w.mode, listed: w.listed }
       }
-      // (`background`: a search, which the agent runs itself and which ends with its turn)
       const w = startedBy(take(a.order, machine.id, ['start'])).with
-      return { cwd: w.cwd, prompt: w.prompt, mode: w.mode, model: w.model, effort: w.effort, name: w.name, create: w.create === true, background: w.background === true }
+      return { cwd: w.cwd, prompt: w.prompt, mode: w.mode, model: w.model, effort: w.effort, name: w.name, create: w.create === true, listed: w.listed }
     },
     // Which of the folders a person used sessions may be started in: allowed or not, and those turned off. Any of the
     // account's devices may narrow that; widening it is starting sessions where they could not be, which is for one
     // that may start them
-    // An upgrade to a release, named with what its plugin is (its digest); `now`: the searches this agent runs are ended
+    // An upgrade to a release, named with what its plugin is (its digest); `now`: the sessions this agent runs are ended
     // for it, where it has to be started again, rather than waited for
     'agent.upgrade': (a) => {
-      const w = startedBy(take(a.order, machine.id, ['upgrade'])).with
+      const w = startedBy(take(a.order, machine.id, ['upgrade']), 'is updated').with
       return { release: Number(w.release), digest: String(w.digest ?? ''), now: w.now === true }
     },
     'spawn.folders': (a) => {
@@ -899,7 +944,7 @@ export async function run(config, flags = {}) {
       const auto = typeof o.with.auto === 'boolean' ? o.with.auto : undefined
       const off = Array.isArray(o.with.off) ? o.with.off.map(String) : undefined
       const wider = (auto === true && !host.spawnConfig.auto) || (off && (host.spawnConfig.autoOff ?? []).some((f) => !off.includes(f)))
-      if (wider) startedBy(o)
+      if (wider) startedBy(o, 'starts sessions in more folders')
       return { auto, off }
     },
     'session.seed': (a, raw) => {
@@ -914,14 +959,18 @@ export async function run(config, flags = {}) {
             .map((row) => ({ role: row.role, text: row.text, ...(typeof row.tool === 'string' ? { tool: row.tool } : {}) }))
         : undefined
       const w = rows ? branch(a, 'clone') : branch(a, 'handoff')
-      return { like: w.cwd || w.like, text: rows ? undefined : a.text, rows, mode: w.mode }
+      return { like: w.cwd || w.like, text: rows ? undefined : a.text, rows, mode: w.mode, listed: w.listed }
     },
     'session.import': (a) => {
       const w = branch(a, 'clone')
-      return { id: a.id, like: w.cwd || w.like, mode: w.mode }
+      return { id: a.id, like: w.cwd || w.like, mode: w.mode, listed: w.listed }
     },
     // A transcript is packed to leave here for whoever signed for it: which session's, the order says
     'session.export': (a) => ({ sid: String(take(a.order, machine.id, ['export']).with.sid ?? '') }),
+    'session.mode': (a) => {
+      const w = take(a.order, machine.id, ['mode']).with
+      return { sid: String(w.sid ?? ''), mode: String(w.mode ?? '') }
+    },
     'cswap.switch': (a) => ({ to: take(a.order, machine.id, ['cswap']).with.to }),
     // A file is read for whoever signed for it: which file, and where its session runs, are the order's to say
     'file.read': (a) => {
