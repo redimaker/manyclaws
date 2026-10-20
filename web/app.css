@@ -413,6 +413,9 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .row-time { font-size: .85em; color: var(--muted); flex-shrink: 0; }
 .row-sub, .row-preview { font-size: .9em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row.active .row-sub, .row.active .row-preview, .row.active .row-time { color: inherit; opacity: .8; }
+/* (its session id, where this device has its tiles show it: a line of its own, in the editor's font) */
+.row-id { height: 1lh; font: .85em/var(--line) var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.active .row-id { color: inherit; opacity: .8; }
 /* Under a session's name, what was last said in it: what its user last typed, marked ❯ as
    a prompt is and a shade nearer the name than the rest, over what Claude last said. Each
    on one line, cut short, unless this device has them take two or three (the settings:
@@ -1422,7 +1425,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 [data-view="terminal"] .group-head { font-size: inherit; font-weight: 400; text-transform: none; padding: 1em var(--cell-w) 0; }
 [data-view="terminal"] .row { padding: .3em var(--cell-w); gap: var(--cell-w); }
 [data-view="terminal"] .row .grip { width: var(--cell-w); font-size: .8em; }
-[data-view="terminal"] .row-sub, [data-view="terminal"] .row-preview, [data-view="terminal"] .row-prompt, [data-view="terminal"] .row-time,
+[data-view="terminal"] .row-sub, [data-view="terminal"] .row-preview, [data-view="terminal"] .row-prompt, [data-view="terminal"] .row-time, [data-view="terminal"] .row-id,
 [data-view="terminal"] .chat-sub, [data-view="terminal"] .badge,
 [data-view="terminal"] .card-sub, [data-view="terminal"] .composer-note { font-size: inherit; }
 [data-view="terminal"] .row-prompt { gap: var(--cell-w); }

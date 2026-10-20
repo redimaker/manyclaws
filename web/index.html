@@ -23,14 +23,14 @@
        from: a preload that fails its check is otherwise fetched again by the import, unchecked (the server names
        the map by its own hash in the page's policy, since it is inline). -->
   <script type="importmap">{"integrity":{"/seal.js":"sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6","/keys.js":"sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
-  <link rel="stylesheet" href="app.css" integrity="sha384-hCtn7WoYWpqXDSLNpSMUDO6BYm4ESnix1nljRf53hKXeVvQbGuRpo5sk4wTcWaPz">
+  <link rel="stylesheet" href="app.css" integrity="sha384-bMcIn58zpNtRaC54TX6taF8SKyHgqaAqfp7I+6aF+UKqUaGtMOE7Z6xHjMWFXX98">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-ZBAepwzX59yX/T4v2jPhynXRXQmV/WgAsqIknvZ9LHWeO3OB7xBW1UPhZ3X31Yzv">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
-  <script src="app.js" defer integrity="sha384-04wjzqJY+Oa49OyY/D6IFhBDdadRvfGF7NxHSWvLchuNTDGkLCsjduIC7OBoxTh3"></script>
+  <script src="app.js" defer integrity="sha384-CTJecXJtxz3bVvnfQdtgn1OJkyYyuXdu15lQlAK6B1c4a9eUEzk0B0HpWlhJ61PI"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -374,6 +374,7 @@
               <p class="muted">What each session in the list shows under its name. Here is one, as this device has them now:</p>
               <div id="tile-sample" class="tile-sample" aria-hidden="true"></div>
               <label class="guide-check"><input type="checkbox" data-tile="where"> The project and computer it is on, and what started it</label>
+              <label class="guide-check"><input type="checkbox" data-tile="id"> Its session id, on a line of its own</label>
               <label class="guide-check"><input type="checkbox" data-tile="prompt"> What you last said to it</label>
               <label class="guide-check"><input type="checkbox" data-tile="reply"> What Claude last said</label>
               <label class="guide-check"><input type="checkbox" data-tile="time"> When it was last active</label>

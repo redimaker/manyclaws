@@ -18,9 +18,9 @@ const trusted = window.trustedTypes?.createPolicy('manyclaws', {
 // A text written in Markdown, as what the page draws of it: all the HTML this page ever sets
 const rendered = (src) => (trusted ? trusted.createHTML(src) : markdown(src))
 // What a session's tile shows beside its name, until this device says otherwise (the settings): the project
-// and computer it is on, the last thing its user typed, the last thing Claude said, when it was last heard
-// from, and how many lines each thing said takes
-const TILE = { where: true, prompt: true, reply: true, time: true, claws: true, star: true, grip: true, edit: true, lines: 1 }
+// and computer it is on, its session id (not to begin with), the last thing its user typed, the last thing
+// Claude said, when it was last heard from, and how many lines each thing said takes
+const TILE = { where: true, id: false, prompt: true, reply: true, time: true, claws: true, star: true, grip: true, edit: true, lines: 1 }
 // (the three on a tile that are pressed: each can be left off, and brought back by a long press or a double click)
 const TILE_OPTIONS = ['star', 'grip', 'edit']
 // How long a session this page saw go quiet stays among the active ones in the list (renderList)
@@ -2221,6 +2221,8 @@ function agentMark(s) {
 // Whether the computer's agent opened this session, as that computer says of the sessions open there
 const openedHere = (s) => !!s?.fromPage || !!app.machines.get(s?.machine)?.open?.[s?.id]?.started
 
+// A session's id, on a line of its own on its tile, where this device has its tiles show it (the settings)
+const idLine = (s) => app.tile.id && h('div', { class: 'row-id', title: 'Its session id' }, s.id)
 // How many subagents a session has running, for a row of the list
 const agentsMark = (s) => (s?.agents?.length ? h('span', { class: 'agents-mark', title: s.agents.map(agentLabel).join('\n') }, count(s.agents.length, 'subagent')) : null)
 const agentLabel = (a) => [a.description || a.type || 'subagent', a.description && a.type ? `(${a.type})` : '', a.background ? 'in the background' : ''].filter(Boolean).join(' ')
@@ -3363,9 +3365,9 @@ function typedHere(sid, rows) {
 }
 
 // A session's tile in the list. What it shows beside the session's name is as this device
-// has it in the settings (`tile`): the project and computer it is on, the last thing its
-// user typed (marked ❯, as a prompt is), the last thing Claude said, and when it was last
-// heard from. What it is waiting for is always said.
+// has it in the settings (`tile`): the project and computer it is on, its session id, the
+// last thing its user typed (marked ❯, as a prompt is), the last thing Claude said, and when
+// it was last heard from. What it is waiting for is always said.
 function renderRow(s, { favorite = false, due = false } = {}) {
   const tile = app.tile
   // The project it's in, the machine, and what started it: what it's about is its title, or the name it was given here
@@ -3401,6 +3403,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
       // (the first line: its name, its label, ManyClaws' mark, when, and the star, at the end)
       h('div', { class: 'row-top' }, h('span', { class: 'row-title' + (app.unread.has(s.id) ? ' unread' : '') }, name), labelChip(mark), tile.claws && agentMark(s), tile.time && rowTime(s), starButton(s)),
       (sub.length || s.agents?.length || soon) && h('div', { class: 'row-sub' }, sub, sub.length && s.agents?.length ? ' · ' : '', agentsMark(s), (sub.length || s.agents?.length) && soon ? ' · ' : '', soon),
+      idLine(s),
       due && remindLine(mark),
       // (each line this device has its tiles show is there whether or not there is anything in it, so that a tile
       // keeps its height as what is said in it comes and goes: blank, or, before Claude has said anything to a
@@ -3563,7 +3566,7 @@ function tileKept() {
     kept = JSON.parse(localStorage.getItem('mc.tile'))
   } catch {}
   const tile = { ...TILE }
-  for (const k of ['where', 'prompt', 'reply', 'time', 'claws', ...TILE_OPTIONS]) if (typeof kept?.[k] === 'boolean') tile[k] = kept[k]
+  for (const k of ['where', 'id', 'prompt', 'reply', 'time', 'claws', ...TILE_OPTIONS]) if (typeof kept?.[k] === 'boolean') tile[k] = kept[k]
   if ([1, 2, 3].includes(kept?.lines)) tile.lines = kept.lines
   return tile
 }
@@ -3577,7 +3580,7 @@ function setTile(change) {
 }
 // A session made up for the settings, to show a tile on: what it says is long enough to run to three lines
 const TILE_SAMPLE = {
-  id: 'tile-sample',
+  id: '3f6c2a91-5d4e-4b7a-9c18-e2a0b7d45f63',
   state: 'idle',
   title: 'Fix the flaky login test',
   project: 'ios-app',
@@ -4148,6 +4151,7 @@ function pastRow(s, { inProject = false, favorite = false, due = false, where = 
       { class: 'row-main' },
       h('div', { class: 'row-top' }, h('span', { class: 'row-title' }, name), labelChip(mark), app.tile.time && h('span', { class: 'row-time' }, now?.lastActivity || s.lastActivity ? ago(now?.lastActivity ?? s.lastActivity) : ''), starButton(s)),
       h('div', { class: 'row-sub' }, sub, now?.agents?.length ? ' · ' : '', agentsMark(now), (sub.length || now?.agents?.length) && soon ? ' · ' : '', soon),
+      idLine(s),
       due && remindLine(mark),
     ),
     due && doneButton(s),
