@@ -23,14 +23,14 @@
        from: a preload that fails its check is otherwise fetched again by the import, unchecked (the server names
        the map by its own hash in the page's policy, since it is inline). -->
   <script type="importmap">{"integrity":{"/seal.js":"sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6","/keys.js":"sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
-  <link rel="stylesheet" href="app.css" integrity="sha384-cDtkpfmiUfsgGgmLk/NPzdVWf1gO4tnL29o4uym09SfPDC0Ktg+pmot7JZYCQ8h3">
+  <link rel="stylesheet" href="app.css" integrity="sha384-362g2wdly/D5uGGJWEXXbfQ530ICFXypA41RaOHuhhuL/yaimRdnokV4J/EvNMFF">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-xHFs1C1eTRqlAVrbhI7uCCxb9+IA6tQMHHnLZaCCtwOUIQzmFQR7Mdm7+rfeCZjd">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
-  <script src="app.js" defer integrity="sha384-Uz+vi2TDEAybQVftpHcTDLbnzog3hlcwerjEzabLIMy1/FurmstDiFfM3jHhOuAp"></script>
+  <script src="app.js" defer integrity="sha384-vMNlr1KPNvmPxoK20ZPO9KFRx4BD+hKN4LjZACSlZg9AWCmFlJVQFptDM7CC7Aab"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -373,12 +373,12 @@
             <div class="acct-body">
               <p class="muted">What each session in the list shows under its name. Here is one, as this device has them now:</p>
               <div id="tile-sample" class="tile-sample" aria-hidden="true"></div>
-              <label class="guide-check"><input type="checkbox" data-tile="where"> The project and computer it is on, and what started it</label>
+              <label class="guide-check"><input type="checkbox" data-tile="where"> The project and computer it is on</label>
               <label class="guide-check"><input type="checkbox" data-tile="id"> Its session id</label>
               <label class="guide-check"><input type="checkbox" data-tile="prompt"> What you last said to it</label>
               <label class="guide-check"><input type="checkbox" data-tile="reply"> What Claude last said</label>
               <label class="guide-check"><input type="checkbox" data-tile="time"> When it was last active</label>
-              <label class="guide-check"><input type="checkbox" data-tile="claws"> ManyClaws' mark on a session started from this page</label>
+              <label class="guide-check"><input type="checkbox" data-tile="by"> What started it, as an icon: ManyClaws' mark for this page, a terminal, VS Code, the Desktop app or a script</label>
               <label class="guide-check"><input type="checkbox" data-tile="star"> The favorite star</label>
               <label class="guide-check"><input type="checkbox" data-tile="grip"> The grabber, to put favorites in order</label>
               <label class="guide-check"><input type="checkbox" data-tile="edit"> The edit pencil</label>
