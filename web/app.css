@@ -797,15 +797,18 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 /* Subagents a session has running: a mark in its row, and a strip above the reply box */
 .agents-mark { color: var(--working); white-space: nowrap; }
 /* What started a running session, on its tile: an icon, small, before the time on the tile's first line, in the time's
-   color; ManyClaws' two claws, for one started from this page, in the red they have beside the page's name */
+   color; ManyClaws' two claws, for one started from this page, in the red they have beside the page's name, and VS
+   Code's mark in its own blue (each of the two in the lighter of its shades on a dark page), on a row that is open too */
 .row-by { flex: none; align-self: center; display: inline-flex; line-height: 1; color: var(--muted); }
 .row-by svg { width: auto; height: .8em; }
 .row-by .by-icon { width: 1.05em; height: 1.05em; }
 .row-by[data-by="vscode"] .by-icon { width: .9em; height: .9em; }
 .row-by[data-by="manyclaws"] svg { fill: #e2664a; }
+.row-by[data-by="vscode"] svg { color: #1f9cf0; }
 .row.active .row-by { color: inherit; opacity: .8; }
 @media (prefers-color-scheme: light) {
   .row-by[data-by="manyclaws"] svg { fill: #c6452c; }
+  .row-by[data-by="vscode"] svg { color: #007acc; }
 }
 .agents-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 16px; border-top: 1px solid var(--border); font-size: .9em; color: var(--muted); max-height: 5.5em; overflow-y: auto; flex-shrink: 0; }
 .agents-strip .agents-count { color: var(--working); font-weight: 600; }
