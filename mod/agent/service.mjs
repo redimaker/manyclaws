@@ -331,12 +331,12 @@ export async function run(config, flags = {}) {
       const TASK = 'ManyClaws upgrade'
       const file = path.join(ownHome, 'upgrade-task.xml')
       const cmd = path.join(ownHome, 'upgrade-run.cmd')
-      const user = spawnSync('whoami', [], { encoding: 'utf8', windowsHide: true }).stdout.trim()
+      const user = (spawnSync('whoami', [], { encoding: 'utf8', windowsHide: true, timeout: 30_000 }).stdout ?? '').trim()
       fs.writeFileSync(cmd, taskCmd({ argv, env, log: path.join(ownHome, 'upgrade.log') }))
       taskFile(file, taskXml({ user, cmd, description: 'ManyClaws: the agent brought up to date, once' }))
-      spawnSync('schtasks', ['/delete', '/tn', TASK, '/f'], { stdio: 'ignore', windowsHide: true })
+      spawnSync('schtasks', ['/delete', '/tn', TASK, '/f'], { stdio: 'ignore', windowsHide: true, timeout: 30_000 })
       for (const args of [['/create', '/tn', TASK, '/xml', file, '/f'], ['/run', '/tn', TASK]]) {
-        const r = spawnSync('schtasks', args, { encoding: 'utf8', windowsHide: true })
+        const r = spawnSync('schtasks', args, { encoding: 'utf8', windowsHide: true, timeout: 30_000 })
         if (r.status !== 0) throw new Error('Task Scheduler would not start it: ' + String(r.stderr || r.stdout || '').trim())
       }
       return
@@ -351,15 +351,15 @@ export async function run(config, flags = {}) {
       )
       const uid = process.getuid()
       // (the one before it, done, is let go of first: launchd takes no second job by the same name)
-      spawnSync('launchctl', ['bootout', `gui/${uid}/${JOB}`], { stdio: 'ignore' })
+      spawnSync('launchctl', ['bootout', `gui/${uid}/${JOB}`], { stdio: 'ignore', timeout: 30_000 })
       for (let tries = 0; ; tries++) {
-        const r = spawnSync('launchctl', ['bootstrap', `gui/${uid}`, plist], { encoding: 'utf8' })
+        const r = spawnSync('launchctl', ['bootstrap', `gui/${uid}`, plist], { encoding: 'utf8', timeout: 30_000 })
         if (r.status === 0) return
         if (tries >= 8) throw new Error('launchd would not start it: ' + String(r.stderr ?? '').trim())
         await new Promise((done) => setTimeout(done, 300))
       }
     }
-    const r = spawnSync('systemd-run', ['--user', '--collect', '--unit', `manyclaws-upgrade-${Date.now()}`, ...Object.entries(env).flatMap(([k, v]) => ['--setenv', `${k}=${v}`]), ...argv], { encoding: 'utf8' })
+    const r = spawnSync('systemd-run', ['--user', '--collect', '--unit', `manyclaws-upgrade-${Date.now()}`, ...Object.entries(env).flatMap(([k, v]) => ['--setenv', `${k}=${v}`]), ...argv], { encoding: 'utf8', timeout: 30_000 })
     if (r.status !== 0) throw new Error('systemd would not start it: ' + String(r.stderr ?? '').trim())
   }
   const replaceAgent = async (w, { endSessions }) => {
