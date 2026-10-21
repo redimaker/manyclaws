@@ -430,7 +430,9 @@ const blockedFor = (to) => {
   if (!app.release && !app.devicesList && !app.machines?.size) return ''
   const s = app.sessions?.get(to)
   const c = s ? computerOfSession(s) : computerOf(to)
-  return c && noReleaseOn(c) ? `${c.name} is running a ManyClaws plugin that matches no signed release, so nothing is sent to it until you decide what is to be done, on its page` : ''
+  const bad = c ? noReleaseOn(c) : null
+  if (!bad) return ''
+  return fromBefore(bad) ? `${c.name} has plugin ${bad.plugin}, from before ManyClaws kept itself up to date, so nothing is sent to it until it is moved to the new release, as its page says` : `${c.name} is running a ManyClaws plugin that matches no signed release, so nothing is sent to it until you decide what is to be done, on its page`
 }
 const orderFor = async (to, what, rest = {}) => (app.key && !blockedFor(to) ? vault.makeOrder({ to, do: what, with: rest }, app.key) : undefined)
 // A prompt for a session, signed for the one that is to run it: the session's own plugin,
@@ -3815,16 +3817,31 @@ function releaseOn(c) {
   const p = said.find((r) => !r.as) ?? said.at(-1)
   return p ? { by: 'plugin', release: p.release, digest: p.digest, as: !!p.as, signed: !!p.signed, local: false } : null
 }
+// A copy of the plugin, by its version: what its signed list says, else the name of the folder Claude Code keeps it in
+// (…/manyclaws/manyclaws/<version>), which is all a copy from before releases were signed has to say of itself
+const copyVersion = (x) => {
+  const folder = String(x?.dir ?? '').split(/[\\/]/).pop()
+  return x?.plugin ?? (versionOf(folder) ? folder : null)
+}
+// A plugin from before releases were signed and carried their list (MOVE_FROM), as its agent measured it: no list, and
+// a version from before. Not one anybody changed, but one the one-time move replaces; nothing is sent to it all the same
+const fromBefore = (bad) => !!bad && bad.by === 'agent' && !bad.signed && behind(bad.plugin, MOVE_FROM)
+// A plugin that is no release, said by what there is to say of it: its release and the day that was made (where this page
+// knows it: the newest release's), its version, and its digest
+function copySays(n) {
+  const made = n.release && n.release === app.release?.release && app.release.made ? dayOf(Date.parse(app.release.made + 'T12:00')) : ''
+  return [n.release ? `release ${n.release}${made ? ` of ${made}` : ''}` : '', n.plugin ? `plugin ${n.plugin}` : '', n.digest.slice(0, 12)].filter(Boolean).join(', ')
+}
 // A plugin on a computer that is no release, and that its owner did not allow there: what its agent measured, what a
 // session's plugin says of itself, or what it found Claude Code had fetched for it. The first that is, or null
 function noReleaseOn(c) {
   if (c.m?.checks) {
     // (a copy Claude Code only keeps, beside the installed one, is no matter until a session runs it: below)
     const p = c.m.plugins.find((x) => x.where !== 'cached' && x.checked && !x.as && x.digest && !allowedHere(c, x.digest))
-    if (p) return { digest: p.digest, by: 'agent', release: p.release, signed: !!p.signed }
+    if (p) return { digest: p.digest, by: 'agent', release: p.release, plugin: copyVersion(p), signed: !!p.signed }
     // (a session still running a copy from before an update: its agent measured that copy too, and holds it to its list)
     const kept = c.live.map((s) => c.m.plugins.find((x) => x.where === 'cached' && x.digest && x.digest === s.release?.digest)).find((x) => x && !x.as && !allowedHere(c, x.digest))
-    if (kept) return { digest: kept.digest, by: 'agent', release: kept.release, signed: !!kept.signed }
+    if (kept) return { digest: kept.digest, by: 'agent', release: kept.release, plugin: copyVersion(kept), signed: !!kept.signed }
     // (and a session's plugin that says it is another than any its agent measured: one of the two is not as it says)
     const known = new Set(c.m.plugins.map((x) => x.digest))
     const other = c.live.find((s) => s.release?.digest && c.m.plugins.length && !known.has(s.release.digest) && !allowedHere(c, s.release.digest))
@@ -3832,8 +3849,8 @@ function noReleaseOn(c) {
     return null
   }
   for (const s of c.live) {
-    if (s.release?.digest && !s.release.as && !allowedHere(c, s.release.digest)) return { digest: s.release.digest, by: 'plugin', release: s.release.release, signed: !!s.release.signed }
-    if (s.next?.digest && !s.next.as && !allowedHere(c, s.next.digest)) return { digest: s.next.digest, by: 'fetched', release: s.next.release, signed: !!s.next.signed }
+    if (s.release?.digest && !s.release.as && !allowedHere(c, s.release.digest)) return { digest: s.release.digest, by: 'plugin', release: s.release.release, plugin: s.release.plugin ?? s.plugin ?? null, signed: !!s.release.signed }
+    if (s.next?.digest && !s.next.as && !allowedHere(c, s.next.digest)) return { digest: s.next.digest, by: 'fetched', release: s.next.release, plugin: s.next.plugin ?? null, signed: !!s.next.signed }
   }
   return null
 }
@@ -3895,10 +3912,13 @@ function needsOf(c) {
   // First, and in red: a plugin there that is no release, and that its owner did not allow there. Nothing is sent to the
   // computer until the owner says what is to be done.
   const bad = noReleaseOn(c)
-  if (bad) needs.push({ kind: 'alarm', ...bad })
+  // (but a plugin from before releases were signed is the move's, below: blocked all the same, and said as what it is)
+  const before = fromBefore(bad)
+  if (bad && !before) needs.push({ kind: 'alarm', ...bad })
   // From before releases carried each other: moved once, by the guide. (An agent too old to be heard is said below.)
-  const moving = (c.m && !c.m.refused && versionOf(c.m.agent) && behind(c.m.agent, MOVE_FROM)) || (!c.m && behind(plugin, MOVE_FROM))
-  if (moving) needs.push({ kind: 'move', has: c.m?.agent ?? plugin, what: c.m ? 'agent' : 'plugin' })
+  const agentBefore = (c.m && !c.m.refused && versionOf(c.m.agent) && behind(c.m.agent, MOVE_FROM)) || (!c.m && behind(plugin, MOVE_FROM))
+  const moving = agentBefore || before
+  if (moving) needs.push(agentBefore ? { kind: 'move', has: c.m?.agent ?? plugin, what: c.m ? 'agent' : 'plugin' } : { kind: 'move', has: bad.plugin, what: 'plugin', blocked: bad.digest })
   // A newer release, with another plugin than the one there: asked for here, and done there
   const newest = app.release?.digest ? app.release : null
   const runs = releaseOn(c)
@@ -3933,7 +3953,12 @@ const UPGRADE_PAGE = '#/account/upgrade'
 const moveLine = () => `Read ${app.account?.server ?? location.origin}/upgrade.md and move ManyClaws on this computer to the new release.`
 // The account's computers that are to be moved: by what each agent says it is now, or last said, and any the server
 // would not hear at all for being too old
-const toUpgrade = () => [...app.machines.values()].filter((m) => m.refused || behind(m.agent, MOVE_FROM)).sort((a, b) => machineName(a).localeCompare(machineName(b)))
+const toUpgrade = () => [...app.machines.values()].filter((m) => m.refused || behind(m.agent, MOVE_FROM) || pluginBefore(m)).sort((a, b) => machineName(a).localeCompare(machineName(b)))
+// A machine whose agent is new enough and whose plugin is from before (fromBefore): its plugin's version, or null
+const pluginBefore = (m) => {
+  const bad = noReleaseOn(computerOf(m.id))
+  return fromBefore(bad) ? bad.plugin : null
+}
 // Seen to as the account's computers are heard of: the line, the page where it is open, and the page brought up, once
 // in a tab, where the page has come in at its list (someone who came for a session is at it, with the line above)
 function seeToUpgrade() {
@@ -3953,7 +3978,7 @@ function seeToUpgrade() {
 const needSays = (n) =>
   ({
     alarm: n.by === 'differ' ? 'its plugin says it is something its agent did not find there: nothing is sent to it' : 'it is running a ManyClaws plugin that matches no signed release: nothing is sent to it',
-    move: `its ${n.what} is ${n.has}, from before ManyClaws kept itself up to date: it is moved once, by a guide`,
+    move: `its ${n.what} is ${n.has}, from before ManyClaws kept itself up to date: it is moved once, by a guide${n.blocked ? ', and nothing is sent to it until then' : ''}`,
     update: `release ${n.newest} is out`,
     'upgrade-waiting': `an update to release ${n.release} is waiting for the sessions started from this page to be done`,
     'agent-setup': 'it has no agent: your phone cannot start sessions on it',
@@ -7951,25 +7976,25 @@ function upkeepNode(c, n) {
       'div',
       { class: 'needs-alarm', 'data-need': 'alarm', role: 'alert' },
       h('p', { 'data-part': 'alarm-mismatch' }, h('b', null, `Version mismatch on ${name}:`), mismatchSays(n), ` Nothing is sent to ${name} until you decide.`),
-      h('div', { class: 'needs-do' }, button('alarm-allow', 'Allow it', () => allowPlugin(c, n.digest)), ' ', h('a', { href: '#/account', class: 'button-link ghost', 'data-part': 'alarm-revoke' }, `Take back ${name}’s access`)),
+      h('div', { class: 'needs-do' }, button('alarm-allow', 'Allow it', () => allowPlugin(c, n)), ' ', h('a', { href: '#/account', class: 'button-link ghost', 'data-part': 'alarm-revoke' }, `Take back ${name}’s access`)),
       ...told,
     )
   if (n.kind === 'alarm')
     return h(
       'div',
       { class: 'needs-alarm', 'data-need': 'alarm', role: 'alert' },
-      h('p', null, h('b', null, `${name} is running a ManyClaws plugin that matches no signed release (${n.digest.slice(0, 12)}).`), ' This page sends it nothing until you decide.'),
+      h('p', null, h('b', null, `${name} is running a ManyClaws plugin that matches no signed release (${copySays(n)}).`), ' This page sends it nothing until you decide.'),
       h('p', null, n.by === 'fetched' ? 'It is what Claude Code fetched when it was asked to update the plugin: no session has loaded it yet. ' : n.by === 'plugin' ? 'That is the plugin’s own word of itself: there is no agent there to look from outside. ' : '', 'If you did not change it yourself, someone else may have: take back its access, and start afresh with a new key (Account, Browsers) if you think it could have read your sessions.'),
       h('div', { class: 'needs-do' }, h('a', { href: '#/account', class: 'button-link primary', 'data-part': 'alarm-revoke' }, `Take back ${name}’s access`), ' ', button('alarm-keep', 'Keep it blocked', () => ((stateOf(c).keptBlocked = true), renderComputer()), { primary: false })),
       stateOf(c).keptBlocked && h('p', { class: 'muted', 'data-part': 'alarm-kept' }, `Kept blocked: nothing is sent to ${name}, and no session is started on it.`),
-      h('p', null, h('button', { type: 'button', class: 'link', 'data-part': 'alarm-allow', onclick: () => allowPlugin(c, n.digest) }, 'I changed the plugin myself: allow it')),
+      h('p', null, h('button', { type: 'button', class: 'link', 'data-part': 'alarm-allow', onclick: () => allowPlugin(c, n) }, 'I changed the plugin myself: allow it')),
       ...told,
     )
   if (n.kind === 'move')
     return h(
       'div',
       { 'data-need': 'move' },
-      h('p', null, h('b', null, `${name} needs a one-time move to the new way of updating.`), ` Its ${n.what} is ${n.has}, from before ManyClaws kept itself up to date from this page. On ${name}, start Claude Code and paste this:`),
+      h('p', null, h('b', null, `${name} needs a one-time move to the new way of updating.`), ` Its ${n.what} is ${n.has}${n.blocked ? ` (${n.blocked.slice(0, 12)})` : ''}, from before ManyClaws kept itself up to date from this page${n.blocked ? ', and carries no signed release, so this page sends it nothing until it is moved' : ''}. On ${name}, start Claude Code and paste this:`),
       codeBox(moveLine()),
       h('p', null, h('a', { href: UPGRADE_PAGE, 'data-part': 'needs-upgrade' }, 'What the move is')),
     )
@@ -8019,10 +8044,12 @@ function upkeepNode(c, n) {
 }
 
 // A plugin that is no release, allowed on a computer by its digest: signed, with the list of the account's devices,
-// with the root, which this browser's passkey opens for it. Only by the one who changed it: the page says so.
-async function allowPlugin(c, digest) {
+// with the root, which this browser's passkey opens for it. Only by the one who changed it: the page says so. `n`: what
+// is said of it (noReleaseOn), its digest with it
+async function allowPlugin(c, n) {
   if (!app.account || !app.key) return
-  const yes = await ask(`Allow ${digest.slice(0, 12)} on ${c.name}?`, {
+  const digest = n.digest
+  const yes = await ask(`Allow ${copySays(n)} on ${c.name}?`, {
     says: [`Allow this only if you changed the plugin on ${c.name} yourself. Its sessions are shown and asked things again, and its agent starts sessions with it. If it changes again it is asked again.`, 'Your passkey is asked for: what is allowed is signed with your key, with the list of your devices.'],
     yes: `Allow ${digest.slice(0, 12)} on ${c.name}`,
     danger: true,
@@ -8144,7 +8171,9 @@ function versionsPart(c) {
   const release = !runs
     ? null
     : bad
-      ? `It runs a plugin that matches no signed release (${bad.digest.slice(0, 12)}).`
+      ? fromBefore(bad)
+        ? `It runs plugin ${bad.plugin} (${bad.digest.slice(0, 12)}), from before releases were signed: it is moved once, by a guide.`
+        : `It runs a plugin that matches no signed release (${copySays(bad)}).`
       : !runs.as
         ? runs.signed ? `Release ${runs.release}, with files that are not as its list has them: allowed here by you.` : 'It runs a plugin that carries no release signed by the release key: allowed here by you.'
         : `Release ${runs.release} · ${runs.local ? 'from a local copy, ' : ''}${runs.by === 'agent' ? 'verified by its agent' : 'checked by the plugin itself'}${newest && newest.release > (runs.release ?? 0) && newest.digest !== runs.digest ? ` · release ${newest.release} is the newest` : ''}.`
@@ -9601,12 +9630,12 @@ function renderUpgrade() {
           accountPart(
             old.length === 1 ? 'The computer' : 'The computers',
             { id: 'upgrade-computers', 'data-part': 'upgrade' },
-            h('p', null, `The agent on ${these} is from before ManyClaws kept itself up to date:`),
+            h('p', null, `The ${old.every(pluginBefore) ? 'plugin' : old.some(pluginBefore) ? 'agent or plugin' : 'agent'} on ${these} is from before ManyClaws kept itself up to date:`),
             ...old.map((m) =>
               h(
                 'div',
                 { class: 'person', 'data-machine': m.id },
-                h('div', null, h('b', null, machineName(m)), h('div', { class: 'muted' }, [m.refused ? `agent ${versionOf(m.agent) ? m.agent + ', ' : ''}too old for this server to hear` : `agent ${m.agent}`, m.online ? 'connected now' : 'not connected now'].join(' · '))),
+                h('div', null, h('b', null, machineName(m)), h('div', { class: 'muted' }, [m.refused ? `agent ${versionOf(m.agent) ? m.agent + ', ' : ''}too old for this server to hear` : `agent ${m.agent}`, ...(pluginBefore(m) ? [`plugin ${pluginBefore(m)}`] : []), m.online ? 'connected now' : 'not connected now'].join(' · '))),
                 h('a', { href: '#/computer/' + encodeURIComponent(m.id) }, 'Its page'),
               ),
             ),

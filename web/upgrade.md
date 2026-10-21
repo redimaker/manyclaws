@@ -48,7 +48,7 @@ New Claude Code sessions use the new plugin; sessions already open keep the old 
 
 ## 3. Where the computer was set up before 9 October 2026
 
-Its marketplace comes from {{name}}'s server, or its agent is older than 5.1.0 and cannot check what it installs.
+Its marketplace comes from {{name}}'s server, or its agent is older than 5.1.0 and cannot check what it installs. Where the marketplace is {{name}}'s server and the agent is 6.0.0 or later, section 4 is the shorter way.
 
 1. **The plugin**, where its marketplace is not `redimaker/manyclaws`:
 
@@ -72,6 +72,36 @@ Its marketplace comes from {{name}}'s server, or its agent is older than 5.1.0 a
 
 4. **Check:** `node ~/.manyclaws/agent/agent.mjs verify --here`.
 
+## 4. Where only the plugin is from before
+
+Its marketplace is {{name}}'s server, and its agent is 6.0.0 or later: the agent was installed from a signed release and is connected already, and only the plugin was set up before 9 October 2026. The agent is kept, with its token and key, and gives the new plugin the same two: there is no code to type.
+
+1. **The plugin**, from GitHub in place of {{name}}'s server:
+
+   ```
+   claude plugin marketplace remove manyclaws
+   claude plugin marketplace add redimaker/manyclaws
+   claude plugin install manyclaws@manyclaws
+   ```
+
+   The first removes the old plugin with the marketplace it came from, and with them the API token it was given: here that is meant, and step 3 gives the new one the agent's.
+
+2. **The agent**, brought up to the release the new plugin carries (where it is that release already, it stays as it is):
+
+   ```
+   bash <the plugin's folder>/agent/install.sh --update --from <the plugin's folder>
+   ```
+
+   Where the agent is running sessions started from your page, it does nothing and says how many, as in section 2.
+
+3. **The plugin given the agent's API token and key**, shown to nobody:
+
+   ```
+   node ~/.manyclaws/agent/agent.mjs plugin
+   ```
+
+4. **Check:** `node ~/.manyclaws/agent/agent.mjs verify --here` says the agent and the plugin are each as their release lists them. Sessions already open keep the old plugin until they are started again.
+
 ## From a clone of the repository
 
 Where you installed from source: `git fetch && git checkout release-N` in the clone, check the release as [the set-up guide]({{origin}}/setup) has it, then `bash mod/agent/install.sh --update --from mod`.
@@ -79,12 +109,14 @@ Where you installed from source: `git fetch && git checkout release-N` in the cl
 ## For Claude Code, when you are asked to follow this guide
 
 - Say first, in a line, what this is: a one-time move to the new way of keeping ManyClaws up to date, after which the person approves each update on their page, and connects the computer with a code and their passkey, with no passphrase. Then do it.
-- Look first, as step 1 has it, and follow section 2 or section 3, whichever the computer is. Do not read `~/.manyclaws/agent.json`: the token and the key are in it.
+- Look first, as step 1 has it, and follow section 2, 3 or 4, whichever the computer is. Do not read `~/.manyclaws/agent.json`: the token and the key are in it.
 - Section 2: run its commands as they are written. If the installer says the agent is running sessions started from the page, tell the person how many end, and ask whether to end them now; only on a yes, run it again with `--end-sessions`. Otherwise stop there and say that it can be run again once those sessions are done.
 - Section 3: run its commands as they are written, `--end-sessions` with them: the old agent may be stopped while it is running sessions, and nothing of them is lost. `claude plugin marketplace remove manyclaws` deletes the API token and the passphrase the plugin was given: it is run here and nowhere else, and only where the marketplace is not `redimaker/manyclaws`. Do not edit `extraKnownMarketplaces` by hand instead.
+- Section 4: run its commands as they are written, the same `claude plugin marketplace remove manyclaws` with them (it is the other place it is run, for the same reason), and the installer as in section 2. `node ~/.manyclaws/agent/agent.mjs plugin` gives the plugin the agent's API token and key without showing either, and says whether it did.
 - Do not type anything into the plugin's options: there is no passphrase any more, and the plugin takes nothing but the key its code gives it.
 - If the installer says it was run from a session the agent itself started, nothing was changed: stop there and say so. Say that it is run from a terminal on that computer, or from a Claude Code session started there in a terminal, VS Code or the desktop app.
-- In both sections, the last step is the person's: say it first and plainly, once the commands are done. Start a new Claude Code session, type the code the plugin shows there under **Connect a computer** ({{origin}}/app#/connect) where they are signed in to {{name}}, press **Connect** and give their passkey. Where the page has not yet started their account afresh with a new key, they do that first, on their phone or in a browser with passkeys.
+- In section 4 there is nothing for the person to do but start their Claude Code sessions again, unless `agent.mjs plugin` says the plugin was NOT given its API token and key: then the last step is theirs, as below.
+- In sections 2 and 3, the last step is the person's: say it first and plainly, once the commands are done. Start a new Claude Code session, type the code the plugin shows there under **Connect a computer** ({{origin}}/app#/connect) where they are signed in to {{name}}, press **Connect** and give their passkey. Where the page has not yet started their account afresh with a new key, they do that first, on their phone or in a browser with passkeys.
 - Never ask for the API token, the passphrase or the key, and do not use any of them if it is offered in the conversation. Never put a token or a key in a command, in `settings.json`, in an environment variable or in any file.
 - The installer starts a background service of the person's own user. Where your commands run in a sandbox that refuses that, run it outside it.
 - Keep what you say short: what you updated and installed, in a line or two; the code to type and where, as above; what `verify --here` said; and that from now on the computer is kept up to date from their page, where they approve each update.
