@@ -102,6 +102,7 @@ const app = {
   dragging: false, // a favorite is being moved: the list is left as it is until it's let go
   branching: null, // a new session asked for here that takes a while (a handoff being written, a transcript on its way): { id, from, mid, how, at }
   stopping: null, // a Stop that was taken and hasn't shown in the session's state yet: { sid }
+  exiting: null, // an Exit asked for, until its computer answers and the session the agent ran has gone: { sid }
   pressed: 0, // when something in the list was pressed, while it still is
   listStale: false, // the list changed while it couldn't be drawn again
   key: null, // what this device holds of the account's key (keys.js, `held`): what its sessions are opened and sealed with here, and this device's own key, which signs what it asks of the account's computers. Given to it by another of the account's devices, or drawn here from the account's root, kept where no script can read it back, and never on the server; and, on the person's own device, the root itself, wrapped under a passkey
@@ -5505,6 +5506,9 @@ function renderHeader() {
   el('remove').hidden = s.online
   // One the machine's agent is running can be handed back to the machine
   el('release').hidden = !(s.hosted && s.machine && s.online)
+  if (el('release').hidden && app.exiting?.sid === s.id) app.exiting = null
+  el('release').disabled = app.exiting?.sid === s.id
+  el('release').textContent = app.exiting?.sid === s.id ? 'Exiting…' : 'Exit'
   // (a prompt the session is set to ask in its own app alone is not one to answer here: the page says where it is asked)
   const answerable = (s.pendingRequests ?? []).some((r) => r.route !== 'local')
   el('attention').hidden = s.state !== 'attention' || answerable
@@ -5605,11 +5609,29 @@ document.addEventListener('keydown', (ev) => {
   ev.preventDefault()
   stop()
 })
-el('release').addEventListener('click', async () => {
+// Exit: the agent's copy of the session ends. The button says it was asked for until the session has gone (the agent
+// ends it within ten seconds); where it was not done (the computer did not answer, is offline, or refused), why is said
+// under the reply box, as a mode that was not changed is: a press that came to nothing was otherwise nothing to see.
+async function exitSession() {
   const s = app.sessions.get(app.current)
-  if (!s?.machine) return
-  await fetch(`/api/machines/${s.machine}/sessions/${encodeURIComponent(s.id)}/stop`, { method: 'POST' })
-})
+  if (!s?.machine || app.exiting?.sid === s.id) return
+  const mine = (app.exiting = { sid: s.id })
+  app.modeError = null
+  renderHeader()
+  const r = await sendJson(`/api/machines/${s.machine}/sessions/${encodeURIComponent(s.id)}/stop`, {})
+  if (app.exiting !== mine) return
+  const over = () => {
+    if (app.exiting !== mine) return
+    app.exiting = null
+    if (app.current === s.id) renderHeader()
+  }
+  if (r.ok) return void setTimeout(over, 15_000)
+  const showMs = Math.max(10_000, String(r.error).length * 100)
+  app.modeError = { sid: s.id, text: `The session was not exited: ${r.error}.`, until: Date.now() + showMs }
+  setTimeout(() => app.current === s.id && renderHeader(), showMs + 100)
+  over()
+}
+el('release').addEventListener('click', exitSession)
 
 // The permission modes, as VS Code names them and as a terminal says them under its
 // prompt, with what VS Code's menu says of each
