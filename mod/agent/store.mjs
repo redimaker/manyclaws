@@ -6,6 +6,7 @@
 const emitWarning = process.emitWarning
 process.emitWarning = (warning, ...rest) => (String(warning?.message ?? warning).includes('SQLite') ? undefined : emitWarning.call(process, warning, ...rest))
 const { DatabaseSync } = await import('node:sqlite')
+import { promptRows } from './rows.mjs'
 
 export class Store {
   constructor(file) {
@@ -25,6 +26,10 @@ export class Store {
       CREATE INDEX IF NOT EXISTS docs_sid ON docs (sid, ts);
       CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(text, tokenize = 'unicode61 remove_diacritics 2');
     `)
+    // Who a user line came from (origin.kind in the transcript), kept since the prompts its people typed are listed
+    // (recentPrompts): a line indexed before that has none, and is judged by its words alone
+    if (!this.db.prepare('PRAGMA table_info(docs)').all().some((c) => c.name === 'origin')) this.db.exec('ALTER TABLE docs ADD COLUMN origin TEXT')
+    this.db.exec('CREATE INDEX IF NOT EXISTS docs_said ON docs (role, side, ts)')
     this.matched = new Map() // a search's sessions, for the searches that follow it down
     const q = (sql) => this.db.prepare(sql)
     this.sql = {
@@ -36,7 +41,7 @@ export class Store {
       docIds: q('SELECT id FROM docs WHERE file = ?'),
       delDocs: q('DELETE FROM docs WHERE file = ?'),
       delFts: q('DELETE FROM fts WHERE rowid = ?'),
-      addDoc: q('INSERT INTO docs (file, sid, uuid, ts, role, side) VALUES (?, ?, ?, ?, ?, ?)'),
+      addDoc: q('INSERT INTO docs (file, sid, uuid, ts, role, side, origin) VALUES (?, ?, ?, ?, ?, ?, ?)'),
       addFts: q('INSERT INTO fts (rowid, text) VALUES (?, ?)'),
       setSession: q(`INSERT INTO sessions (sid, root, project, path, cwd, title, first_prompt, first_ts, last_ts, prompts, messages, version, branch, model, mode, entrypoint, size)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -90,7 +95,7 @@ export class Store {
 
   addDocs(file, docs) {
     for (const d of docs) {
-      const { lastInsertRowid } = this.sql.addDoc.run(file.id, file.sid, d.uuid, d.ts, d.role, file.side)
+      const { lastInsertRowid } = this.sql.addDoc.run(file.id, file.sid, d.uuid, d.ts, d.role, file.side, d.origin ?? null)
       this.sql.addFts.run(lastInsertRowid, d.text)
     }
   }
@@ -252,6 +257,42 @@ export class Store {
     }
   }
 
+  // ---- The prompts its people typed, in every session here (not a subagent's), the latest first, each with the last
+  // thing Claude said to it: the last it said in its session before the next thing it was told there, whoever by (a
+  // task's word is answered in a turn of its own). For the page's list of prompts, across every computer.
+  // A person's, in Claude Code or on the page (which its plugin hands on): not a task's word, another session's, a
+  // schedule's or the app's own, a slash command, a shell line or a command's output. `chars`: how much of each is said.
+  recentPrompts({ limit = 1000, chars = 300 } = {}) {
+    const want = Math.min(Math.max(1, Number(limit) || 1000), 1000)
+    const cap = Math.min(Math.max(40, Number(chars) || 300), 2000)
+    const cut = (text) => (text.length > cap ? text.slice(0, cap).trimEnd() + '…' : text)
+    const page = this.db.prepare(`SELECT d.sid, d.uuid, d.ts, d.origin, f.text FROM docs d JOIN fts f ON f.rowid = d.id
+      WHERE d.role = 'user' AND d.side = 0 AND d.ts > 0 ORDER BY d.ts DESC, d.id DESC LIMIT ? OFFSET ?`)
+    const prompts = []
+    for (let offset = 0; prompts.length < want; offset += 2000) {
+      const rows = page.all(2000, offset)
+      for (const r of rows) {
+        const text = typedPrompt(r.text, r.origin)
+        if (text && r.uuid) prompts.push({ sid: r.sid, uuid: r.uuid, ts: r.ts, text: cut(text) })
+        if (prompts.length >= want) break
+      }
+      if (rows.length < 2000) break
+    }
+    const told = this.db.prepare(`SELECT MIN(ts) AS ts FROM docs WHERE sid = ? AND side = 0 AND role = 'user' AND ts > ?`)
+    const reply = this.db.prepare(`SELECT d.uuid, d.ts, f.text FROM docs d JOIN fts f ON f.rowid = d.id
+      WHERE d.sid = ? AND d.side = 0 AND d.role = 'assistant' AND d.ts >= ? AND d.ts < ? ORDER BY d.ts DESC, d.id DESC LIMIT 1`)
+    const sessions = {}
+    for (const p of prompts) {
+      const r = reply.get(p.sid, p.ts, told.get(p.sid, p.ts)?.ts ?? Number.MAX_SAFE_INTEGER)
+      if (r) p.reply = { uuid: r.uuid, ts: r.ts, text: cut(r.text) }
+      if (!sessions[p.sid]) {
+        const s = this.session(p.sid) ?? this.remnant(p.sid)
+        sessions[p.sid] = s ? { title: s.title ?? '', cwd: s.cwd ?? '', first_prompt: (s.first_prompt ?? '').slice(0, 200), last_ts: s.last_ts ?? 0 } : {}
+      }
+    }
+    return { prompts, sessions }
+  }
+
   // A session whose own file is gone, as far as its subagents' files tell
   remnant(sid) {
     const files = this.db.prepare('SELECT project, facts FROM files WHERE sid = ? AND side = 1').all(sid)
@@ -281,6 +322,22 @@ export class Store {
   close() {
     this.db.close()
   }
+}
+
+// A user line as a person typed it, or '' where it is not one: by who it came from where the transcript says (a line
+// indexed before that was kept has nothing to go by but its words), then as the chat shows it (promptRows)
+const NOT_TYPED = /engine|task|peer|coordinat|agent|cron|schedul|loop|hook|system|notif/i
+export function typedPrompt(text, origin) {
+  if (origin && NOT_TYPED.test(origin)) return ''
+  const said = promptRows(String(text ?? ''))
+    .filter((r) => r.role === 'user')
+    .map((r) => r.text)
+    .join('\n')
+    // (Claude in Chrome's instructions, which the app puts in front of a prompt typed in VS Code)
+    .replace(/<browser_instruction>[\s\S]*?<\/browser_instruction>\s*/g, '')
+    .trim()
+  // (a slash command, a shell line, and what Claude Code writes where a turn was stopped)
+  return !said || /^(\/[\w:.-]+(\s|$)|! |\[Request interrupted)/.test(said) ? '' : said
 }
 
 // An FTS5 query from what someone typed: each word quoted (so punctuation in it is

@@ -518,6 +518,8 @@ export async function run(config, flags = {}) {
     'search.projects': (args = {}) => ({ ...store.searchProjects(args), indexing: indexer.pending.length }),
     'search.sessions': (args = {}) => store.searchSessions(args),
     'search.hits': (args = {}) => store.searchHits(args),
+    // The prompts its people typed here, the latest first, each with the last reply to it: the page's Prompts (flat)
+    'prompts.recent': (args = {}) => ({ ...store.recentPrompts(args), indexing: indexer.pending.length }),
     // A page of a conversation: the last `limit` lines before `before`, or around one line.
     // `subagent` (a file id from a search hit) reads a subagent's own conversation.
     'session.read': ({ sid, subagent, limit = 200, before, around, max = 8000 } = {}) => {
@@ -761,7 +763,7 @@ export async function run(config, flags = {}) {
       ...machine,
       agent: VERSION,
       node: process.version,
-      capabilities: ['sessions', 'search', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
+      capabilities: ['sessions', 'search', 'prompts', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
       sealed: 3,
       spawn: host.canStart(),
       card: seal(about, sealKey),
