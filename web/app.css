@@ -771,6 +771,21 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .hit-role { color: var(--text); font-weight: 600; margin-right: 6px; }
 .hit mark, .msg.found { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 2px; }
 .hit-more { padding: 0 12px 4px; font-size: .85em; color: var(--muted); }
+/* Search in the open session: a box across the top of its chat, under its head, and what it finds in a list that opens
+   over the chat, each hit as the list's search has them, the latest first */
+.chat-find { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-bottom: 1px solid var(--border); }
+.find-q { flex: 1; min-width: 0; border: 1px solid var(--input-border); border-radius: 4px; background: var(--input-bg); padding: 3px 8px; font: inherit; }
+.find-q:focus { outline: 1px solid var(--button-bg); outline-offset: -1px; }
+.find-says { flex: none; font-size: .85em; color: var(--muted); white-space: nowrap; }
+.find-hits { position: absolute; z-index: 6; top: calc(100% + 4px); left: 16px; right: 16px; max-height: min(60dvh, 460px); overflow-y: auto; overscroll-behavior: contain; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--menu-bg); box-shadow: 0 8px 24px #00000040; }
+.find-hits[hidden] { display: none; }
+.find-hit { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; width: 100%; margin: 0; padding: 5px 8px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: .9em; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.find-hit:hover, .find-hit:focus-visible { background: var(--hover); outline: none; }
+.find-hit mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 2px; }
+.find-when { color: var(--muted); }
+.find-note { padding: 5px 8px; font-size: .85em; color: var(--muted); }
+[data-view="terminal"] .chat-find { padding: .3em var(--cell-w); }
+[data-view="terminal"] .find-q { border-radius: 0; }
 /* Subagents a session has running: a mark in its row, and a strip above the reply box */
 .agents-mark { color: var(--working); white-space: nowrap; }
 /* What started a running session, on its tile: an icon, small, before the time on the tile's first line, in the time's

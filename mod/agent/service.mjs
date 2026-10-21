@@ -20,7 +20,7 @@ import { historyRows } from './rows.mjs'
 import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, FILE_MAX } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '6.2.1'
+export const VERSION = '6.2.2'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
@@ -518,6 +518,8 @@ export async function run(config, flags = {}) {
     'search.projects': (args = {}) => ({ ...store.searchProjects(args), indexing: indexer.pending.length }),
     'search.sessions': (args = {}) => store.searchSessions(args),
     'search.hits': (args = {}) => store.searchHits(args),
+    // The prompts its people typed here, the latest first, each with the last reply to it: the page's Prompts (flat)
+    'prompts.recent': (args = {}) => ({ ...store.recentPrompts(args), indexing: indexer.pending.length }),
     // A page of a conversation: the last `limit` lines before `before`, or around one line.
     // `subagent` (a file id from a search hit) reads a subagent's own conversation.
     'session.read': ({ sid, subagent, limit = 200, before, around, max = 8000 } = {}) => {
@@ -761,7 +763,7 @@ export async function run(config, flags = {}) {
       ...machine,
       agent: VERSION,
       node: process.version,
-      capabilities: ['sessions', 'search', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
+      capabilities: ['sessions', 'search', 'prompts', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
       sealed: 3,
       spawn: host.canStart(),
       card: seal(about, sealKey),

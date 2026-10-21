@@ -1439,6 +1439,7 @@ function connect() {
     autoApprove()
     haikuWatch()
     if (app.sortBy === 'prompt') readPrompts()
+    if (app.sortBy === 'prompts') loadPrompts()
     snapshotCame()
     seeToUpgrade()
     app.favorites = snapshot.favorites ?? []
@@ -1491,6 +1492,8 @@ function connect() {
     const { sid, message } = JSON.parse(ev.data)
     if (!message) return
     if (personRow(message) && notePrompt(sid, message) && app.sortBy === 'prompt') renderListSoon()
+    // (a prompt, or a reply to one: the list of them read again, a moment after, its computer having written it)
+    if (app.sortBy === 'prompts' && (message.role === 'user' || message.role === 'assistant')) promptsSoon()
     if (sid === app.current) {
       addMessage(message)
     } else {
@@ -1867,6 +1870,7 @@ function route() {
 
 function closeSession() {
   clearInterval(pastTimer)
+  findOpened(null)
   leaveView()
   app.current = null
   app.past = null
@@ -1878,6 +1882,7 @@ function closeSession() {
 
 async function openSession(id) {
   clearInterval(pastTimer)
+  findOpened(id)
   if (app.past || app.current !== id || !el('messages').contains(working)) {
     // The chat that was showing is put away as it is, and this one put back if it was kept
     leaveView()
@@ -2130,7 +2135,8 @@ function renderList() {
     for (const f of app.favorites) if (!first.has(f.id)) nodes.push(favoriteRow(f))
   }
   if (app.sortBy !== 'standard') nodes.length = 0
-  if (app.sortBy !== 'standard') nodes.push(...flatNodes(due))
+  if (app.sortBy === 'prompts') nodes.push(...promptNodes())
+  else if (app.sortBy !== 'standard') nodes.push(...flatNodes(due))
   else if (visible.length) {
     nodes.push(h('div', { class: 'group-head', 'data-key': 'active' }, h('span', null, app.showEnded ? 'Active and inactive' : 'Active'), optionsDone()))
     for (const s of visible.sort(byStanding)) nodes.push(renderRow(s))
@@ -2182,6 +2188,95 @@ function flatNodes(due) {
   return nodes
 }
 
+// ---- Prompts (flat), an order of the list (SORTS): not sessions but the prompts typed to them, each a row of its own,
+// on every computer whose agent keeps them (prompts.recent: a person's, in Claude Code or on a page, not a task's word or
+// another session's), put together, the latest first, the last PROMPTS_MAX of them. Each with the last thing Claude said
+// to it, under the name of its session and where it is; a press opens the session there, as a search hit does. Read
+// when it is chosen and when the page is, and again a moment after a prompt or a reply is heard of.
+const PROMPTS_MAX = 1000
+const PROMPT_CHARS = 300 // as much of each as a tile shows, at three lines
+const PROMPTS_AGAIN_MS = 4000
+async function loadPrompts() {
+  const asked = Date.now()
+  app.prompts = { ...(app.prompts ?? { items: [] }), asked, loading: true }
+  const sealed = await sealFor({ limit: PROMPTS_MAX, chars: PROMPT_CHARS })
+  if (!sealed) return void ((app.prompts = { items: [], locked: true, asked }), app.sortBy === 'prompts' && renderListSoon())
+  const r = await fetch('/api/prompts?c=' + encodeURIComponent(sealed)).catch(() => null)
+  if (app.prompts?.asked !== asked) return
+  if (!r?.ok) return void ((app.prompts = { ...app.prompts, loading: false, failed: true }), app.sortBy === 'prompts' && renderListSoon())
+  const data = await r.json()
+  const items = []
+  let indexing = 0
+  for (const x of data.results ?? []) {
+    const got = x.r && typeof x.r === 'object' ? x.r : null
+    indexing += got?.indexing ?? 0
+    for (const p of Array.isArray(got?.prompts) ? got.prompts : []) {
+      // (a search this page asked Haiku for is no prompt anyone typed)
+      if (typeof p?.uuid !== 'string' || typeof p.text !== 'string' || p.text.startsWith(HAIKU_SAYS)) continue
+      items.push({ ...p, mid: x.machine?.id, machine: x.machine?.name ?? '', session: got.sessions?.[p.sid] ?? {} })
+    }
+  }
+  items.sort((a, b) => b.ts - a.ts || (a.uuid < b.uuid ? -1 : 1))
+  app.prompts = { items: items.slice(0, PROMPTS_MAX), asked, loaded: Date.now(), indexing, unreachable: data.unreachable ?? [] }
+  if (app.sortBy === 'prompts') renderList()
+}
+// (once in a few seconds at the most: the end of a burst of them is read too. And once more a little after, for a
+// computer whose agent had not read what was written there yet)
+function promptsSoon(again = true) {
+  if (app.promptsTimer) return
+  const since = Date.now() - (app.prompts?.asked ?? 0)
+  app.promptsTimer = setTimeout(async () => {
+    app.promptsTimer = 0
+    if (app.sortBy !== 'prompts') return
+    await loadPrompts()
+    if (again) setTimeout(() => promptsSoon(false), PROMPTS_AGAIN_MS)
+  }, Math.max(PROMPTS_AGAIN_MS - since, 1500))
+}
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && app.sortBy === 'prompts' && promptsSoon())
+
+function promptNodes() {
+  const got = app.prompts ?? { items: [], loading: true }
+  const nodes = got.items.map(promptRow)
+  const say = (key, text) => nodes.push(h('div', { class: 'list-empty', 'data-key': 'prompts:' + key }, text))
+  if (got.locked) say('locked', NO_KEY_MACHINE)
+  else if (!got.items.length) say('none', got.loading ? 'Reading the prompts on your computers…' : got.failed ? 'The prompts could not be read: the server did not answer.' : 'No prompts yet.')
+  // What is not in it, and why: a computer that did not answer, one that is not online, one whose agent is from before
+  // it kept prompts, and one with no agent at all
+  const machines = [...app.machines.values()]
+  const older = machines.filter((m) => m.online && !(m.capabilities ?? []).includes('prompts')).map(machineName)
+  const offline = machines.filter((m) => !m.online).map(machineName)
+  const loose = looseComputers().map((c) => c.name)
+  if (got.unreachable?.length) say('unreachable', 'Not read (it did not answer): ' + got.unreachable.join(', '))
+  if (offline.length) say('offline', 'Not read (offline): ' + offline.join(', '))
+  if (older.length) say('older', 'Not read (its ManyClaws agent is from before it kept prompts: update it from its page): ' + older.join(', '))
+  if (loose.length) say('loose', 'Not read (no ManyClaws agent): ' + loose.join(', '))
+  if (got.indexing) say('indexing', `Still indexing ${got.indexing} files; more may turn up.`)
+  return nodes
+}
+// One prompt: the name of its session and when it was typed, where that is (as this device's tiles say it), what was
+// typed, marked as a prompt is, and the last thing Claude said to it
+function promptRow(x) {
+  const live = app.sessions.get(x.sid)
+  const name = markOf(x.sid)?.name || live?.title || x.session.title || (x.session.first_prompt ?? '').slice(0, 80) || folderOf(x.session.cwd) || x.sid.slice(0, 8)
+  const m = app.machines.get(x.mid)
+  const sub = app.tile.where ? dotted(folderOf(x.session.cwd), whereLabel(m ? machineName(m) : x.machine, x.mid)) : []
+  const here = app.past?.sid === x.sid && app.past.at === x.uuid
+  const state = live && !live.ended && live.online ? live.state : 'past'
+  return h(
+    'a',
+    { class: 'row prompt-row' + (here ? ' active' : ''), 'data-key': `prompt:${x.mid}/${x.sid}/${x.uuid}`, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}?at=${encodeURIComponent(x.uuid)}` },
+    h('span', { class: 'dot ' + state, title: STATE_LABEL[state] ?? 'Not running' }),
+    h(
+      'div',
+      { class: 'row-main' },
+      h('div', { class: 'row-top' }, h('span', { class: 'row-title' }, name), app.tile.time && h('span', { class: 'row-time', title: 'You typed it ' + whenText(x.ts) }, ago(x.ts))),
+      sub.length && h('div', { class: 'row-sub' }, sub),
+      h('div', { class: 'row-prompt' }, h('span', { class: 'row-prompt-mark', 'aria-hidden': 'true' }, '❯'), h('span', { class: 'row-said' }, x.text)),
+      h('div', { class: 'row-preview' }, x.reply?.text ?? ''),
+    ),
+  )
+}
+
 // Updates arrive in bursts, and from sessions at work several times a second: the list
 // is drawn once for a burst, and a few times a second at the most
 function renderListSoon() {
@@ -2211,6 +2306,8 @@ const SORTS = {
   standard: { name: 'Standard', says: 'Favorites, then needs you, at work and the rest, then each computer' },
   prompt: { name: 'Prompt (desc)', says: 'Everything, the one you last typed to first (not what another session or a task said to it)', at: promptAtOf },
   action: { name: 'Last action (desc)', says: 'Everything, the one that last said or did something first', at: ({ s }) => s.lastActivity ?? 0 },
+  // (not sessions at all: the prompts typed to them, each a row of its own, as promptNodes has them)
+  prompts: { name: 'Prompts (flat)', says: 'Every prompt you typed, on every computer, the latest first, each with the last reply to it (the last 1000)' },
 }
 
 // Where a session runs: the name its mod was given, else its machine's, else the host
@@ -3381,6 +3478,7 @@ function setSort(by) {
   } catch {}
   markSort()
   if (app.sortBy === 'prompt') readPrompts()
+  if (app.sortBy === 'prompts') loadPrompts()
   renderList()
 }
 function markSort() {
@@ -4825,6 +4923,7 @@ const FOLLOW_ROWS = 60 // lines read again to see what a running session has wri
 
 async function openPast(mid, sid, { at = '', sub = '' } = {}) {
   clearInterval(pastTimer)
+  findOpened(sid)
   leaveView()
   app.current = null
   document.body.classList.add('chat-open')
@@ -4879,6 +4978,107 @@ function showFound(at) {
   hit.scrollIntoView({ block: 'center' })
   return true
 }
+
+// ---- Search in the open session (the bar over its chat): the whole of its transcript as its computer's agent finds it
+// (search.hits, sealed as every search is), the latest first, its subagents' too; a hit goes to its row where the page has
+// it, and otherwise opens the chat there, as one in the list's search does. Where its computer has no agent to ask, or
+// it does not answer, what this page has of the chat is searched. Kept while the same session is open.
+const FIND_HITS = 50
+let findTimer = 0
+function findOpened(sid) {
+  if (app.find?.sid === sid) return
+  app.find = { sid, q: '', hits: [] }
+  el('find-q').value = ''
+  showFind()
+}
+// The session open, and its computer where its agent can be asked
+function findTarget() {
+  if (app.past) return { mid: app.past.mid, sid: app.past.sid, ask: true }
+  const s = app.sessions.get(app.current)
+  if (!s) return null
+  const m = app.machines.get(s.machine)
+  return { mid: s.machine, sid: s.id, ask: !!m?.online && (m.capabilities ?? []).includes('search') }
+}
+async function runFind() {
+  clearTimeout(findTimer)
+  const q = el('find-q').value.trim()
+  const t = findTarget()
+  const asking = (app.find = { sid: t?.sid ?? null, q, hits: [], open: true })
+  if (!q || !t) return showFind()
+  if (t.ask && app.key) {
+    el('find-says').textContent = 'Searching…'
+    const r = await fetch(`/api/machines/${t.mid}/sessions/${encodeURIComponent(t.sid)}/search?` + (await askOf({ q, sid: t.sid, limit: FIND_HITS, offset: 0, subagents: true }))).catch(() => null)
+    if (app.find !== asking) return
+    if (r?.ok) {
+      const data = await r.json()
+      Object.assign(asking, { t, hits: Array.isArray(data.hits) ? data.hits : [], total: data.total ?? 0 })
+      return showFind()
+    }
+  }
+  // (what this page has of it: each row with the words, the latest first)
+  const words = q.toLowerCase()
+  const hits = []
+  for (const node of [...el('messages').querySelectorAll('.msg')].reverse()) {
+    const text = node.textContent.replace(/\s+/g, ' ').trim()
+    const at = text.toLowerCase().indexOf(words)
+    if (at < 0) continue
+    const from = Math.max(0, at - 60)
+    const snippet = (from ? '…' : '') + text.slice(from, at) + '\u0001' + text.slice(at, at + q.length) + '\u0002' + text.slice(at + q.length, at + q.length + 120)
+    hits.push({ node, snippet, role: node.classList.contains('user') ? 'user' : node.classList.contains('assistant') ? 'assistant' : node.classList.contains('tool') ? 'tool' : '' })
+    if (hits.length >= FIND_HITS) break
+  }
+  Object.assign(asking, { t, hits, total: hits.length, here: t.ask ? 'Its computer did not answer: in what this page has of the chat.' : 'In what this page has of the chat: its computer has no ManyClaws agent to search the whole of it.' })
+  showFind()
+}
+function showFind() {
+  const f = app.find ?? { q: '', hits: [] }
+  const box = el('find-hits')
+  if (!f.q) {
+    el('find-says').textContent = ''
+    box.hidden = true
+    return box.replaceChildren()
+  }
+  const n = f.hits.length
+  el('find-says').textContent = !n ? 'No match' : f.total > n ? `The latest ${n} of ${f.total}` : `${n} match${n === 1 ? '' : 'es'}`
+  fill(
+    box,
+    f.here && h('div', { class: 'find-note' }, f.here),
+    ...f.hits.map((hit) =>
+      h('button', { type: 'button', class: 'find-hit', onclick: () => goFind(hit) }, h('span', { class: 'hit-role' }, HIT_ROLES[hit.role] ?? 'Said', hit.subagent ? ' (subagent)' : ''), ...marked(hit.snippet), hit.ts ? h('span', { class: 'find-when' }, ' · ' + ago(hit.ts)) : null),
+    ),
+  )
+  box.hidden = !f.open || !f.hits.length
+}
+function goFind(hit) {
+  const f = app.find
+  f.open = false
+  showFind()
+  if (hit.node) {
+    for (const node of el('messages').querySelectorAll('.msg.found')) node.classList.remove('found')
+    hit.node.classList.add('found')
+    return hit.node.scrollIntoView({ block: 'center' })
+  }
+  // (where the page has that row already, it is gone to; otherwise the chat is opened there, from its computer)
+  if (!hit.subagent && !(app.past?.sub) && showFound(hit.uuid)) return
+  location.hash = `#/m/${f.t.mid}/${encodeURIComponent(f.t.sid)}?at=${encodeURIComponent(hit.uuid)}` + (hit.subagent ? '&sub=' + hit.subagent : '')
+}
+el('find-q').addEventListener('input', () => {
+  clearTimeout(findTimer)
+  findTimer = setTimeout(runFind, 300)
+})
+el('find-q').addEventListener('keydown', (ev) => {
+  if (ev.key === 'Enter') return void (ev.preventDefault(), runFind())
+  if (ev.key !== 'Escape') return
+  // (not as a search box empties itself: the hits go first, and then what was typed)
+  ev.preventDefault()
+  if (app.find?.open && app.find.hits.length) return void ((app.find.open = false), showFind())
+  el('find-q').value = ''
+  runFind()
+})
+// (the hits put away come back as the box is gone to again: by a press on it too, where it had kept the focus)
+for (const ev of ['focus', 'click']) el('find-q').addEventListener(ev, () => app.find?.hits.length && !app.find.open && ((app.find.open = true), showFind()))
+// (a press anywhere else puts the hits away; what was searched for stays in the box)
+document.addEventListener('pointerdown', (ev) => app.find?.open && !ev.target.closest?.('#find') && ((app.find.open = false), showFind()))
 
 async function pastPage({ around = '', before } = {}) {
   const p = app.past
@@ -6204,6 +6404,8 @@ function rowNodes(list, { older = false } = {}) {
     if (m.role === 'user' || m.role === 'assistant') settleTools()
     const node = renderMessage(m)
     node.dataset.seq = m.seq
+    // (where it is in the transcript, as the rows read from its computer have it: a search hit in it is gone to there)
+    if (m.uuid) node.dataset.uuid = m.uuid
     if (m.role === 'user') node._prompt = m.text
     nodes.push(node)
   }

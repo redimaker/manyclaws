@@ -149,13 +149,15 @@ export function searchable(row, { results = true } = {}) {
   if ((row.type !== 'user' && row.type !== 'assistant') || !row.message || row.isMeta || row.isCompactSummary) return []
   const ts = row.timestamp ? Date.parse(row.timestamp) : 0
   const docs = []
-  const add = (role, text) => {
+  const add = (role, text, more = {}) => {
     const clean = text.trim()
-    if (clean) docs.push({ uuid: row.uuid ?? '', ts, role, text: clean })
+    if (clean) docs.push({ uuid: row.uuid ?? '', ts, role, text: clean, ...more })
   }
   const content = row.message.content
   if (row.type === 'user') {
-    if (!hasToolResult(content)) add('user', unwrap(blocksText(content)).slice(0, MAX_TEXT))
+    // (with who it came from, as Claude Code writes it: a person, in Claude Code or on the page through the plugin, or a
+    // task's word, another session's, a schedule's; for the prompts its people typed, store.recentPrompts)
+    if (!hasToolResult(content)) add('user', unwrap(blocksText(content)).slice(0, MAX_TEXT), { origin: typeof row.origin?.kind === 'string' ? row.origin.kind : '' })
     else if (results) for (const b of content) if (b?.type === 'tool_result') add('result', blocksText(b.content).slice(0, MAX_RESULT))
   } else if (Array.isArray(content)) {
     for (const b of content) {
