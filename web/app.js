@@ -8242,7 +8242,8 @@ function upkeepNode(c, n) {
       'div',
       { 'data-need': 'update' },
       lead,
-      h('div', { class: 'needs-do' }, ...(hosted ? [button('update-when-done', 'Update when they’re done', () => upgradeComputer(c, { now: false }), { primary: false }), ' ', button('update-now', 'Update now', () => upgradeComputer(c, { now: true }))] : [button('update-go', `Update ${name}`, () => upgradeComputer(c, { now: false }))])),
+      hosted ? hostedSays(c) : null,
+      h('div', { class: 'needs-do' }, ...(hosted ? [button('update-when-done', whenDone(hosted), () => upgradeComputer(c, { now: false }), { primary: false }), ' ', button('update-now', 'Update now', () => upgradeComputer(c, { now: true }))] : [button('update-go', `Update ${name}`, () => upgradeComputer(c, { now: false }))])),
       ...told,
     )
   }
@@ -8265,6 +8266,28 @@ function upkeepNode(c, n) {
     )
   }
   return null
+}
+
+// What an update's "when it's done" waits for, said on its card: the sessions the computer's agent runs that were
+// started from this page, by name, which the update ends as the agent starts again. One is done once it is exited, or
+// once the agent closes it for sitting idle (idleMinutes, 30 unless set otherwise there: the page is not told). The card
+// said none of it, and only its buttons spoke of "they".
+const whenDone = (hosted) => (hosted === 1 ? 'Update when it’s done' : 'Update when they’re done')
+function hostedSays(c) {
+  const runs = c.m.hosted
+  const one = runs.length === 1
+  const named = runs.map((x) => {
+    const s = app.sessions.get(x.sid)
+    const label = (s && nameOf(s)) || folderOf(x.cwd) || 'one with no name yet'
+    return s ? h('a', { href: '#/s/' + encodeURIComponent(x.sid) }, label) : label
+  })
+  return h(
+    'p',
+    { 'data-part': 'update-hosted' },
+    `The agent there is running ${one ? 'a session' : count(runs.length, 'session')} started from this page: `,
+    ...named.flatMap((n, i) => (i ? [', ', n] : [n])),
+    `. Updating starts the agent again, which ends ${one ? 'it' : 'them'}, and a reply here resumes ${one ? 'it' : 'each'}. Update now ends ${one ? 'it' : 'them'} now. ${whenDone(runs.length)} waits until ${one ? 'it has' : 'they have'} ended: a session ends when you press Exit over its chat, or after it has sat idle for 30 minutes.`,
+  )
 }
 
 // A plugin that is no release, allowed on a computer by its digest: signed, with the list of the account's devices,
@@ -8296,9 +8319,9 @@ async function upgradeComputer(c, { now, release }) {
   const hosted = c.m?.hosted?.length ?? 0
   const via = c.m ? null : c.live.find((s) => s.attended && s.online)
   const says = c.m
-    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions you started there in a terminal, VS Code or the desktop app keep running, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The session' : count(hosted, 'session')} started from this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : ', once they are done'}; a reply resumes ${hosted === 1 ? 'it' : 'them'}.` : ''}`
+    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions you started there in a terminal, VS Code or the desktop app keep running, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The session' : count(hosted, 'session')} started from this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : `, once ${hosted === 1 ? 'it is' : 'they are'} done`}; a reply resumes ${hosted === 1 ? 'it' : 'them'}.` : ''}`
     : `Updates the ManyClaws plugin on ${name}, through the Claude Code session in ${via?.project ?? 'its folder'}. Nothing running ends: each session uses the new plugin when it is next started.`
-  if (!(await ask(`Update ${name}?`, { says, yes: now ? 'Update now' : hosted ? 'Update when they’re done' : `Update ${name}` }))) return
+  if (!(await ask(`Update ${name}?`, { says, yes: now ? 'Update now' : hosted ? whenDone(hosted) : `Update ${name}` }))) return
   stateOf(c).upkeep = { kind: release ? 'upgrade-waiting' : 'update', busy: true, done: 'Updating…' }
   renderComputer()
   const order = c.m ? await orderFor(c.id, 'upgrade', { release: release ?? newest.release, digest: newest.digest, now }) : await orderFor(via.id, 'call', { method: 'manyclaws.update', args: {} })
