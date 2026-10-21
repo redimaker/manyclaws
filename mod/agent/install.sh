@@ -391,7 +391,9 @@ if [ "$os" = windows ]; then
   # A task of the user's own, in their own session (so that the sessions it starts run as them, with what they have),
   # started as they sign in and now, and started again a minute after it stops of itself, with no window of its
   # own: conhost --headless keeps the console the agent runs in off the screen, and cmd puts what it says in its log
-  # (Task Scheduler keeps nothing of it). No administrator is asked for: the task is the user's and runs as them.
+  # (Task Scheduler keeps nothing of it). No administrator is asked for: the task is the user's and runs as them. Its
+  # priority is said, normal (4): a task that does not say runs below normal, and so does every process it starts, the
+  # sessions from the page and whatever they build among them.
   who="$(win "$(cygpath -W)/System32/whoami.exe" | tr -d '\r')"
   esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g'; }
   # What the task runs is a file of its own, agent-run.cmd: conhost takes what follows it apart and puts it together
@@ -423,6 +425,7 @@ if [ "$os" = windows ]; then
     <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>4</Priority>
     <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
     <StartWhenAvailable>true</StartWhenAvailable>
     <Hidden>true</Hidden>
@@ -439,6 +442,9 @@ EOF
   win schtasks.exe /create /tn "$TASK" /xml "$(native "$xml")" /f >/dev/null || { echo "Task Scheduler would not take the agent's task: nothing starts it. Its XML: $xml" >&2; exit 1; }
   win schtasks.exe /run /tn "$TASK" >/dev/null || { echo "Task Scheduler would not start the agent's task. Start it with: schtasks /run /tn \"$TASK\"" >&2; exit 1; }
 elif [ "$os" = mac ]; then
+  # Interactive, as an app is: every process the agent starts has its priority, the sessions from the page and whatever
+  # they build among them, and those are the person's own work, asked for. Background held all of it to the lowest
+  # priority (4) and throttled its disk, as a Mac does what nobody asked for.
   mkdir -p "$(dirname "$PLIST")"
   cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -449,7 +455,7 @@ elif [ "$os" = mac ]; then
   <key>EnvironmentVariables</key><dict><key>MANYCLAWS_HOME</key><string>$HOME_DIR</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>ProcessType</key><string>Background</string>
+  <key>ProcessType</key><string>Interactive</string>
   <key>StandardOutPath</key><string>$HOME_DIR/agent.log</string>
   <key>StandardErrorPath</key><string>$HOME_DIR/agent.log</string>
 </dict></plist>
