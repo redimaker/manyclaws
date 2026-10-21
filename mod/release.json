@@ -1,6 +1,6 @@
 {
-  "release": 87,
-  "made": "2026-10-20",
+  "release": 88,
+  "made": "2026-10-21",
   "plugin": "6.2.0",
   "agent": "6.2.0",
   "files": {
@@ -28,7 +28,7 @@
     "mod/tests/lib.test.ts": "10b3510b322536376cdc0f86a75b2a0f51098d1ab2f8addd521901666964b42a",
     "mod/tests/mod.test.ts": "67c2cae4b921008dc4d6d3cd3949b13abee04f665919959bf0d9551469787897",
     "web/app.css": "c1fb106f70afd9a8c49cc323d84a5b51ba84df95b7522c5a795da2e54edc12a0",
-    "web/app.js": "08d29629b0fc258a5d2043bc97e775bf3cb5956a9fb7b4a6ef650e2e1cf951ca",
+    "web/app.js": "8b7072707fb427c25549a6ebf5d8be93c887db51c876fe460f0bed7f8507ba0d",
     "web/home.html": "b3cd273f1636501aa2a8cc61c44bd63cab07819b570e7de99876cf8e551042a1",
     "web/icons/apple-touch-icon.png": "112c3e38c33ebbc48af0e34e32e611a3c5764543883176201f434d2ffae97044",
     "web/icons/badge-96.png": "d2144540484405c14a48d6456bd030b9f8a0d685ea2595728bf8709409b2a9f0",
@@ -36,7 +36,7 @@
     "web/icons/icon-512.png": "68210fa4a61d9536b2f840ac4841a569f1972c86e412c383794ee3aa54e38135",
     "web/icons/icon-maskable-512.png": "6d67517211466100180fb453856ce78e65512dda3e614b02537aa83c5fefe77a",
     "web/icons/tab-64.png": "af273af0b387c9db6c071c1210afcf003e1ce641428a5c3a34d3e92202f43761",
-    "web/index.html": "fcb9c5994a11d1d08531b2bb97e16fcc9eb5d51cbac01f38da457fd6fdf00480",
+    "web/index.html": "5449da08b780fb06f7b92f2149d4b9039aa2696b1d61f0fd102a87ce7ea97137",
     "web/keys.js": "2298da2f6965ef8000f9c473c0969b245c2e2582093ae367c92a8655bb8ea3fb",
     "web/legal.html": "a39406028c9e30ff12b0d58400acf27578cf4315e212625eb5c48efec5916808",
     "web/manifest.webmanifest": "2beffc6e8cb380634e3d25072b23fdfaf4794b559c2ba519d3427a14cd321c3a",
@@ -78,6 +78,6 @@
     "web/site/site.js": "cfde4e232c316cb66cfe876674caff9e9518f42b0f604a657942b55e0f61d4be",
     "web/site/theme.js": "50514b3119d5b9141799ce338f09d20f66e5dadd588b5dc4c597b389f0bd6cac",
     "web/sw.js": "dcd7727fd016d5120e8993755833b3e214822933f2a0e81794997bf46f26dfbb",
-    "web/upgrade.md": "f7fd62999425066fbb1e418a8483885977a7012a331d9ba08b6082050cdd7aec"
+    "web/upgrade.md": "f1425c2be05f7f8b7c7373795330df5afafe32be9febe1f78550896169f7eacf"
   }
 }
