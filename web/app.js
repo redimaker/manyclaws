@@ -2252,9 +2252,12 @@ async function loadPrompts() {
   if (!r?.ok) return void ((app.prompts = { ...app.prompts, loading: false, failed: true }), app.sortBy === 'prompts' && renderListSoon())
   const data = await r.json()
   const items = []
+  const missed = []
   let indexing = 0
   for (const x of data.results ?? []) {
     const got = x.r && typeof x.r === 'object' ? x.r : null
+    // (one that answered with nothing this page can open, or with nothing at all: said, not taken for one with none)
+    if (!got || !Array.isArray(got.prompts)) missed.push(x.machine?.name ?? 'a computer')
     indexing += got?.indexing ?? 0
     for (const p of Array.isArray(got?.prompts) ? got.prompts : []) {
       // (a search this page asked Haiku for is no prompt anyone typed)
@@ -2263,7 +2266,7 @@ async function loadPrompts() {
     }
   }
   items.sort((a, b) => b.ts - a.ts || (a.uuid < b.uuid ? -1 : 1))
-  app.prompts = { items: items.slice(0, PROMPTS_MAX), asked, loaded: Date.now(), indexing, unreachable: data.unreachable ?? [] }
+  app.prompts = { items: items.slice(0, PROMPTS_MAX), asked, loaded: Date.now(), indexing, unreachable: data.unreachable ?? [], missed }
   if (app.sortBy === 'prompts') renderList()
 }
 // (once in a few seconds at the most: the end of a burst of them is read too. And once more a little after, for a
@@ -2293,6 +2296,7 @@ function promptNodes() {
   const offline = machines.filter((m) => !m.online).map(machineName)
   const loose = looseComputers().map((c) => c.name)
   if (got.unreachable?.length) say('unreachable', 'Not read (it did not answer): ' + got.unreachable.join(', '))
+  if (got.missed?.length) say('missed', 'Not read (what it answered did not come through): ' + got.missed.join(', '))
   if (offline.length) say('offline', 'Not read (offline): ' + offline.join(', '))
   if (older.length) say('older', 'Not read (its ManyClaws agent is from before it kept prompts: update it from its page): ' + older.join(', '))
   if (loose.length) say('loose', 'Not read (no ManyClaws agent): ' + loose.join(', '))
