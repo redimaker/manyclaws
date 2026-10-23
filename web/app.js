@@ -1556,10 +1556,7 @@ function connect() {
     lookAgain()
     seeToUpgrade()
     // Its sessions are read again when it comes online, and when what it runs changes
-    if (m.online && Date.now() - (app.catalog.get(m.id)?.at ?? 0) > 3000) {
-      loadCatalog(m.id)
-      if (app.pastBy === 'project') loadProjects(m.id)
-    }
+    if (m.online) catalogSoon(m.id)
     renderListSoon()
     if (el('ns-box').open) drawNewDevices()
     if (app.computer?.mid === m.id) renderComputer()
@@ -4173,6 +4170,33 @@ function looseNodes(c) {
 // A machine's past sessions, newest first; `more` adds the next page
 // What is said under a computer whose answer this browser's key does not open
 const OTHER_KEY = 'This computer answered with something this browser cannot open: it has another key than this browser’s. Connect it again, with the code its plugin shows.'
+// A machine's sessions are read again as what it runs changes: once in three seconds at the most, and what it says
+// meanwhile is read once those are up, so that the last of it is not lost (a session its agent starts is said as it
+// starts, before its transcript has anything in it, and again a moment after: dropped, that second word left the list
+// without it). And one its agent runs that the list does not have yet, its transcript not read there yet, is asked for
+// again a little after, a few times.
+const CATALOG_AGAIN_MS = 3000
+const catalogTimers = new Map() // machine id -> the reading waited for
+const catalogMissed = new Map() // "machine id/session id" -> how many times it was asked for again
+function catalogSoon(mid) {
+  if (catalogTimers.has(mid)) return
+  const read = () => {
+    catalogTimers.delete(mid)
+    if (!app.machines.get(mid)?.online) return
+    loadCatalog(mid)
+    if (app.pastBy === 'project') loadProjects(mid)
+  }
+  const wait = CATALOG_AGAIN_MS - (Date.now() - (app.catalog.get(mid)?.at ?? 0))
+  if (wait <= 0) return read()
+  catalogTimers.set(mid, setTimeout(read, wait))
+}
+function catalogMissing(mid) {
+  const listed = new Set((app.catalog.get(mid)?.sessions ?? []).map((x) => x.id))
+  const again = (app.machines.get(mid)?.hosted ?? []).map((x) => x.sid).filter((sid) => !listed.has(sid) && (catalogMissed.get(mid + '/' + sid) ?? 0) < 5)
+  for (const sid of again) catalogMissed.set(mid + '/' + sid, (catalogMissed.get(mid + '/' + sid) ?? 0) + 1)
+  if (again.length) catalogSoon(mid)
+}
+
 async function loadCatalog(mid, more = false) {
   // (a machine reads only what was sealed for it: where this device has no key, there is nothing to ask it with)
   if (!app.key) return void (app.catalog.set(mid, { sessions: [], more: false, loaded: false, failed: false, locked: true, at: Date.now() }), renderList())
@@ -4202,6 +4226,8 @@ async function loadCatalog(mid, more = false) {
   const rest = more ? [] : (have?.sessions ?? []).filter((old) => sessions.length && old.lastActivity < sessions.at(-1).lastActivity && !again.has(old.id))
   if (app.sortBy === 'prompt') setTimeout(readPastPrompts, 0)
   app.catalog.set(mid, { sessions: [...kept, ...sessions, ...rest], more: more ? sessions.length === PAST_PAGE : (have?.more ?? sessions.length === PAST_PAGE), loaded: true, failed: false, at: Date.now() })
+  // (one its agent runs that it does not have yet: read again in a little while)
+  if (!more) catalogMissing(mid)
   renderList()
 }
 
