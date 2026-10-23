@@ -969,8 +969,9 @@ async function showSignup(invite = '') {
   if (mode === 'closed') return say('login-error', 'This server is not taking new accounts.')
   if (mode === 'invite' && !invite) return say('login-error', "An account here is made with an invite: open the link you were sent by whoever runs this server.")
   el('signup-invite').value = invite
-  showCheck()
+  // (the form shown first: the check's frame is made in it as it is laid out, and is as wide as its fields from the start)
   showCard('signup-form')
+  showCheck()
   if (!invite) return
   const can = await fetch('/api/signup?invite=' + encodeURIComponent(invite))
     .then((r) => r.json())
