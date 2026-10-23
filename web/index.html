@@ -25,14 +25,14 @@
        from: a preload that fails its check is otherwise fetched again by the import, unchecked (the server names
        the map by its own hash in the page's policy, since it is inline). -->
   <script type="importmap">{"integrity":{"/seal.js":"sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6","/keys.js":"sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
-  <link rel="stylesheet" href="app.css" integrity="sha384-IZl6ctPwFtvaZ+0C2vAQx3mbIIh30L30gB/eTN00tMwpJ/RywDhx+9snlWWeFFc9">
+  <link rel="stylesheet" href="app.css" integrity="sha384-zwosuWJGS3izwyqGI/GHurJhzkFLL+tQyDF5UsUAkNiJxoXrqatWLo72qBxvySRa">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-xHFs1C1eTRqlAVrbhI7uCCxb9+IA6tQMHHnLZaCCtwOUIQzmFQR7Mdm7+rfeCZjd">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
-  <script src="app.js" defer integrity="sha384-q/T/x8Ir4/xrlD3/+T5a9bz8qrApI7duBCjGEM/ov+TkcDvQbbs1hr3q691AfxrE"></script>
+  <script src="app.js" defer integrity="sha384-Ekv5f03RO2Lp8+Crd8/TTV7bg785KX6aCzdfOZuqr9ouFkzjqD6+L9V8LlEdqMxE"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -174,9 +174,11 @@
           <button id="ns-open" type="button" class="ns-open" hidden aria-haspopup="dialog" aria-expanded="false" title="A new session from this one: an empty one, a clone of it, or one that starts from a handoff it writes"><span class="ns-plus" aria-hidden="true">+</span><span class="ns-words">New session</span></button>
           <span id="chat-state" class="badge"></span>
           <button id="more" type="button" class="more" aria-expanded="false" aria-label="More for this session" title="Its name, label and reminder, where its prompts are answered, the look, and what can be done with this session">⋯</button>
-          <div class="view-switch in-chat" role="group" aria-label="Look">
-            <button type="button" data-set-view="vscode">VS Code</button>
-            <button type="button" data-set-view="terminal">Terminal</button>
+          <!-- (this session's own look: the page's is under Settings) -->
+          <div class="view-switch in-chat" role="group" aria-label="This session's look">
+            <button type="button" data-set-look="vscode">VS Code</button>
+            <button type="button" data-set-look="terminal">Terminal</button>
+            <button type="button" data-set-look="desktop" title="Look like the Claude app">Claude Desktop</button>
           </div>
           <button id="stop" class="stop" hidden title="Interrupts what Claude is doing. The Escape key does the same.">Stop</button>
           <button id="release" class="ghost" hidden title="Ends the copy this machine's agent is running. The session stays on the machine, where a reply here, or claude --resume in a terminal, picks it up again.">Exit</button>
@@ -373,6 +375,7 @@
                 <span class="view-switch" role="group" aria-label="Look">
                   <button type="button" data-set-view="vscode" title="Look like the VS Code extension">VS Code</button>
                   <button type="button" data-set-view="terminal" title="Look like Claude Code in the terminal">Terminal</button>
+                  <button type="button" data-set-view="desktop" title="Look like the Claude app">Claude Desktop</button>
                 </span>
               </div>
               <div class="set-row">
@@ -511,7 +514,7 @@
   <dialog id="mk-box" class="ns-box mk-box" aria-labelledby="mk-tag mk-title">
     <form id="mk-form" method="dialog" novalidate>
       <button id="mk-close" type="button" class="ns-close" aria-label="Close">✕</button>
-      <div id="mk-tag" class="ns-tag">Name, label and reminder for</div>
+      <div id="mk-tag" class="ns-tag">Name, label, look and reminder for</div>
       <h2 id="mk-title" class="ns-title"></h2>
       <label class="mk-field mk-first">Name
         <input id="mk-name" maxlength="80" autocomplete="off" spellcheck="false">
@@ -530,6 +533,9 @@
         <div id="mk-says" class="mk-says"></div>
       </div>
       <label id="mk-notify-row" class="ns-listed"><input id="mk-notify" type="checkbox"><span><b>Send a notification then</b><i id="mk-notify-hint"></i></span></label>
+      <div class="mk-field mk-beside" id="mk-look-name" title="How this session's chat looks, on every device: the look Settings gives the page on this device, or one of its own">Look
+        <div id="mk-looks" class="mk-when" role="group" aria-labelledby="mk-look-name"></div>
+      </div>
       <label id="mk-answer-row" class="mk-field mk-apart" title="Where permission prompts and Claude's questions are answered. Here + the terminal: in both at once (in VS Code, wherever you sent the last prompt from). Always here: only here. The terminal only: the terminal's own dialog.">Permission prompts and questions
         <select id="mode">
           <option value="auto">Answer: here + terminal</option>
