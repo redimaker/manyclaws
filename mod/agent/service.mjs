@@ -295,8 +295,8 @@ export async function run(config, flags = {}) {
   // ---- An upgrade, on an order for it: the plugin as Claude Code fetches it, held against the release the order names
   // before anything of it is gone by; then, where that release has other files for the agent, this agent's own, by the
   // installer the release carries, in a job of its own: stopping the agent ends whatever the agent started, so what
-  // replaces it does not run under it. That is done once the agent runs no sessions, or at once where the order says
-  // so (it ends them: the page said how many). The installer puts the agent before it back where the new one does not
+  // replaces it does not run under it. That is done once every session the agent runs has exited or sat idle for half an
+  // hour (host.done: those it ends), or at once where the order says so (it ends them: the page said how many). The installer puts the agent before it back where the new one does not
   // start. What is waiting to be done is kept (upgrade.json), and said, sealed.
   const upgradeFile = path.join(ownHome, 'upgrade.json')
   let waitingUpgrade = null
@@ -370,10 +370,11 @@ export async function run(config, flags = {}) {
     if (!bash) throw new Error('Git Bash was not found on this computer, and the agent is brought up to date by it (CLAUDE_CODE_GIT_BASH_PATH names it)')
     await startJob([bash, path.join(w.dir, 'agent', 'install.sh'), '--update', '--from', w.dir, '--wait-start', '60', ...(endSessions ? ['--end-sessions'] : [])])
   }
-  // (waiting for its sessions to be done: tried once there are none, and again a while later where it is still here)
+  // (waiting for its sessions to be done: tried once each has exited or sat idle for half an hour, which ends those, and
+  // again a while later where it is still here)
   setInterval(() => {
-    if (!waitingUpgrade || host.hosted.size || Date.now() - (waitingUpgrade.tried ?? 0) < 5 * 60_000) return
-    replaceAgent(waitingUpgrade, { endSessions: false }).catch((err) => log('the agent could not be replaced:', err.message))
+    if (!waitingUpgrade || !host.done() || Date.now() - (waitingUpgrade.tried ?? 0) < 5 * 60_000) return
+    replaceAgent(waitingUpgrade, { endSessions: host.hosted.size > 0 }).catch((err) => log('the agent could not be replaced:', err.message))
   }, 15_000).unref()
   async function upgrade({ release, digest, now }) {
     if (!checks()) throw new HostError('this agent was not installed from a signed release, and has no keys to hold one against: install it again, as the guide has it')
@@ -400,7 +401,8 @@ export async function run(config, flags = {}) {
     if (had && agentFilesOf(had) === agentFilesOf(got.list)) return { release, plugin: got.plugin, agent: 'unchanged' }
     const w = { dir: installed.dir, release, at: Date.now() }
     const sessions = host.hosted.size
-    if (now || !sessions) {
+    // (sessions that are done, each exited or idle for half an hour, are not waited for: the update ends them)
+    if (now || host.done()) {
       // (once this answer is on its way: the job stops the agent)
       setTimeout(() => replaceAgent(w, { endSessions: sessions > 0 }).catch((err) => log('the agent could not be replaced:', err.message)), 1500).unref()
       return { release, plugin: got.plugin, agent: 'now', ends: sessions }
