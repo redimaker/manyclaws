@@ -14,6 +14,9 @@ const MODES = ['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermi
 // 2026-10-08: "It should default to everything allowed if not specified"); a list in agent.json narrows them
 export const DEFAULT_MODES = MODES
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+// How long a session sits idle before an update that waits for the sessions to be done counts it done, and ends it
+// (deon, 2026-10-23: "'Update when they're done' can wait for 30 mins")
+export const DONE_IDLE_MINUTES = 30
 // What a Claude Code session tells its children about itself, which a session the agent
 // starts must not take for its own. A service's environment is the account's, and the
 // CLAUDE_CODE_ settings in it are the owner's choices (a Git Bash path, a token limit):
@@ -40,9 +43,12 @@ export class Host {
   constructor(config, { store, onChange = () => {}, log = () => {}, usedFolder = mayBeUsedFolder, startedFile = null }) {
     this.config = config
     // args and env are added to every session the agent starts: a default model, say.
-    // max: how many it runs at once. One left idle keeps its place until it is closed
-    // (idleMinutes), so the number is of those started in that long, working or not: at
-    // 4 the fifth asked for within a quarter of an hour was refused. 64 is the owner's number.
+    // idleMinutes: how long one sits idle before it is closed (a reply resumes it). 0, as it is unless agent.json says
+    // otherwise, is never: it stays open until Exit, or until room is wanted for another (deon, 2026-10-23, of the 30
+    // minutes it was: "Why is it so important to want to kill a session that we think is doing nothing after 30 minutes
+    // anyway?"). Closed, a session loses what Claude Code would have done next by itself (a scheduled wake-up, a monitor).
+    // max: how many it runs at once, working or idle. 64 is the owner's number. At it, the one that has sat idle longest
+    // is closed to make room for another; where every one is working, another is refused (see room).
     // modes: the permission modes a session may be started in or switched to. With no list
     // of its own a machine allows every one, bypassPermissions too: what a session is
     // started in is what one of the account's own devices asked, signed. A list in its
@@ -52,7 +58,7 @@ export class Host {
     // auto: the folders a person has used Claude Code in (autoFolders, below) are allowed too, and autoOff names the
     // ones of those that are not; folders: the ones the owner listed. A session may be started anywhere under either,
     // and a new folder made only under one the owner listed.
-    this.spawnConfig = { enabled: false, folders: [], auto: false, autoOff: [], modes: DEFAULT_MODES, idleMinutes: 30, max: 64, args: [], env: {}, ...(config.spawn ?? {}) }
+    this.spawnConfig = { enabled: false, folders: [], auto: false, autoOff: [], modes: DEFAULT_MODES, idleMinutes: 0, max: 64, args: [], env: {}, ...(config.spawn ?? {}) }
     this.store = store
     this.onChange = onChange
     this.log = log
@@ -295,11 +301,40 @@ export class Host {
     this.allowMode(mode)
   }
 
-  // Room for one more session. The machine is said by name: the page shows the refusal
+  // Room for one more session: under the most it runs, or one of them idle, which is closed to make it once another is
+  // started (makeRoom). Refused only where every one is working. The machine is said by name: the page shows the refusal
   // beside whichever device is chosen there, which need not be the one that refused.
   room() {
     const c = this.spawnConfig
-    if (this.hosted.size >= c.max) throw new HostError(`${this.config.label || os.hostname()} is already running ${c.max} sessions for ManyClaws, the most it runs at once (spawn.max in its agent.json)`)
+    if (this.running().length >= c.max && !this.longestIdle()) throw new HostError(`${this.config.label || os.hostname()} is already running ${c.max} sessions for ManyClaws, every one of them working: the most it runs at once (spawn.max in its agent.json)`)
+  }
+
+  // The sessions it runs that are not on their way out
+  running() {
+    return [...this.hosted.values()].filter((h) => !h.closing)
+  }
+
+  // Of those, the one that has sat idle longest, if any is idle
+  longestIdle() {
+    return this.running()
+      .filter((h) => h.state === 'idle')
+      .sort((a, b) => (a.idleSince ?? 0) - (b.idleSince ?? 0))[0]
+  }
+
+  // At the most it runs, the one that has sat idle longest is closed for one about to start: a reply resumes it
+  makeRoom() {
+    if (this.running().length < this.spawnConfig.max) return
+    const h = this.longestIdle()
+    if (!h) return
+    this.log(`${h.sid}: closed to make room for another, idle since ${new Date(h.idleSince ?? h.lastActive).toISOString()} (spawn.max ${this.spawnConfig.max})`)
+    this.close(h)
+  }
+
+  // Whether every session it runs is done, as an update that waits for them has it: sat idle for `minutes` (none is
+  // closed for being idle, so an update would otherwise wait for ever). One on its way out is waited for: it goes in a
+  // moment, and the update then has nothing of it to end
+  done(minutes = DONE_IDLE_MINUTES) {
+    return [...this.hosted.values()].every((h) => !h.closing && h.state === 'idle' && Date.now() - (h.idleSince ?? Date.now()) >= minutes * 60_000)
   }
 
   allowEffort(effort) {
@@ -446,10 +481,11 @@ export class Host {
     Object.assign(env, this.spawnConfig.env)
     if (root && path.resolve(root) !== path.join(os.homedir(), '.claude')) env.CLAUDE_CONFIG_DIR = root
     const argv = sessionArgs(this.spawnConfig, { args, mode, model, effort, name })
+    this.makeRoom()
     const proc = spawn(claude, argv, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
-    // (one started with nothing to do is idle from the first, and is closed in time like any other left idle)
+    // (one started with nothing to do is idle from the first)
     const waiting = !String(prompt ?? '').trim()
-    const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', turn: 'working', background: 0, startedAt: Date.now(), lastActive: Date.now(), timer: null, tail: '', asked: new Map(), listed: typeof listed === 'boolean' ? listed : undefined }
+    const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', turn: 'working', background: 0, startedAt: Date.now(), lastActive: Date.now(), idleSince: null, timer: null, tail: '', asked: new Map(), listed: typeof listed === 'boolean' ? listed : undefined }
     this.hosted.set(sid, h)
     this.remember(sid)
     this.log(`started ${sid} in ${cwd} (pid ${proc.pid})`)
@@ -581,9 +617,12 @@ export class Host {
     const changed = h.state !== state
     h.state = state
     h.lastActive = Date.now()
+    // (since when it has been idle, for the one closed to make room and an update that waits: not moved while it stays so)
+    if (state !== 'idle') h.idleSince = null
+    else if (changed || h.idleSince == null) h.idleSince = Date.now()
     clearTimeout(h.timer)
-    // Left idle long enough, it's closed; a later reply resumes it
-    if (state === 'idle') h.timer = setTimeout(() => this.close(h), this.spawnConfig.idleMinutes * 60_000)
+    // Left idle as long as agent.json says, where it says (idleMinutes), it's closed; a later reply resumes it
+    if (state === 'idle' && this.spawnConfig.idleMinutes > 0) h.timer = setTimeout(() => this.close(h), this.spawnConfig.idleMinutes * 60_000)
     if (changed) this.onChange()
   }
 

@@ -8270,8 +8270,8 @@ function upkeepNode(c, n) {
 
 // What an update's "when it's done" waits for, said on its card: the sessions the computer's agent runs that were
 // started from this page, by name, which the update ends as the agent starts again. One is done once it is exited, or
-// once the agent closes it for sitting idle (idleMinutes, 30 unless set otherwise there: the page is not told). The card
-// said none of it, and only its buttons spoke of "they".
+// once it has sat idle for half an hour (the agent's DONE_IDLE_MINUTES: it no longer closes one for sitting idle). The
+// card said none of it, and only its buttons spoke of "they".
 const whenDone = (hosted) => (hosted === 1 ? 'Update when it’s done' : 'Update when they’re done')
 function hostedSays(c) {
   const runs = c.m.hosted
@@ -8286,7 +8286,7 @@ function hostedSays(c) {
     { 'data-part': 'update-hosted' },
     `The agent there is running ${one ? 'a session' : count(runs.length, 'session')} started from this page: `,
     ...named.flatMap((n, i) => (i ? [', ', n] : [n])),
-    `. Updating starts the agent again, which ends ${one ? 'it' : 'them'}, and a reply here resumes ${one ? 'it' : 'each'}. Update now ends ${one ? 'it' : 'them'} now. ${whenDone(runs.length)} waits until ${one ? 'it has' : 'they have'} ended: a session ends when you press Exit over its chat, or after it has sat idle for 30 minutes.`,
+    `. Updating starts the agent again, which ends ${one ? 'it' : 'them'}, and a reply here resumes ${one ? 'it' : 'each'}. Update now ends ${one ? 'it' : 'them'} now. ${whenDone(runs.length)} waits until ${one ? 'it has' : 'each has'} sat idle for 30 minutes, or ended when you pressed Exit over its chat.`,
   )
 }
 

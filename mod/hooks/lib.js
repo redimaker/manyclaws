@@ -2,7 +2,7 @@
 // load them directly. register.js holds everything that touches `$`.
 
 export const PROTOCOL = 2
-export const PLUGIN_VERSION = '6.2.3'
+export const PLUGIN_VERSION = '6.2.4'
 
 // Where the mod reports. ManyClaws has one server, so the plugin has no option for its
 // address and its dialog asks for none: MANYCLAWS_URL names another (a test's, or one
