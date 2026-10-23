@@ -35,7 +35,8 @@ const STATE_LABEL = { working: 'Working', attention: 'Needs you', idle: 'Ready',
 const STATE_ORDER = { attention: 0, working: 1, idle: 2, offline: 3, ended: 4 }
 
 // The page's two looks: the VS Code extension's, and Claude Code's in the terminal
-const VIEWS = ['vscode', 'terminal']
+const VIEWS = ['vscode', 'terminal', 'desktop']
+const VIEW_NAMES = { vscode: 'VS Code', terminal: 'Terminal', desktop: 'Claude Desktop' }
 
 const app = {
   view: 'vscode',
@@ -649,31 +650,74 @@ function setView(view, { save = false } = {}) {
       localStorage.setItem('mc.view', app.view)
     } catch {}
   }
+  applyChatLook()
   fitTerminalGrid()
   autosize()
   refoldSoon()
   if (nearEnd) scrollToEnd()
 }
 
+// A session's own look, where it has one: kept with its mark, sealed with it, and so the same on every device of the
+// account's. The open session's chat is drawn in it, and in the page's where it has none: #chat carries the one it is
+// drawn in (app.css draws what is in the chat by the chat's, and the rest of the page by the page's)
+const lookOf = (sid) => (sid && VIEWS.includes(markOf(sid)?.look) ? markOf(sid).look : '')
+const chatView = () => lookOf(app.past?.sid ?? app.current) || app.view
+function applyChatLook() {
+  const chat = el('chat')
+  const look = chatView()
+  for (const b of document.querySelectorAll('[data-set-look]')) b.setAttribute('aria-pressed', String(b.dataset.setLook === look))
+  if (chat.dataset.view === look) return
+  const box = el('messages')
+  const nearEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 120
+  chat.dataset.view = look
+  if (app.footMenu) closeFootMenu()
+  fitTerminalGrid()
+  autosize()
+  refoldSoon()
+  if (nearEnd) scrollToEnd()
+}
+// From the switch in the open session's own menu: that session's look, kept with the rest of its mark (and none of its
+// own where it is the page's: the page's it then follows)
+async function setSessionLook(look) {
+  const s = openOne()
+  if (!s || !VIEWS.includes(look)) return
+  const m = markOf(s.id)
+  const failed = await setMark(s, { name: m?.name ?? '', label: m?.label ?? '', color: m?.color ?? '', remind: m?.remind ?? 0, notify: !!m?.notice, look: look === app.view ? '' : look })
+  // (what went wrong is said under the reply box a while, as a mode that could not be set is)
+  if (failed) {
+    app.modeError = { sid: s.id, text: failed, until: Date.now() + 8000 }
+    if (app.past) renderPastHeader()
+    else renderHeader()
+  }
+}
+
 // Terminal.app sets its text on a grid of whole points: SF Mono 11 sits in cells 7
 // wide and 14 tall. The stylesheet has the cell (--cell-w, and the line height);
 // the space between letters that fills it out depends on which fixed-width font
 // this browser found, so it's measured.
+// (the page's, and the open chat's in its own look: measured in it, where the chat is in the terminal's)
 function fitTerminalGrid() {
-  const root = document.documentElement
-  root.style.removeProperty('--track')
-  if (app.view !== 'terminal') return
+  fitGrid(document.documentElement, app.view, document.body)
+  const chat = el('chat')
+  // (a chat in another look than the terminal's has the spacing its type has, whatever the page's is)
+  if (chat.dataset.view !== 'terminal') chat.style.setProperty('--track', 'normal')
+  else if (!chat.hidden) fitGrid(chat, 'terminal', chat)
+}
+function fitGrid(node, look, inside) {
+  node.style.removeProperty('--track')
+  if (look !== 'terminal') return
   const probe = h('span', { class: 'cell-probe' }, 'M'.repeat(100))
-  document.body.append(probe)
+  inside.append(probe)
   const advance = probe.getBoundingClientRect().width / 100
   probe.remove()
-  const cell = parseFloat(getComputedStyle(root).getPropertyValue('--cell-w'))
-  if (advance && cell) root.style.setProperty('--track', (cell - advance).toFixed(3) + 'px')
+  const cell = parseFloat(getComputedStyle(node).getPropertyValue('--cell-w'))
+  if (advance && cell) node.style.setProperty('--track', (cell - advance).toFixed(3) + 'px')
 }
 
 document.fonts?.ready.then(fitTerminalGrid)
 
 for (const b of document.querySelectorAll('[data-set-view]')) b.addEventListener('click', () => setView(b.dataset.setView, { save: true }))
+for (const b of document.querySelectorAll('[data-set-look]')) b.addEventListener('click', () => setSessionLook(b.dataset.setLook))
 
 // ---- Light or dark: as this device's system has it (to begin with), or the one picked here whatever the system has,
 // remembered on this device. site/theme.js puts it on the page before the page is drawn, and keeps to the system's as
@@ -1540,6 +1584,8 @@ function connect() {
   // Something was put on a session, or taken off, here or on another device
   on('mark', (ev) => {
     const { id, mark } = JSON.parse(ev.data)
+    // (one this page is changing still: what its own answer says is the mark)
+    if (markWrites.has(id)) return
     if (mark) app.marks.set(id, markRead(mark))
     else app.marks.delete(id)
     lookAgain()
@@ -1876,6 +1922,7 @@ function closeSession() {
   app.past = null
   document.body.classList.remove('chat-open')
   el('chat').hidden = true
+  applyChatLook()
   el('empty').hidden = false
   renderList()
 }
@@ -1900,6 +1947,7 @@ async function openSession(id) {
   document.body.classList.add('chat-open')
   el('empty').hidden = true
   el('chat').hidden = false
+  applyChatLook()
   autosize()
   renderList()
   renderHeader()
@@ -2465,7 +2513,7 @@ const REMIND_IN = [
 // (`shut`: something on it did not open here, so this device does not have all of it)
 function markRead(m) {
   const said = (v) => (typeof v === 'string' && v !== sealing?.UNOPENED ? v : '')
-  return { ...m, title: said(m.title), project: said(m.project), where: said(m.where), name: said(m.name), label: said(m.label), color: MARK_COLORS.includes(m.color) ? m.color : '', remind: Number.isFinite(m.remind) ? m.remind : 0, shut: [m.title, m.project, m.where, m.name, m.label, m.color, m.remind].some(isLocked) }
+  return { ...m, title: said(m.title), project: said(m.project), where: said(m.where), name: said(m.name), label: said(m.label), color: MARK_COLORS.includes(m.color) ? m.color : '', look: VIEWS.includes(m.look) ? m.look : '', remind: Number.isFinite(m.remind) ? m.remind : 0, shut: [m.title, m.project, m.where, m.name, m.label, m.color, m.look, m.remind].some(isLocked) }
 }
 const markOf = (id) => app.marks.get(id) ?? null
 // What a session is called here: the name it was given, else its own
@@ -2547,6 +2595,7 @@ async function markBody(s, to, key = app.key) {
     name: await put(to.name),
     label: await put(to.label),
     color: await put(to.color),
+    look: await put(to.look ?? ''),
     remind: to.remind ? await put(to.remind) : null,
     notice: to.remind && to.notify ? { at: to.remind, title: await put(to.name || s.title || 'A session'), body: await put(to.label ? 'Reminder: ' + to.label : 'Reminder') } : null,
   }
@@ -2554,15 +2603,22 @@ async function markBody(s, to, key = app.key) {
 
 // A session's mark made into `to`: shown at once, then told to the server, which tells
 // every page of the account's. Resolves with what went wrong, where something did.
+// (Changed again before the server has answered, the last change is the one that stands: what the server says of the
+// ones before, in its answer and in what it tells this page meanwhile, is not taken as the mark is drawn)
+const markWrites = new Map() // session id -> the number of its last change from here, while one is on its way
 async function setMark(s, to) {
   if (!canMark()) return NO_KEY_MARK
+  const writing = (markWrites.get(s.id) ?? 0) + 1
+  markWrites.set(s.id, writing)
   const was = markOf(s.id)
   const body = await markBody(s, to)
-  if (to.name || to.label || to.color || to.remind) app.marks.set(s.id, markRead({ ...was, id: s.id, machine: body.machine, title: s.title ?? '', project: s.project ?? '', where: s.where ?? '', name: to.name, label: to.label, color: to.color, remind: to.remind || 0, notice: body.notice ? { at: body.notice.at } : undefined }))
+  if (to.name || to.label || to.color || to.look || to.remind) app.marks.set(s.id, markRead({ ...was, id: s.id, machine: body.machine, title: s.title ?? '', project: s.project ?? '', where: s.where ?? '', look: to.look ?? '', name: to.name, label: to.label, color: to.color, remind: to.remind || 0, notice: body.notice ? { at: body.notice.at } : undefined }))
   else app.marks.delete(s.id)
   marksChanged()
   const r = await fetch('/api/marks/' + encodeURIComponent(s.id), { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).catch(() => null)
   const data = (await r?.json().catch(() => null)) ?? {}
+  if (markWrites.get(s.id) !== writing) return r?.ok ? '' : (data.error ?? 'That could not be saved: the server did not answer.')
+  markWrites.delete(s.id)
   if (r?.ok && data.mark) app.marks.set(s.id, markRead(data.mark))
   else if (r?.ok) app.marks.delete(s.id)
   else if (was) app.marks.set(s.id, was)
@@ -2578,7 +2634,7 @@ const NO_KEY_MARK = 'What you put on a session is end-to-end encrypted like the 
 // as they are now. Not one this device could not open all of: put again from here, what
 // it could not read of it would be gone.
 const markSaid = new Map() // id -> what was last sent of it, so that it is sent once
-const markAgain = (s, m) => markBody(s, { name: m.name, label: m.label, color: m.color, remind: m.remind, notify: !!m.notice })
+const markAgain = (s, m) => markBody(s, { name: m.name, label: m.label, color: m.color, look: m.look, remind: m.remind, notify: !!m.notice })
 function markKept(s) {
   const m = app.key ? markOf(s.id) : null
   if (!m || m.shut || isLocked(s.title)) return
@@ -2596,12 +2652,13 @@ function remindAgain(s, ms) {
   const m = markOf(s.id)
   if (!m) return
   buzz()
-  return setMark(s, { name: m.name, label: m.label, color: m.color, remind: ms ? Date.now() + ms : 0, notify: !!m.notice })
+  return setMark(s, { name: m.name, label: m.label, color: m.color, look: m.look, remind: ms ? Date.now() + ms : 0, notify: !!m.notice })
 }
 
 // The marks have changed: the list, the open session's head, and the wait for the next reminder
 function marksChanged() {
   armReminders()
+  applyChatLook()
   renderList()
   if (app.past) renderPastHeader()
   else if (app.current) renderHeader()
@@ -2691,6 +2748,9 @@ function drawMarkBox() {
     el('mk-colors'),
     ['', ...MARK_COLORS].map((c) => h('button', { type: 'button', class: 'mk-color', 'data-color': c, 'aria-pressed': String(k.color === c), 'aria-label': c || 'No color', title: c ? c[0].toUpperCase() + c.slice(1) : 'No color', onclick: () => ((k.color = c), drawMarkBox()) })),
   )
+  // (its own look, or the one this device has the page in: by its name)
+  const look = (value, says) => h('button', { type: 'button', class: 'mk-way', 'data-look': value, 'aria-pressed': String(k.look === value), onclick: () => ((k.look = value), drawMarkBox()) }, says)
+  redraw(el('mk-looks'), [look('', `Default (${VIEW_NAMES[app.view]})`), ...VIEWS.map((v) => look(v, VIEW_NAMES[v]))])
   const way = (value, says) => h('button', { type: 'button', class: 'mk-way', 'data-when': value, 'aria-pressed': String(k.when === value), onclick: () => pickMarkWhen(value) }, says)
   redraw(el('mk-when'), [way('none', 'No reminder'), k.at ? way('keep', isDue({ remind: k.at }) ? 'Due now' : whenText(k.at)) : null, ...REMIND_IN.map(([says, ms]) => way(String(ms), 'In ' + says)), way('at', 'At a time…')].filter(Boolean))
   el('mk-at').hidden = k.when !== 'at'
@@ -2774,7 +2834,7 @@ function openMarkBox(s = openOne(), row = '') {
   el('mk-answer-row').hidden = !answers
   for (const o of el('mode').options) o.textContent = { auto: `Answer: here + ${appName(s)}`, remote: 'Answer: always here', local: `Answer: ${appName(s)} only` }[o.value] ?? o.textContent
   el('mode').value = s.policy?.overrides?.approvals ?? s.policy?.approvals ?? 'auto'
-  app.marking = { s, row, color: m?.color ?? '', label: m?.label ?? '', adding: false, when: m?.remind ? 'keep' : 'none', at: m?.remind ?? 0, devices: null, answer: answers ? el('mode').value : null }
+  app.marking = { s, row, color: m?.color ?? '', label: m?.label ?? '', look: m?.look ?? '', adding: false, when: m?.remind ? 'keep' : 'none', at: m?.remind ?? 0, devices: null, answer: answers ? el('mode').value : null }
   el('mk-title').textContent = s.title || 'This session'
   el('mk-title').title = s.title ?? ''
   el('mk-name').value = m?.name ?? ''
@@ -2819,7 +2879,7 @@ async function saveMarkBox(clear = false) {
   // (where its prompts are answered is told only where that was changed, and is not something Clear everything clears)
   const answer = !clear && k.answer && el('mode').value !== k.answer ? el('mode').value : null
   el('mk-save').disabled = true
-  const failed = (await setMark(k.s, clear ? { name: '', label: '', color: '', remind: 0, notify: false } : { name: el('mk-name').value.trim(), label: markLabel(), color: k.color, remind, notify })) || (answer ? await setAnswer(k.s, answer) : '')
+  const failed = (await setMark(k.s, clear ? { name: '', label: '', color: '', look: '', remind: 0, notify: false } : { name: el('mk-name').value.trim(), label: markLabel(), color: k.color, look: k.look, remind, notify })) || (answer ? await setAnswer(k.s, answer) : '')
   el('mk-save').disabled = false
   if (failed) return markNote(failed)
   closeMarkBox()
@@ -4937,6 +4997,7 @@ async function openPast(mid, sid, { at = '', sub = '' } = {}) {
   if (kept && (!at || kept.nodes.some((n) => isAt(n, at)))) {
     app.past = kept.past
     app.past.at = at
+    applyChatLook()
     const left = enterView(key)
     renderChips()
     showDraft()
@@ -4949,6 +5010,7 @@ async function openPast(mid, sid, { at = '', sub = '' } = {}) {
   }
   app.views.delete(key)
   const p = (app.past = { mid, sid, at, sub, from: 0, to: 0, session: null, loaded: false })
+  applyChatLook()
   el('messages').replaceChildren(h('div', { class: 'msg notice' }, 'Reading the transcript…'))
   renderChips()
   showDraft()
@@ -5869,7 +5931,7 @@ function drawFootMenu() {
   // (drawn already: drawing it again would take it from under a finger)
   // Auto approve, under the modes: whether it is on for this session, how long yet, and why it cannot be where it cannot
   const auto = live ? { on: !!autoUntil(live.id), left: autoUntil(live.id) ? autoLeft(live.id) : '', bars: autoBars(live) } : null
-  const drawn = JSON.stringify([kind, app.view, live?.id, live?.model, level, ultracodeOf(live), can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto, clones, app.modeRestart, live?.cwd])
+  const drawn = JSON.stringify([kind, chatView(), live?.id, live?.model, level, ultracodeOf(live), can, app.setting, modes.mode, modes.allowed, row, live?.state === 'working', auto, clones, app.modeRestart, live?.cwd])
   if (box.dataset.drawn === drawn) return
   box.dataset.drawn = drawn
   box.dataset.kind = kind
@@ -5993,7 +6055,7 @@ function drawFootMenu() {
           return menuRow({ title, says, on: alias === now, pending: alias === asked(live, 'model'), disabled: !can, 'data-model': alias, onclick: () => (alias === now ? closeFootMenu() : setOption(live, 'model', alias)) })
         }),
       ),
-      foot(app.view === 'terminal' ? [h('div', { class: 'menu-head' }, 'Effort'), line()] : dots(), h('p', { class: 'menu-note' }, ...both(can ? saved : '', 'Pick one · Esc to cancel')), ultraRow()),
+      foot(chatView() === 'terminal' ? [h('div', { class: 'menu-head' }, 'Effort'), line()] : dots(), h('p', { class: 'menu-note' }, ...both(can ? saved : '', 'Pick one · Esc to cancel')), ultraRow()),
     )
   }
 }
@@ -7481,7 +7543,7 @@ async function send() {
     el('input').value = ''
     autosize()
     keepDraft()
-    return openFootMenu(picker[1] === 'model' ? 'model' : app.view === 'terminal' ? 'effort' : 'modes')
+    return openFootMenu(picker[1] === 'model' ? 'model' : chatView() === 'terminal' ? 'effort' : 'modes')
   }
   // One that has exited is started again on its machine by this reply, in the mode picked beside the box
   const m = s?.ended ? app.machines.get(s.machine) : null

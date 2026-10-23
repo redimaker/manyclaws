@@ -1,4 +1,5 @@
-/* The page has two looks, chosen with data-view on <html>.
+/* The page has three looks, chosen with data-view on <html>; and the open session's chat has its own, chosen with
+   data-view on #chat (the session's own look, kept with its mark, else the page's).
 
    vscode (the default): the Claude Code extension's chat. VS Code's interface font
    at its 13px chat size, the editor font for code, and the colors of VS Code's
@@ -8,9 +9,18 @@
    terminal: Claude Code in Terminal.app. The terminal's fixed-width font at its
    size (SF Mono 11), and the colors of Claude Code's dark and light themes.
 
-   Both follow the device's light or dark setting. */
+   desktop: the Claude app's own chat. One column down the middle in a larger type,
+   what was typed in a bubble at its right, Claude's replies as plain text, and the
+   app's own colors.
 
-:root {
+   Each follows the device's light or dark setting (data-theme on <html>).
+
+   So a rule for one look names it twice, as what is in the chat goes by the chat's
+   look and the rest of the page by the page's, each as specific as the one rule was:
+     :where(#chat)[data-view="terminal"] .thing, [data-view="terminal"] .thing:not(:where(#chat, #chat *))
+   and a thing that is only ever in the chat needs the first alone. */
+
+:root, :where(#chat)[data-view] {
   /* VS Code, Light Modern */
   --font: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", system-ui, Ubuntu, "Droid Sans", sans-serif;
   --mono: Monaco, Menlo, "Courier New", monospace; /* the editor font */
@@ -59,7 +69,7 @@
   --attention-bg: #fff4ec;
   --scroll: #64646466;
 }
-:root[data-theme="dark"] {
+:root[data-theme="dark"], :where(:root[data-theme="dark"]) :where(#chat)[data-view] {
   /* VS Code, Dark Modern */
   --bg: #181818;
   --panel: #181818;
@@ -97,7 +107,7 @@
   --attention-bg: #3a2516;
   --scroll: #79797966;
 }
-:root[data-view="terminal"] {
+:root[data-view="terminal"], :where(#chat)[data-view="terminal"] {
   /* Terminal.app's Basic profile, with Claude Code's light theme */
   --font: "SF Mono", SFMono-Regular, ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --mono: var(--font);
@@ -151,7 +161,7 @@
   --offline: rgb(153, 153, 153);
   --attention-bg: transparent;
 }
-:root[data-theme="dark"][data-view="terminal"] {
+:root[data-theme="dark"][data-view="terminal"], :where(:root[data-theme="dark"]) :where(#chat)[data-view="terminal"] {
   /* The same profile in dark mode, with Claude Code's dark theme */
   --bg: #1e1e1e;
   --panel: #1e1e1e;
@@ -191,9 +201,63 @@
   --offline: rgb(110, 110, 110);
 }
 
+:root[data-view="desktop"], :where(#chat)[data-view="desktop"] {
+  /* The Claude app, light */
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --size: 15px;
+  --line: 1.6;
+  --column: 768px; /* the one column a chat is drawn in */
+  --bg: #faf9f5;
+  --panel: #faf9f5;
+  --tool-bg: #ffffff;
+  --text: #141413;
+  --strong: #141413;
+  --muted: #73726c;
+  --dot: #8a8880;
+  --border: #e8e6dc;
+  --hover: #f0eee6;
+  --active: #e8e6dc;
+  --active-text: #141413;
+  --input-bg: #ffffff;
+  --input-border: #dedcd1;
+  --menu-bg: #ffffff;
+  --placeholder: #8a8880;
+  --code-bg: #f0eee6;
+  --code-inline-bg: #ebe9e0;
+  --code-inline-text: #141413;
+  --link: #a8492d;
+  --quote-border: #dedcd1;
+  --user-bg: #f0eee6;
+  --user-text: #141413;
+}
+:root[data-theme="dark"][data-view="desktop"], :where(:root[data-theme="dark"]) :where(#chat)[data-view="desktop"] {
+  /* The Claude app, dark */
+  --bg: #1f1f1e;
+  --panel: #1f1f1e;
+  --tool-bg: #191918;
+  --text: #ecebe6;
+  --strong: #faf9f5;
+  --muted: #a3a19a;
+  --dot: #8c8a83;
+  --border: #353533;
+  --hover: #2a2a28;
+  --active: #33332f;
+  --active-text: #faf9f5;
+  --input-bg: #2a2a28;
+  --input-border: #3d3d3a;
+  --menu-bg: #2a2a28;
+  --placeholder: #8c8a83;
+  --code-bg: #191918;
+  --code-inline-bg: #33332f;
+  --code-inline-text: #ecebe6;
+  --link: #e3967a;
+  --quote-border: #4a4a46;
+  --user-bg: #30302d;
+  --user-text: #faf9f5;
+}
+
 /* Text that differs by look is drawn twice; each look shows its own */
-:root:not([data-view="terminal"]) .for-terminal,
-:root[data-view="terminal"] .for-vscode { display: none !important; }
+:where(#chat)[data-view]:not([data-view="terminal"]) .for-terminal, :root:not([data-view="terminal"]) .for-terminal:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .for-vscode, :root[data-view="terminal"] .for-vscode:not(:where(#chat, #chat *)) { display: none !important; }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -336,6 +400,8 @@ body.noticed .bar { padding-top: 6px; }
 .divider:hover, .divider.dragging, .divider:focus-visible { background: color-mix(in srgb, var(--button-bg) 55%, transparent); outline: none; }
 body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none; }
 #chat { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+/* (in its own look: the type, the spacing and the colors of the look #chat carries, whatever the page's) */
+#chat { background: var(--bg); color: var(--text); font: var(--size) / var(--line) var(--font); letter-spacing: var(--track, normal); }
 .bar {
   display: flex;
   align-items: center;
@@ -547,7 +613,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
    its edge, a label beside its name, and a reminder: said small in the line under the
    name while it is still to come, and once it has come due the row is at the top of the
    list, lit, with a line of its own and the way to clear it. */
-:root { --mk-red: #d2493f; --mk-orange: #dc7a33; --mk-yellow: #c9a20e; --mk-green: #3f9f55; --mk-teal: #1c9c96; --mk-blue: #3f82dc; --mk-purple: #8d62d9; --mk-pink: #d4558f; --due: var(--star); }
+:root, :where(#chat)[data-view] { --mk-red: #d2493f; --mk-orange: #dc7a33; --mk-yellow: #c9a20e; --mk-green: #3f9f55; --mk-teal: #1c9c96; --mk-blue: #3f82dc; --mk-purple: #8d62d9; --mk-pink: #d4558f; --due: var(--star); }
 [data-color="red"] { --mk: var(--mk-red); }
 [data-color="orange"] { --mk: var(--mk-orange); }
 [data-color="yellow"] { --mk: var(--mk-yellow); }
@@ -589,9 +655,9 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .remind-way:hover { border-color: var(--text); }
 .remind-way.done { border-color: transparent; background: var(--button-bg); color: var(--button-text); }
 .remind-way.done:hover { background: var(--button-hover); }
-[data-view="terminal"] .row-label, [data-view="terminal"] .remind-way, [data-view="terminal"] .remind-done, [data-view="terminal"] .mark-open { border-radius: 0; }
-[data-view="terminal"] .row-label { font-size: inherit; font-weight: 400; line-height: inherit; }
-[data-view="terminal"] .remind-due { padding: .3em var(--cell-w); border-bottom: 0; }
+:where(#chat)[data-view="terminal"] .row-label, [data-view="terminal"] .row-label:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .remind-way, [data-view="terminal"] .remind-way:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .remind-done, [data-view="terminal"] .remind-done:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .mark-open, [data-view="terminal"] .mark-open:not(:where(#chat, #chat *)) { border-radius: 0; }
+:where(#chat)[data-view="terminal"] .row-label, [data-view="terminal"] .row-label:not(:where(#chat, #chat *)) { font-size: inherit; font-weight: 400; line-height: inherit; }
+:where(#chat)[data-view="terminal"] .remind-due, [data-view="terminal"] .remind-due:not(:where(#chat, #chat *)) { padding: .3em var(--cell-w); border-bottom: 0; }
 @media (pointer: coarse) {
   .remind-due { padding: 10px 14px; }
   .remind-way { padding: 7px 14px; }
@@ -608,6 +674,8 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .mk-field input:focus, .mk-field select:focus { outline: 0; border-color: var(--n-soft); }
 .mk-field input::placeholder { color: var(--n-muted); opacity: .75; }
 .mk-labels, .mk-colors, .mk-when { display: flex; flex-wrap: wrap; gap: 8px; }
+/* (the look: its name beside its choices, one line where there is the room for it) */
+.mk-beside { grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 14px; }
 /* (a label is as long as it is and no longer than the box; the way to a new one is drawn as something not there yet) */
 .mk-labels .mk-way { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .mk-new { border-style: dashed; color: var(--n-muted); }
@@ -728,9 +796,9 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 @keyframes haiku-spark { 50% { transform: rotate(90deg) scale(.7); opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .search-haiku.busy svg { animation: none; } }
 /* (a terminal's: square, in its own type, the way chosen drawn in reverse) */
-[data-view="terminal"] .search-modes, [data-view="terminal"] .search-modes button, [data-view="terminal"] .search-haiku { border-radius: 0; font-size: inherit; }
-[data-view="terminal"] .search-modes button[aria-pressed="true"] { background: var(--text); color: var(--panel); box-shadow: none; }
-[data-view="terminal"] .search-close { width: auto; height: auto; margin: 0; border-radius: 0; font-size: inherit; }
+:where(#chat)[data-view="terminal"] .search-modes, [data-view="terminal"] .search-modes:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .search-modes button, [data-view="terminal"] .search-modes button:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .search-haiku, [data-view="terminal"] .search-haiku:not(:where(#chat, #chat *)) { border-radius: 0; font-size: inherit; }
+:where(#chat)[data-view="terminal"] .search-modes button[aria-pressed="true"], [data-view="terminal"] .search-modes button[aria-pressed="true"]:not(:where(#chat, #chat *)) { background: var(--text); color: var(--panel); box-shadow: none; }
+:where(#chat)[data-view="terminal"] .search-close, [data-view="terminal"] .search-close:not(:where(#chat, #chat *)) { width: auto; height: auto; margin: 0; border-radius: 0; font-size: inherit; }
 /* A choice under what the question box says (app.js, ask: `check`) */
 .ask-check { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; color: var(--n-soft, var(--muted)); font-size: 14px; cursor: pointer; }
 .ask-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--n-accent, var(--accent)); }
@@ -784,8 +852,8 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .find-hit mark { background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; border-radius: 2px; }
 .find-when { color: var(--muted); }
 .find-note { padding: 5px 8px; font-size: .85em; color: var(--muted); }
-[data-view="terminal"] .chat-find { padding: .3em var(--cell-w); }
-[data-view="terminal"] .find-q { border-radius: 0; }
+:where(#chat)[data-view="terminal"] .chat-find, [data-view="terminal"] .chat-find:not(:where(#chat, #chat *)) { padding: .3em var(--cell-w); }
+:where(#chat)[data-view="terminal"] .find-q, [data-view="terminal"] .find-q:not(:where(#chat, #chat *)) { border-radius: 0; }
 /* Subagents a session has running: a mark in its row, and a strip above the reply box */
 .agents-mark { color: var(--working); white-space: nowrap; }
 /* What started a running session, on its tile: an icon, small, before the time on the tile's first line, in the time's
@@ -806,9 +874,9 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .agents-strip .agent::before { content: "● "; color: var(--working); font-size: .7em; vertical-align: middle; }
 .agents-strip .agent.more::before { content: ""; }
 .agents-strip .agent-for { opacity: .7; }
-[data-view="terminal"] .agents-strip { padding: 0 var(--cell-w); font-size: inherit; gap: 0 calc(2 * var(--cell-w)); border-top: 0; }
-[data-view="terminal"] .agents-strip .agents-count { font-weight: 400; }
-[data-view="terminal"] .agents-strip .agent::before { content: "⏺ "; font-size: inherit; }
+:where(#chat)[data-view="terminal"] .agents-strip, [data-view="terminal"] .agents-strip:not(:where(#chat, #chat *)) { padding: 0 var(--cell-w); font-size: inherit; gap: 0 calc(2 * var(--cell-w)); border-top: 0; }
+:where(#chat)[data-view="terminal"] .agents-strip .agents-count, [data-view="terminal"] .agents-strip .agents-count:not(:where(#chat, #chat *)) { font-weight: 400; }
+:where(#chat)[data-view="terminal"] .agents-strip .agent::before, [data-view="terminal"] .agents-strip .agent:not(:where(#chat, #chat *))::before { content: "⏺ "; font-size: inherit; }
 /* A search is a way down: machines, a machine's projects, a project's sessions, a session's results */
 .branch[data-depth="1"], .more-link[data-depth="1"] { padding-left: 26px; }
 .branch[data-depth="2"], .more-link[data-depth="2"], .branch-note[data-depth="2"] { padding-left: 40px; }
@@ -1126,8 +1194,8 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 /* An edit's diff has the box to itself, and a taller window */
 .tool-row.diff { grid-template-columns: minmax(0, 1fr); }
 .tool-row.diff .tool-label { display: none; }
-:root:not([data-view="terminal"]) .tool-row.diff .tool-more { grid-column: 1; }
-:root:not([data-view="terminal"]) .tool-row.diff:not(.expanded) .tool-io {
+:where(#chat)[data-view]:not([data-view="terminal"]) .tool-row.diff .tool-more, :root:not([data-view="terminal"]) .tool-row.diff .tool-more:not(:where(#chat, #chat *)) { grid-column: 1; }
+:where(#chat)[data-view]:not([data-view="terminal"]) .tool-row.diff:not(.expanded) .tool-io, :root:not([data-view="terminal"]) .tool-row.diff:not(.expanded) .tool-io:not(:where(#chat, #chat *)) {
   max-height: 160px;
   -webkit-mask-image: linear-gradient(to bottom, #000 150px, transparent 160px);
   mask-image: linear-gradient(to bottom, #000 150px, transparent 160px);
@@ -1236,15 +1304,15 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .foot-mode { font-size: .85em; line-height: 26px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The mode a session starts again in, picked where a running session's mode shows */
 .resume-mode { font: inherit; color: inherit; background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; max-width: 100%; }
-[data-view="terminal"] .resume-mode { border-radius: 0; padding: 0 var(--cell-w); }
+:where(#chat)[data-view="terminal"] .resume-mode, [data-view="terminal"] .resume-mode:not(:where(#chat, #chat *)) { border-radius: 0; padding: 0 var(--cell-w); }
 .foot-space { flex: 1; }
 
 /* ---- The model and effort by the reply box: VS Code's pill, and its button for the mode
    on the right, whose menu has the effort's slider under the modes */
 .composer-box { position: relative; }
-:root:not([data-view="terminal"]) .foot-space { order: 1; }
-:root:not([data-view="terminal"]) .foot-mode { order: 2; overflow: visible; flex: 0 100 auto; min-width: 30px; padding: 0; }
-:root:not([data-view="terminal"]) .send { order: 3; margin-left: 4px; }
+:where(#chat)[data-view]:not([data-view="terminal"]) .foot-space, :root:not([data-view="terminal"]) .foot-space:not(:where(#chat, #chat *)) { order: 1; }
+:where(#chat)[data-view]:not([data-view="terminal"]) .foot-mode, :root:not([data-view="terminal"]) .foot-mode:not(:where(#chat, #chat *)) { order: 2; overflow: visible; flex: 0 100 auto; min-width: 30px; padding: 0; }
+:where(#chat)[data-view]:not([data-view="terminal"]) .send, :root:not([data-view="terminal"]) .send:not(:where(#chat, #chat *)) { order: 3; margin-left: 4px; }
 .foot-model {
   display: inline-flex;
   align-items: baseline;
@@ -1279,8 +1347,8 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .foot-auto { flex: 0 1 auto; min-width: 0; height: 26px; padding: 0 8px; border: 0; border-radius: 5px; background: none; color: var(--muted); font: inherit; font-size: .85em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .foot-auto.on { background: var(--attention-bg); color: var(--attention); }
 .foot-auto:hover, .foot-auto[aria-expanded="true"] { color: var(--strong); }
-:root:not([data-view="terminal"]) .foot-auto { order: 2; }
-:root:not([data-view="terminal"]) .foot-auto:not(.on) { display: none; }
+:where(#chat)[data-view]:not([data-view="terminal"]) .foot-auto, :root:not([data-view="terminal"]) .foot-auto:not(:where(#chat, #chat *)) { order: 2; }
+:where(#chat)[data-view]:not([data-view="terminal"]) .foot-auto:not(.on), :root:not([data-view="terminal"]) .foot-auto:not(.on):not(:where(#chat, #chat *)) { display: none; }
 /* (where a terminal's look is a phone's, the mode and this have a line to themselves: this ends it) */
 .foot-break { display: none; }
 .pending { opacity: .55; }
@@ -1302,7 +1370,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
   font-size: .95em;
 }
 .foot-menu[data-kind="model"] { right: auto; left: 0; }
-:root:not([data-view="terminal"]) .foot-menu[data-kind="model"] .menu-row > .menu-icon { display: none; }
+:where(#chat)[data-view]:not([data-view="terminal"]) .foot-menu[data-kind="model"] .menu-row > .menu-icon, :root:not([data-view="terminal"]) .foot-menu[data-kind="model"] .menu-row > .menu-icon:not(:where(#chat, #chat *)) { display: none; }
 .foot-menu[hidden] { display: none; }
 /* (the orders of the list: under the head, at its right, from the button beside the gear) */
 .sort-menu { top: var(--sort-top, 48px); bottom: auto; right: 8px; width: min(320px, calc(100% - 16px)); }
@@ -1414,67 +1482,58 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 
 /* ---- The terminal look ---- */
 
-[data-view="terminal"] #app { grid-template-columns: var(--list-width, calc(44 * var(--cell-w))) minmax(0, 1fr); }
-[data-view="terminal"] .primary,
-[data-view="terminal"] .ghost,
-[data-view="terminal"] .stop,
-[data-view="terminal"] .option,
-[data-view="terminal"] .other,
-[data-view="terminal"] .view-switch,
-[data-view="terminal"] .login-card,
-[data-view="terminal"] .login-card input { border-radius: 0; }
-[data-view="terminal"] .primary, [data-view="terminal"] .ghost, [data-view="terminal"] .stop { padding: 0 var(--cell-w); }
-[data-view="terminal"] .bar { padding: .5em var(--cell-w); min-height: 0; gap: var(--cell-w); }
-[data-view="terminal"] .brand { font-size: inherit; font-weight: 700; letter-spacing: 0; color: var(--strong); }
-[data-view="terminal"] .head-link { width: auto; height: auto; margin-right: 0; border-radius: 0; }
-[data-view="terminal"] .head-icon { width: 1.15em; height: 1.15em; }
-[data-view="terminal"] .view-switch button { font-size: inherit; line-height: inherit; padding: 0 var(--cell-w); }
-[data-view="terminal"] .group-head { font-size: inherit; font-weight: 400; text-transform: none; padding: 1em var(--cell-w) 0; }
-[data-view="terminal"] .row { padding: .3em var(--cell-w); gap: var(--cell-w); }
-[data-view="terminal"] .row .grip { width: var(--cell-w); font-size: .8em; }
-[data-view="terminal"] .row-sub, [data-view="terminal"] .row-preview, [data-view="terminal"] .row-prompt, [data-view="terminal"] .row-time, [data-view="terminal"] .row-id,
-[data-view="terminal"] .chat-sub, [data-view="terminal"] .badge,
-[data-view="terminal"] .card-sub, [data-view="terminal"] .composer-note { font-size: inherit; }
-[data-view="terminal"] .row-prompt { gap: var(--cell-w); }
-[data-view="terminal"] .tile-sample { border-color: var(--rule); border-radius: 0; }
-[data-view="terminal"] .badge { border-radius: 0; padding: 0 var(--cell-w); }
-[data-view="terminal"] .chat-name { color: var(--strong); font-weight: 700; }
-[data-view="terminal"] .attention-banner { padding: .3em var(--cell-w); border-bottom: 0; }
-[data-view="terminal"] .unread { color: var(--strong); }
-[data-view="terminal"] .search-box { padding: .5em var(--cell-w); }
-[data-view="terminal"] #search, [data-view="terminal"] .new-form input, [data-view="terminal"] .new-form select, [data-view="terminal"] .new-form textarea, [data-view="terminal"] .hit { border-radius: 0; }
-[data-view="terminal"] .hit-head, [data-view="terminal"] .hit-where, [data-view="terminal"] .hit-more, [data-view="terminal"] .more-link { padding-left: var(--cell-w); padding-right: var(--cell-w); font-size: inherit; }
-[data-view="terminal"] .hit { margin: 0; padding: 0 var(--cell-w); font-size: inherit; }
-[data-view="terminal"] .machine-open { margin: 0; padding: 0; border-radius: 0; }
-[data-view="terminal"] .machine-open .menu-icon { width: 1em; height: 1em; }
-[data-view="terminal"] .machine-open { display: inline-flex; gap: var(--cell-w); }
-[data-view="terminal"] .machine-note { position: static; display: inline-block; width: auto; height: auto; border-radius: 0; background: none; order: -1; text-decoration: none; }
-[data-view="terminal"] .machine-note::after { content: '!'; color: var(--attention); font-weight: 700; }
-[data-view="terminal"] .machine-still { gap: var(--cell-w); padding-left: calc(2 * var(--cell-w)); }
-[data-view="terminal"] .where-label { border-radius: 0; }
-[data-view="terminal"] .project { padding: .2em var(--cell-w); gap: var(--cell-w); }
-[data-view="terminal"] .machine-fold { gap: var(--cell-w); margin: -1em 0 0; padding: 1em 0 0; }
-[data-view="terminal"] .machine-fold .project-mark { width: var(--cell-w); font-size: inherit; line-height: inherit; }
-[data-view="terminal"] .branch[data-depth="1"], [data-view="terminal"] .more-link[data-depth="1"] { padding-left: calc(3 * var(--cell-w)); }
-[data-view="terminal"] .branch[data-depth="2"], [data-view="terminal"] .more-link[data-depth="2"], [data-view="terminal"] .branch-note[data-depth="2"] { padding-left: calc(5 * var(--cell-w)); }
-[data-view="terminal"] .branch[data-depth="3"], [data-view="terminal"] .more-link[data-depth="3"], [data-view="terminal"] .branch-note[data-depth="3"] { padding-left: calc(7 * var(--cell-w)); }
-[data-view="terminal"] .hit[data-depth="3"] { margin-left: 0; padding-left: calc(7 * var(--cell-w)); }
-[data-view="terminal"] .branch .session-name { font-weight: 400; color: inherit; }
-[data-view="terminal"] .project-mark { width: var(--cell-w); }
-[data-view="terminal"] .project-name { font-weight: 700; color: var(--strong); }
-[data-view="terminal"] .row.in-project, [data-view="terminal"] .more-link.in-project, [data-view="terminal"] .list-empty.in-project { padding-left: calc(3 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] #app, [data-view="terminal"] #app:not(:where(#chat, #chat *)) { grid-template-columns: var(--list-width, calc(44 * var(--cell-w))) minmax(0, 1fr); }
+:where(#chat)[data-view="terminal"] .primary, [data-view="terminal"] .primary:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .ghost, [data-view="terminal"] .ghost:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .stop, [data-view="terminal"] .stop:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .option, [data-view="terminal"] .option:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .other, [data-view="terminal"] .other:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .view-switch, [data-view="terminal"] .view-switch:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .login-card, [data-view="terminal"] .login-card:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .login-card input, [data-view="terminal"] .login-card input:not(:where(#chat, #chat *)) { border-radius: 0; }
+:where(#chat)[data-view="terminal"] .primary, [data-view="terminal"] .primary:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .ghost, [data-view="terminal"] .ghost:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .stop, [data-view="terminal"] .stop:not(:where(#chat, #chat *)) { padding: 0 var(--cell-w); }
+:where(#chat)[data-view="terminal"] .bar, [data-view="terminal"] .bar:not(:where(#chat, #chat *)) { padding: .5em var(--cell-w); min-height: 0; gap: var(--cell-w); }
+:where(#chat)[data-view="terminal"] .brand, [data-view="terminal"] .brand:not(:where(#chat, #chat *)) { font-size: inherit; font-weight: 700; letter-spacing: 0; color: var(--strong); }
+:where(#chat)[data-view="terminal"] .head-link, [data-view="terminal"] .head-link:not(:where(#chat, #chat *)) { width: auto; height: auto; margin-right: 0; border-radius: 0; }
+:where(#chat)[data-view="terminal"] .head-icon, [data-view="terminal"] .head-icon:not(:where(#chat, #chat *)) { width: 1.15em; height: 1.15em; }
+:where(#chat)[data-view="terminal"] .view-switch button, [data-view="terminal"] .view-switch button:not(:where(#chat, #chat *)) { font-size: inherit; line-height: inherit; padding: 0 var(--cell-w); }
+:where(#chat)[data-view="terminal"] .group-head, [data-view="terminal"] .group-head:not(:where(#chat, #chat *)) { font-size: inherit; font-weight: 400; text-transform: none; padding: 1em var(--cell-w) 0; }
+:where(#chat)[data-view="terminal"] .row, [data-view="terminal"] .row:not(:where(#chat, #chat *)) { padding: .3em var(--cell-w); gap: var(--cell-w); }
+:where(#chat)[data-view="terminal"] .row .grip, [data-view="terminal"] .row .grip:not(:where(#chat, #chat *)) { width: var(--cell-w); font-size: .8em; }
+:where(#chat)[data-view="terminal"] .row-sub, [data-view="terminal"] .row-sub:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .row-preview, [data-view="terminal"] .row-preview:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .row-prompt, [data-view="terminal"] .row-prompt:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .row-time, [data-view="terminal"] .row-time:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .row-id, [data-view="terminal"] .row-id:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .chat-sub, [data-view="terminal"] .chat-sub:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .badge, [data-view="terminal"] .badge:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .card-sub, [data-view="terminal"] .card-sub:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .composer-note, [data-view="terminal"] .composer-note:not(:where(#chat, #chat *)) { font-size: inherit; }
+:where(#chat)[data-view="terminal"] .row-prompt, [data-view="terminal"] .row-prompt:not(:where(#chat, #chat *)) { gap: var(--cell-w); }
+:where(#chat)[data-view="terminal"] .tile-sample, [data-view="terminal"] .tile-sample:not(:where(#chat, #chat *)) { border-color: var(--rule); border-radius: 0; }
+:where(#chat)[data-view="terminal"] .badge, [data-view="terminal"] .badge:not(:where(#chat, #chat *)) { border-radius: 0; padding: 0 var(--cell-w); }
+:where(#chat)[data-view="terminal"] .chat-name, [data-view="terminal"] .chat-name:not(:where(#chat, #chat *)) { color: var(--strong); font-weight: 700; }
+:where(#chat)[data-view="terminal"] .attention-banner, [data-view="terminal"] .attention-banner:not(:where(#chat, #chat *)) { padding: .3em var(--cell-w); border-bottom: 0; }
+:where(#chat)[data-view="terminal"] .unread, [data-view="terminal"] .unread:not(:where(#chat, #chat *)) { color: var(--strong); }
+:where(#chat)[data-view="terminal"] .search-box, [data-view="terminal"] .search-box:not(:where(#chat, #chat *)) { padding: .5em var(--cell-w); }
+:where(#chat)[data-view="terminal"] #search, [data-view="terminal"] #search:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .new-form input, [data-view="terminal"] .new-form input:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .new-form select, [data-view="terminal"] .new-form select:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .new-form textarea, [data-view="terminal"] .new-form textarea:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .hit, [data-view="terminal"] .hit:not(:where(#chat, #chat *)) { border-radius: 0; }
+:where(#chat)[data-view="terminal"] .hit-head, [data-view="terminal"] .hit-head:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .hit-where, [data-view="terminal"] .hit-where:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .hit-more, [data-view="terminal"] .hit-more:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .more-link, [data-view="terminal"] .more-link:not(:where(#chat, #chat *)) { padding-left: var(--cell-w); padding-right: var(--cell-w); font-size: inherit; }
+:where(#chat)[data-view="terminal"] .hit, [data-view="terminal"] .hit:not(:where(#chat, #chat *)) { margin: 0; padding: 0 var(--cell-w); font-size: inherit; }
+:where(#chat)[data-view="terminal"] .machine-open, [data-view="terminal"] .machine-open:not(:where(#chat, #chat *)) { margin: 0; padding: 0; border-radius: 0; }
+:where(#chat)[data-view="terminal"] .machine-open .menu-icon, [data-view="terminal"] .machine-open .menu-icon:not(:where(#chat, #chat *)) { width: 1em; height: 1em; }
+:where(#chat)[data-view="terminal"] .machine-open, [data-view="terminal"] .machine-open:not(:where(#chat, #chat *)) { display: inline-flex; gap: var(--cell-w); }
+:where(#chat)[data-view="terminal"] .machine-note, [data-view="terminal"] .machine-note:not(:where(#chat, #chat *)) { position: static; display: inline-block; width: auto; height: auto; border-radius: 0; background: none; order: -1; text-decoration: none; }
+:where(#chat)[data-view="terminal"] .machine-note::after, [data-view="terminal"] .machine-note:not(:where(#chat, #chat *))::after { content: '!'; color: var(--attention); font-weight: 700; }
+:where(#chat)[data-view="terminal"] .machine-still, [data-view="terminal"] .machine-still:not(:where(#chat, #chat *)) { gap: var(--cell-w); padding-left: calc(2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .where-label, [data-view="terminal"] .where-label:not(:where(#chat, #chat *)) { border-radius: 0; }
+:where(#chat)[data-view="terminal"] .project, [data-view="terminal"] .project:not(:where(#chat, #chat *)) { padding: .2em var(--cell-w); gap: var(--cell-w); }
+:where(#chat)[data-view="terminal"] .machine-fold, [data-view="terminal"] .machine-fold:not(:where(#chat, #chat *)) { gap: var(--cell-w); margin: -1em 0 0; padding: 1em 0 0; }
+:where(#chat)[data-view="terminal"] .machine-fold .project-mark, [data-view="terminal"] .machine-fold .project-mark:not(:where(#chat, #chat *)) { width: var(--cell-w); font-size: inherit; line-height: inherit; }
+:where(#chat)[data-view="terminal"] .branch[data-depth="1"], [data-view="terminal"] .branch[data-depth="1"]:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .more-link[data-depth="1"], [data-view="terminal"] .more-link[data-depth="1"]:not(:where(#chat, #chat *)) { padding-left: calc(3 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .branch[data-depth="2"], [data-view="terminal"] .branch[data-depth="2"]:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .more-link[data-depth="2"], [data-view="terminal"] .more-link[data-depth="2"]:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .branch-note[data-depth="2"], [data-view="terminal"] .branch-note[data-depth="2"]:not(:where(#chat, #chat *)) { padding-left: calc(5 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .branch[data-depth="3"], [data-view="terminal"] .branch[data-depth="3"]:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .more-link[data-depth="3"], [data-view="terminal"] .more-link[data-depth="3"]:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .branch-note[data-depth="3"], [data-view="terminal"] .branch-note[data-depth="3"]:not(:where(#chat, #chat *)) { padding-left: calc(7 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .hit[data-depth="3"], [data-view="terminal"] .hit[data-depth="3"]:not(:where(#chat, #chat *)) { margin-left: 0; padding-left: calc(7 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .branch .session-name, [data-view="terminal"] .branch .session-name:not(:where(#chat, #chat *)) { font-weight: 400; color: inherit; }
+:where(#chat)[data-view="terminal"] .project-mark, [data-view="terminal"] .project-mark:not(:where(#chat, #chat *)) { width: var(--cell-w); }
+:where(#chat)[data-view="terminal"] .project-name, [data-view="terminal"] .project-name:not(:where(#chat, #chat *)) { font-weight: 700; color: var(--strong); }
+:where(#chat)[data-view="terminal"] .row.in-project, [data-view="terminal"] .row.in-project:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .more-link.in-project, [data-view="terminal"] .more-link.in-project:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .list-empty.in-project, [data-view="terminal"] .list-empty.in-project:not(:where(#chat, #chat *)) { padding-left: calc(3 * var(--cell-w)); }
 
 /* The transcript: a blank line between entries, a bullet before each of Claude's */
-[data-view="terminal"] .messages { padding: .5em var(--cell-w) 2em; gap: calc(var(--line) * 1em); }
-[data-view="terminal"] .msg { padding: 0; }
+:where(#chat)[data-view="terminal"] .messages, [data-view="terminal"] .messages:not(:where(#chat, #chat *)) { padding: .5em var(--cell-w) 2em; gap: calc(var(--line) * 1em); }
+:where(#chat)[data-view="terminal"] .msg, [data-view="terminal"] .msg:not(:where(#chat, #chat *)) { padding: 0; }
 .banner { white-space: pre; overflow: hidden; }
 .banner .mark { color: var(--accent); letter-spacing: 0; } /* its blocks touch */
 .banner .mark-in { background: var(--mark-bg); }
 .banner .dim { color: var(--muted); }
 .banner b { color: var(--strong); }
 
-[data-view="terminal"] .msg.user { display: block; }
-[data-view="terminal"] .msg.user .bubble {
+:where(#chat)[data-view="terminal"] .msg.user, [data-view="terminal"] .msg.user:not(:where(#chat, #chat *)) { display: block; }
+:where(#chat)[data-view="terminal"] .msg.user .bubble, [data-view="terminal"] .msg.user .bubble:not(:where(#chat, #chat *)) {
   display: block;
   margin: 0;
   border: 0;
@@ -1484,16 +1543,16 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   padding: 0 var(--cell-w) 0 calc(2 * var(--cell-w));
   position: relative;
 }
-[data-view="terminal"] .msg.user .bubble::before { content: "❯"; position: absolute; left: 0; color: var(--muted); }
-[data-view="terminal"] .msg.user .from { font-size: inherit; }
-[data-view="terminal"] .pinned { padding: 0 var(--cell-w) .3em; box-shadow: none; }
-[data-view="terminal"] .pinned .bubble { border: 0; border-radius: 0; padding: 0 0 0 calc(2 * var(--cell-w)); position: relative; background: var(--user-bg, var(--input-bg)); width: auto; }
-[data-view="terminal"] .pinned .bubble::before { content: "❯"; position: absolute; left: 0; color: var(--muted); }
-[data-view="terminal"] .msg.user .from::before { content: "› "; }
-[data-view="terminal"] .thumb { border-radius: 0; margin: .3em 0; }
+:where(#chat)[data-view="terminal"] .msg.user .bubble::before, [data-view="terminal"] .msg.user .bubble:not(:where(#chat, #chat *))::before { content: "❯"; position: absolute; left: 0; color: var(--muted); }
+:where(#chat)[data-view="terminal"] .msg.user .from, [data-view="terminal"] .msg.user .from:not(:where(#chat, #chat *)) { font-size: inherit; }
+:where(#chat)[data-view="terminal"] .pinned, [data-view="terminal"] .pinned:not(:where(#chat, #chat *)) { padding: 0 var(--cell-w) .3em; box-shadow: none; }
+:where(#chat)[data-view="terminal"] .pinned .bubble, [data-view="terminal"] .pinned .bubble:not(:where(#chat, #chat *)) { border: 0; border-radius: 0; padding: 0 0 0 calc(2 * var(--cell-w)); position: relative; background: var(--user-bg, var(--input-bg)); width: auto; }
+:where(#chat)[data-view="terminal"] .pinned .bubble::before, [data-view="terminal"] .pinned .bubble:not(:where(#chat, #chat *))::before { content: "❯"; position: absolute; left: 0; color: var(--muted); }
+:where(#chat)[data-view="terminal"] .msg.user .from::before, [data-view="terminal"] .msg.user .from:not(:where(#chat, #chat *))::before { content: "› "; }
+:where(#chat)[data-view="terminal"] .thumb, [data-view="terminal"] .thumb:not(:where(#chat, #chat *)) { border-radius: 0; margin: .3em 0; }
 
-[data-view="terminal"] .tl { padding-left: calc(2 * var(--cell-w)); }
-[data-view="terminal"] .tl::before {
+:where(#chat)[data-view="terminal"] .tl, [data-view="terminal"] .tl:not(:where(#chat, #chat *)) { padding-left: calc(2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .tl::before, [data-view="terminal"] .tl:not(:where(#chat, #chat *))::before {
   content: "●";
   left: 0;
   top: 0;
@@ -1503,63 +1562,63 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   background: none;
   color: var(--dot);
 }
-[data-view="terminal"] .tl::after { display: none; }
-[data-view="terminal"] .tool.ok::before { background: none; color: var(--ok); }
-[data-view="terminal"] .tool.err::before { background: none; color: var(--err); }
-[data-view="terminal"] .tool.stale::before { color: var(--muted); }
-[data-view="terminal"] .streaming::before { animation: none; }
+:where(#chat)[data-view="terminal"] .tl::after, [data-view="terminal"] .tl:not(:where(#chat, #chat *))::after { display: none; }
+:where(#chat)[data-view="terminal"] .tool.ok::before, [data-view="terminal"] .tool.ok:not(:where(#chat, #chat *))::before { background: none; color: var(--ok); }
+:where(#chat)[data-view="terminal"] .tool.err::before, [data-view="terminal"] .tool.err:not(:where(#chat, #chat *))::before { background: none; color: var(--err); }
+:where(#chat)[data-view="terminal"] .tool.stale::before, [data-view="terminal"] .tool.stale:not(:where(#chat, #chat *))::before { color: var(--muted); }
+:where(#chat)[data-view="terminal"] .streaming::before, [data-view="terminal"] .streaming:not(:where(#chat, #chat *))::before { animation: none; }
 
-[data-view="terminal"] .md > * { margin: 0; }
-[data-view="terminal"] .md > * + * { margin-top: calc(var(--line) * 1em); }
-[data-view="terminal"] .md :is(h1, h2, h3, h4, h5, h6) { font-size: inherit; font-weight: 700; color: var(--strong); }
-[data-view="terminal"] .md h1 { font-style: italic; text-decoration: underline; }
-[data-view="terminal"] .md strong { color: var(--strong); }
-[data-view="terminal"] .md ul { list-style: "- "; padding-inline-start: calc(2 * var(--cell-w)); }
-[data-view="terminal"] .md ol { padding-inline-start: calc(3 * var(--cell-w)); }
-[data-view="terminal"] .md li > :is(ul, ol) { margin: 0; }
-[data-view="terminal"] .md li.task { margin-left: 0; }
-[data-view="terminal"] .md pre { background: none; border-radius: 0; padding: 0; white-space: pre-wrap; overflow: visible; }
-[data-view="terminal"] .md li > .code-block { margin: 0; }
+:where(#chat)[data-view="terminal"] .md > *, [data-view="terminal"] .md > *:not(:where(#chat, #chat *)) { margin: 0; }
+:where(#chat)[data-view="terminal"] .md > * + *, [data-view="terminal"] .md > * + *:not(:where(#chat, #chat *)) { margin-top: calc(var(--line) * 1em); }
+:where(#chat)[data-view="terminal"] .md :is(h1, h2, h3, h4, h5, h6), [data-view="terminal"] .md :is(h1, h2, h3, h4, h5, h6):not(:where(#chat, #chat *)) { font-size: inherit; font-weight: 700; color: var(--strong); }
+:where(#chat)[data-view="terminal"] .md h1, [data-view="terminal"] .md h1:not(:where(#chat, #chat *)) { font-style: italic; text-decoration: underline; }
+:where(#chat)[data-view="terminal"] .md strong, [data-view="terminal"] .md strong:not(:where(#chat, #chat *)) { color: var(--strong); }
+:where(#chat)[data-view="terminal"] .md ul, [data-view="terminal"] .md ul:not(:where(#chat, #chat *)) { list-style: "- "; padding-inline-start: calc(2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .md ol, [data-view="terminal"] .md ol:not(:where(#chat, #chat *)) { padding-inline-start: calc(3 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .md li > :is(ul, ol), [data-view="terminal"] .md li > :is(ul, ol):not(:where(#chat, #chat *)) { margin: 0; }
+:where(#chat)[data-view="terminal"] .md li.task, [data-view="terminal"] .md li.task:not(:where(#chat, #chat *)) { margin-left: 0; }
+:where(#chat)[data-view="terminal"] .md pre, [data-view="terminal"] .md pre:not(:where(#chat, #chat *)) { background: none; border-radius: 0; padding: 0; white-space: pre-wrap; overflow: visible; }
+:where(#chat)[data-view="terminal"] .md li > .code-block, [data-view="terminal"] .md li > .code-block:not(:where(#chat, #chat *)) { margin: 0; }
 /* A code block has no box here and its lines wrap: the button that copies it is one line high, over the end of the
    block's first line while the block is pointed at. Where nothing points it is always there, and the first line
    wraps short of it. */
-[data-view="terminal"] .code-copy { top: 0; right: 0; width: calc(3 * var(--cell-w)); height: calc(var(--line) * 1em); border: 0; border-radius: 0; }
-[data-view="terminal"] .code-copy svg { width: 1em; height: 1em; }
+:where(#chat)[data-view="terminal"] .code-copy, [data-view="terminal"] .code-copy:not(:where(#chat, #chat *)) { top: 0; right: 0; width: calc(3 * var(--cell-w)); height: calc(var(--line) * 1em); border: 0; border-radius: 0; }
+:where(#chat)[data-view="terminal"] .code-copy svg, [data-view="terminal"] .code-copy svg:not(:where(#chat, #chat *)) { width: 1em; height: 1em; }
 @media (hover: none) {
-  [data-view="terminal"] .code-copy { position: relative; float: right; margin-left: var(--cell-w); }
+  :where(#chat)[data-view="terminal"] .code-copy, [data-view="terminal"] .code-copy:not(:where(#chat, #chat *)) { position: relative; float: right; margin-left: var(--cell-w); }
   /* (a finger has more to land on than the line's height) */
-  [data-view="terminal"] .code-copy::after { content: ""; position: absolute; inset: -8px -6px; }
-  [data-view="terminal"] .md pre code { display: inline; padding-right: 0; }
+  :where(#chat)[data-view="terminal"] .code-copy::after, [data-view="terminal"] .code-copy:not(:where(#chat, #chat *))::after { content: ""; position: absolute; inset: -8px -6px; }
+  :where(#chat)[data-view="terminal"] .md pre code, [data-view="terminal"] .md pre code:not(:where(#chat, #chat *)) { display: inline; padding-right: 0; }
 }
-[data-view="terminal"] .md code { background: none; border-radius: 0; padding: 0; font-size: inherit; }
-[data-view="terminal"] .md pre code { color: inherit; }
-[data-view="terminal"] .md th, [data-view="terminal"] .md td { border-color: var(--text); padding: 0 var(--cell-w); }
-[data-view="terminal"] .md th { text-align: center; font-weight: 400; }
-[data-view="terminal"] .md blockquote { background: none; padding: 0 0 0 var(--cell-w); border-left: 1px solid var(--quote-border); color: var(--muted); font-style: italic; }
-[data-view="terminal"] .md hr { border-top: 1px solid var(--muted); }
+:where(#chat)[data-view="terminal"] .md code, [data-view="terminal"] .md code:not(:where(#chat, #chat *)) { background: none; border-radius: 0; padding: 0; font-size: inherit; }
+:where(#chat)[data-view="terminal"] .md pre code, [data-view="terminal"] .md pre code:not(:where(#chat, #chat *)) { color: inherit; }
+:where(#chat)[data-view="terminal"] .md th, [data-view="terminal"] .md th:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .md td, [data-view="terminal"] .md td:not(:where(#chat, #chat *)) { border-color: var(--text); padding: 0 var(--cell-w); }
+:where(#chat)[data-view="terminal"] .md th, [data-view="terminal"] .md th:not(:where(#chat, #chat *)) { text-align: center; font-weight: 400; }
+:where(#chat)[data-view="terminal"] .md blockquote, [data-view="terminal"] .md blockquote:not(:where(#chat, #chat *)) { background: none; padding: 0 0 0 var(--cell-w); border-left: 1px solid var(--quote-border); color: var(--muted); font-style: italic; }
+:where(#chat)[data-view="terminal"] .md hr, [data-view="terminal"] .md hr:not(:where(#chat, #chat *)) { border-top: 1px solid var(--muted); }
 
 /* A tool call: ● Name(what), then ⎿ and the first lines of what came back */
-[data-view="terminal"] .tool-head { display: block; padding-left: calc(4 * var(--cell-w)); text-indent: calc(-4 * var(--cell-w)); white-space: pre-wrap; }
-[data-view="terminal"] .tool-name { margin: 0; color: var(--strong); }
-[data-view="terminal"] .tool-desc { display: none; }
-[data-view="terminal"] .tool-arg { font-size: inherit; word-break: normal; overflow-wrap: anywhere; }
-[data-view="terminal"] .tool.cmd .tool-arg { display: inline; }
-[data-view="terminal"] .tool-arg::before { content: "("; }
-[data-view="terminal"] .tool-arg::after { content: ")"; }
-[data-view="terminal"] .tool-body, [data-view="terminal"] .tool:not(.cmd):not(.err):not(.has-diff) .tool-body { display: block; border: 0; border-radius: 0; background: none; margin: 0; }
-[data-view="terminal"] .tool-row { padding: 0; border: 0; grid-template-columns: calc(3 * var(--cell-w)) minmax(0, 1fr); }
-[data-view="terminal"] .tool-row.in, [data-view="terminal"] .tool-label { display: none; }
-[data-view="terminal"] .tool-row.out::before { content: "⎿"; color: var(--muted); }
+:where(#chat)[data-view="terminal"] .tool-head, [data-view="terminal"] .tool-head:not(:where(#chat, #chat *)) { display: block; padding-left: calc(4 * var(--cell-w)); text-indent: calc(-4 * var(--cell-w)); white-space: pre-wrap; }
+:where(#chat)[data-view="terminal"] .tool-name, [data-view="terminal"] .tool-name:not(:where(#chat, #chat *)) { margin: 0; color: var(--strong); }
+:where(#chat)[data-view="terminal"] .tool-desc, [data-view="terminal"] .tool-desc:not(:where(#chat, #chat *)) { display: none; }
+:where(#chat)[data-view="terminal"] .tool-arg, [data-view="terminal"] .tool-arg:not(:where(#chat, #chat *)) { font-size: inherit; word-break: normal; overflow-wrap: anywhere; }
+:where(#chat)[data-view="terminal"] .tool.cmd .tool-arg, [data-view="terminal"] .tool.cmd .tool-arg:not(:where(#chat, #chat *)) { display: inline; }
+:where(#chat)[data-view="terminal"] .tool-arg::before, [data-view="terminal"] .tool-arg:not(:where(#chat, #chat *))::before { content: "("; }
+:where(#chat)[data-view="terminal"] .tool-arg::after, [data-view="terminal"] .tool-arg:not(:where(#chat, #chat *))::after { content: ")"; }
+:where(#chat)[data-view="terminal"] .tool-body, [data-view="terminal"] .tool-body:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .tool:not(.cmd):not(.err):not(.has-diff) .tool-body, [data-view="terminal"] .tool:not(.cmd):not(.err):not(.has-diff) .tool-body:not(:where(#chat, #chat *)) { display: block; border: 0; border-radius: 0; background: none; margin: 0; }
+:where(#chat)[data-view="terminal"] .tool-row, [data-view="terminal"] .tool-row:not(:where(#chat, #chat *)) { padding: 0; border: 0; grid-template-columns: calc(3 * var(--cell-w)) minmax(0, 1fr); }
+:where(#chat)[data-view="terminal"] .tool-row.in, [data-view="terminal"] .tool-row.in:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .tool-label, [data-view="terminal"] .tool-label:not(:where(#chat, #chat *)) { display: none; }
+:where(#chat)[data-view="terminal"] .tool-row.out::before, [data-view="terminal"] .tool-row.out:not(:where(#chat, #chat *))::before { content: "⎿"; color: var(--muted); }
 /* Output wraps at the column, wherever that falls, as a terminal wraps it */
-[data-view="terminal"] .tool-io { padding: 0; font-size: inherit; max-height: none; -webkit-mask-image: none; mask-image: none; white-space: pre-wrap; word-break: break-all; }
-[data-view="terminal"] .tool.err .tool-io { color: var(--err); }
+:where(#chat)[data-view="terminal"] .tool-io, [data-view="terminal"] .tool-io:not(:where(#chat, #chat *)) { padding: 0; font-size: inherit; max-height: none; -webkit-mask-image: none; mask-image: none; white-space: pre-wrap; word-break: break-all; }
+:where(#chat)[data-view="terminal"] .tool.err .tool-io, [data-view="terminal"] .tool.err .tool-io:not(:where(#chat, #chat *)) { color: var(--err); }
 /* Folded: three rows of what came back, twelve of an edit */
-[data-view="terminal"] .tool-row.out:not(.expanded) .tool-io { max-height: calc(3 * var(--line) * 1em); }
-[data-view="terminal"] .tool-row.out.diff:not(.expanded) .tool-io { max-height: calc(12 * var(--line) * 1em); }
-[data-view="terminal"] .tool-more { padding: 0; font-size: inherit; }
-[data-view="terminal"] .tool-more:not(:empty) { display: block; }
+:where(#chat)[data-view="terminal"] .tool-row.out:not(.expanded) .tool-io, [data-view="terminal"] .tool-row.out:not(.expanded) .tool-io:not(:where(#chat, #chat *)) { max-height: calc(3 * var(--line) * 1em); }
+:where(#chat)[data-view="terminal"] .tool-row.out.diff:not(.expanded) .tool-io, [data-view="terminal"] .tool-row.out.diff:not(.expanded) .tool-io:not(:where(#chat, #chat *)) { max-height: calc(12 * var(--line) * 1em); }
+:where(#chat)[data-view="terminal"] .tool-more, [data-view="terminal"] .tool-more:not(:where(#chat, #chat *)) { padding: 0; font-size: inherit; }
+:where(#chat)[data-view="terminal"] .tool-more:not(:empty), [data-view="terminal"] .tool-more:not(:empty):not(:where(#chat, #chat *)) { display: block; }
 
-[data-view="terminal"] .msg.output {
+:where(#chat)[data-view="terminal"] .msg.output, [data-view="terminal"] .msg.output:not(:where(#chat, #chat *)) {
   background: none;
   border-radius: 0;
   padding: 0 0 0 calc(5 * var(--cell-w));
@@ -1568,19 +1627,19 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   overflow: visible;
   color: var(--muted);
 }
-[data-view="terminal"] .msg.output::before { content: "⎿"; position: absolute; left: calc(2 * var(--cell-w)); }
-[data-view="terminal"] .msg.notice { opacity: 1; font-style: normal; padding-left: calc(2 * var(--cell-w)); }
-[data-view="terminal"] .working-line { min-height: 0; margin: 0; }
-[data-view="terminal"] .working-line .spin { width: calc(2 * var(--cell-w)); text-align: left; }
-[data-view="terminal"] .working-line .esc { margin-left: var(--cell-w); color: var(--muted); }
+:where(#chat)[data-view="terminal"] .msg.output::before, [data-view="terminal"] .msg.output:not(:where(#chat, #chat *))::before { content: "⎿"; position: absolute; left: calc(2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .msg.notice, [data-view="terminal"] .msg.notice:not(:where(#chat, #chat *)) { opacity: 1; font-style: normal; padding-left: calc(2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .working-line, [data-view="terminal"] .working-line:not(:where(#chat, #chat *)) { min-height: 0; margin: 0; }
+:where(#chat)[data-view="terminal"] .working-line .spin, [data-view="terminal"] .working-line .spin:not(:where(#chat, #chat *)) { width: calc(2 * var(--cell-w)); text-align: left; }
+:where(#chat)[data-view="terminal"] .working-line .esc, [data-view="terminal"] .working-line .esc:not(:where(#chat, #chat *)) { margin-left: var(--cell-w); color: var(--muted); }
 
 /* Prompts to answer: a box in the permission color, its choices numbered */
-[data-view="terminal"] .requests { padding: 0 var(--cell-w) .5em; gap: .5em; }
-[data-view="terminal"] .card { max-width: none; border-color: var(--code-inline-text); border-radius: 4px; padding: 0 var(--cell-w); gap: 0; }
-[data-view="terminal"] .card-title { color: var(--strong); }
-[data-view="terminal"] .card-detail { background: none; border-radius: 0; padding: 0 0 0 calc(2 * var(--cell-w)); font-size: inherit; margin: calc(var(--line) * .5em) 0; }
-[data-view="terminal"] .card-actions, [data-view="terminal"] .options { flex-direction: column; align-items: flex-start; gap: 0; counter-reset: choice; }
-[data-view="terminal"] .card-actions button, [data-view="terminal"] .option {
+:where(#chat)[data-view="terminal"] .requests, [data-view="terminal"] .requests:not(:where(#chat, #chat *)) { padding: 0 var(--cell-w) .5em; gap: .5em; }
+:where(#chat)[data-view="terminal"] .card, [data-view="terminal"] .card:not(:where(#chat, #chat *)) { max-width: none; border-color: var(--code-inline-text); border-radius: 4px; padding: 0 var(--cell-w); gap: 0; }
+:where(#chat)[data-view="terminal"] .card-title, [data-view="terminal"] .card-title:not(:where(#chat, #chat *)) { color: var(--strong); }
+:where(#chat)[data-view="terminal"] .card-detail, [data-view="terminal"] .card-detail:not(:where(#chat, #chat *)) { background: none; border-radius: 0; padding: 0 0 0 calc(2 * var(--cell-w)); font-size: inherit; margin: calc(var(--line) * .5em) 0; }
+:where(#chat)[data-view="terminal"] .card-actions, [data-view="terminal"] .card-actions:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .options, [data-view="terminal"] .options:not(:where(#chat, #chat *)) { flex-direction: column; align-items: flex-start; gap: 0; counter-reset: choice; }
+:where(#chat)[data-view="terminal"] .card-actions button, [data-view="terminal"] .card-actions button:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .option, [data-view="terminal"] .option:not(:where(#chat, #chat *)) {
   counter-increment: choice;
   border: 0;
   background: none;
@@ -1588,58 +1647,57 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   color: var(--text);
   text-align: left;
 }
-[data-view="terminal"] .card-actions button::before, [data-view="terminal"] .option::before { content: counter(choice) ". "; }
-[data-view="terminal"] .card-actions button:hover, [data-view="terminal"] .option:hover, [data-view="terminal"] .option.picked { color: var(--code-inline-text); background: none; }
-[data-view="terminal"] .option.picked::before { content: "✔ " counter(choice) ". "; margin-left: calc(-2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .card-actions button::before, [data-view="terminal"] .card-actions button:not(:where(#chat, #chat *))::before, :where(#chat)[data-view="terminal"] .option::before, [data-view="terminal"] .option:not(:where(#chat, #chat *))::before { content: counter(choice) ". "; }
+:where(#chat)[data-view="terminal"] .card-actions button:hover, [data-view="terminal"] .card-actions button:hover:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .option:hover, [data-view="terminal"] .option:hover:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .option.picked, [data-view="terminal"] .option.picked:not(:where(#chat, #chat *)) { color: var(--code-inline-text); background: none; }
+:where(#chat)[data-view="terminal"] .option.picked::before, [data-view="terminal"] .option.picked:not(:where(#chat, #chat *))::before { content: "✔ " counter(choice) ". "; margin-left: calc(-2 * var(--cell-w)); }
 /* A question's choices carry the numbers; its buttons sit in a row under them */
-[data-view="terminal"] .card:has(.question) .card-actions { flex-direction: row; gap: calc(2 * var(--cell-w)); padding-left: calc(2 * var(--cell-w)); }
-[data-view="terminal"] .card:has(.question) .card-actions button { padding: 0; color: var(--muted); }
-[data-view="terminal"] .card:has(.question) .card-actions button::before { content: "["; }
-[data-view="terminal"] .card:has(.question) .card-actions button::after { content: "]"; }
-[data-view="terminal"] .chip { border-radius: 0; padding: 0 var(--cell-w); }
-[data-view="terminal"] .other { padding: 0 var(--cell-w); margin-left: calc(2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .card:has(.question) .card-actions, [data-view="terminal"] .card:has(.question) .card-actions:not(:where(#chat, #chat *)) { flex-direction: row; gap: calc(2 * var(--cell-w)); padding-left: calc(2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .card:has(.question) .card-actions button, [data-view="terminal"] .card:has(.question) .card-actions button:not(:where(#chat, #chat *)) { padding: 0; color: var(--muted); }
+:where(#chat)[data-view="terminal"] .card:has(.question) .card-actions button::before, [data-view="terminal"] .card:has(.question) .card-actions button:not(:where(#chat, #chat *))::before { content: "["; }
+:where(#chat)[data-view="terminal"] .card:has(.question) .card-actions button::after, [data-view="terminal"] .card:has(.question) .card-actions button:not(:where(#chat, #chat *))::after { content: "]"; }
+:where(#chat)[data-view="terminal"] .chip, [data-view="terminal"] .chip:not(:where(#chat, #chat *)) { border-radius: 0; padding: 0 var(--cell-w); }
+:where(#chat)[data-view="terminal"] .other, [data-view="terminal"] .other:not(:where(#chat, #chat *)) { padding: 0 var(--cell-w); margin-left: calc(2 * var(--cell-w)); }
 
 /* The reply box: a prompt between two rules, the mode line under it */
-[data-view="terminal"] .composer { padding: 0 var(--cell-w) .5em; padding-bottom: max(.5em, env(safe-area-inset-bottom)); }
-[data-view="terminal"] .composer-box { max-width: none; border: 0; border-radius: 0; background: none; box-shadow: none; }
-[data-view="terminal"] .composer-input { border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
-[data-view="terminal"] .dropping .composer-input { border-style: dashed; border-color: var(--accent); }
-[data-view="terminal"] .prompt-char { width: calc(2 * var(--cell-w)); flex-shrink: 0; color: var(--strong); }
-[data-view="terminal"] .composer textarea { padding: 0; line-height: var(--line); min-height: calc(var(--line) * 1em); }
-[data-view="terminal"] .composer-foot { border: 0; padding: 0 calc(2 * var(--cell-w)); gap: calc(2 * var(--cell-w)); }
-[data-view="terminal"] .foot-mode { order: 0; font-size: inherit; line-height: inherit; padding: 0; }
-[data-view="terminal"] .foot-space { order: 1; }
-[data-view="terminal"] .foot-btn { order: 3; }
-[data-view="terminal"] .send { order: 4; }
+:where(#chat)[data-view="terminal"] .composer, [data-view="terminal"] .composer:not(:where(#chat, #chat *)) { padding: 0 var(--cell-w) .5em; padding-bottom: max(.5em, env(safe-area-inset-bottom)); }
+:where(#chat)[data-view="terminal"] .composer-box, [data-view="terminal"] .composer-box:not(:where(#chat, #chat *)) { max-width: none; border: 0; border-radius: 0; background: none; box-shadow: none; }
+:where(#chat)[data-view="terminal"] .composer-input, [data-view="terminal"] .composer-input:not(:where(#chat, #chat *)) { border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+:where(#chat)[data-view="terminal"] .dropping .composer-input, [data-view="terminal"] .dropping .composer-input:not(:where(#chat, #chat *)) { border-style: dashed; border-color: var(--accent); }
+:where(#chat)[data-view="terminal"] .prompt-char, [data-view="terminal"] .prompt-char:not(:where(#chat, #chat *)) { width: calc(2 * var(--cell-w)); flex-shrink: 0; color: var(--strong); }
+:where(#chat)[data-view="terminal"] .composer textarea, [data-view="terminal"] .composer textarea:not(:where(#chat, #chat *)) { padding: 0; line-height: var(--line); min-height: calc(var(--line) * 1em); }
+:where(#chat)[data-view="terminal"] .composer-foot, [data-view="terminal"] .composer-foot:not(:where(#chat, #chat *)) { border: 0; padding: 0 calc(2 * var(--cell-w)); gap: calc(2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .foot-mode, [data-view="terminal"] .foot-mode:not(:where(#chat, #chat *)) { order: 0; font-size: inherit; line-height: inherit; padding: 0; }
+:where(#chat)[data-view="terminal"] .foot-space, [data-view="terminal"] .foot-space:not(:where(#chat, #chat *)) { order: 1; }
+:where(#chat)[data-view="terminal"] .foot-btn, [data-view="terminal"] .foot-btn:not(:where(#chat, #chat *)) { order: 3; }
+:where(#chat)[data-view="terminal"] .send, [data-view="terminal"] .send:not(:where(#chat, #chat *)) { order: 4; }
 /* (the model and effort under the prompt, as a terminal says the effort: "◉ xhigh · /effort") */
-[data-view="terminal"] .composer-foot { flex-wrap: wrap; row-gap: 0; }
-[data-view="terminal"] .foot-model, [data-view="terminal"] .foot-effort { order: 2; height: auto; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: var(--muted); font: inherit; line-height: inherit; }
-[data-view="terminal"] .foot-model, [data-view="terminal"] .foot-effort { display: inline-flex; align-items: center; gap: 0; }
-[data-view="terminal"] .foot-hint { white-space: pre; }
-[data-view="terminal"] .foot-auto { order: 1; height: auto; margin: 0; padding: 0; border-radius: 0; background: none; font-size: inherit; line-height: inherit; }
-[data-view="terminal"] .foot-auto.on { background: none; color: var(--err); }
-[data-view="terminal"] .menu-sep { height: calc(var(--line) * .5em); margin: 0; background: none; }
-[data-view="terminal"] .foot-model b { font-weight: inherit; color: inherit; }
-[data-view="terminal"] .foot-model:hover:not(:disabled), [data-view="terminal"] .foot-effort:hover:not(:disabled),
-[data-view="terminal"] .foot-model[aria-expanded="true"], [data-view="terminal"] .foot-effort[aria-expanded="true"] { background: none; color: var(--strong); }
-[data-view="terminal"] .foot-model:hover:not(:disabled) b, [data-view="terminal"] .foot-model:hover:not(:disabled) span { color: var(--strong); }
+:where(#chat)[data-view="terminal"] .composer-foot, [data-view="terminal"] .composer-foot:not(:where(#chat, #chat *)) { flex-wrap: wrap; row-gap: 0; }
+:where(#chat)[data-view="terminal"] .foot-model, [data-view="terminal"] .foot-model:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .foot-effort, [data-view="terminal"] .foot-effort:not(:where(#chat, #chat *)) { order: 2; height: auto; margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: var(--muted); font: inherit; line-height: inherit; }
+:where(#chat)[data-view="terminal"] .foot-model, [data-view="terminal"] .foot-model:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .foot-effort, [data-view="terminal"] .foot-effort:not(:where(#chat, #chat *)) { display: inline-flex; align-items: center; gap: 0; }
+:where(#chat)[data-view="terminal"] .foot-hint, [data-view="terminal"] .foot-hint:not(:where(#chat, #chat *)) { white-space: pre; }
+:where(#chat)[data-view="terminal"] .foot-auto, [data-view="terminal"] .foot-auto:not(:where(#chat, #chat *)) { order: 1; height: auto; margin: 0; padding: 0; border-radius: 0; background: none; font-size: inherit; line-height: inherit; }
+:where(#chat)[data-view="terminal"] .foot-auto.on, [data-view="terminal"] .foot-auto.on:not(:where(#chat, #chat *)) { background: none; color: var(--err); }
+:where(#chat)[data-view="terminal"] .menu-sep, [data-view="terminal"] .menu-sep:not(:where(#chat, #chat *)) { height: calc(var(--line) * .5em); margin: 0; background: none; }
+:where(#chat)[data-view="terminal"] .foot-model b, [data-view="terminal"] .foot-model b:not(:where(#chat, #chat *)) { font-weight: inherit; color: inherit; }
+:where(#chat)[data-view="terminal"] .foot-model:hover:not(:disabled), [data-view="terminal"] .foot-model:hover:not(:disabled):not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .foot-effort:hover:not(:disabled), [data-view="terminal"] .foot-effort:hover:not(:disabled):not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .foot-model[aria-expanded="true"], [data-view="terminal"] .foot-model[aria-expanded="true"]:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .foot-effort[aria-expanded="true"], [data-view="terminal"] .foot-effort[aria-expanded="true"]:not(:where(#chat, #chat *)) { background: none; color: var(--strong); }
+:where(#chat)[data-view="terminal"] .foot-model:hover:not(:disabled) b, [data-view="terminal"] .foot-model:hover:not(:disabled) b:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .foot-model:hover:not(:disabled) span, [data-view="terminal"] .foot-model:hover:not(:disabled) span:not(:where(#chat, #chat *)) { color: var(--strong); }
 /* (its pickers: what a terminal draws under the prompt's rule for /model and /effort) */
-[data-view="terminal"] .foot-menu { position: static; width: auto; max-height: 60dvh; border: 0; border-top: 1px solid var(--rule); border-radius: 0; background: none; box-shadow: none; font-size: inherit; counter-reset: pick; }
-[data-view="terminal"] .menu-list, [data-view="terminal"] .menu-foot { padding: 0 calc(2 * var(--cell-w)); border: 0; }
-[data-view="terminal"] .menu-foot { padding-bottom: calc(var(--line) * .5em); }
-[data-view="terminal"] .menu-foot .effort-line { margin-top: calc(var(--line) * .5em); }
-[data-view="terminal"] .menu-head { padding: 0; color: var(--strong); font-weight: bold; }
-[data-view="terminal"] .menu-note { margin: 0 0 calc(var(--line) * .5em); font-size: inherit; line-height: inherit; }
-[data-view="terminal"] .menu-row { display: flex; align-items: baseline; gap: 0; padding: 0; border-radius: 0; counter-increment: pick; }
-[data-view="terminal"] button.menu-row:hover:not(:disabled), [data-view="terminal"] button.menu-row:focus-visible, [data-view="terminal"] .menu-row.on { background: none; }
-[data-view="terminal"] .menu-row > .menu-icon { width: calc(2 * var(--cell-w)); height: auto; color: var(--accent); }
-[data-view="terminal"] button.menu-row:hover:not(:disabled) > .menu-icon::before, [data-view="terminal"] button.menu-row:focus-visible > .menu-icon::before { content: "❯"; }
-[data-view="terminal"] .menu-text { display: flex; flex-wrap: wrap; column-gap: calc(2 * var(--cell-w)); }
-[data-view="terminal"] .menu-title::before { content: counter(pick) ". "; color: var(--muted); }
-[data-view="terminal"] .menu-title { min-width: calc(30 * var(--cell-w)); }
-[data-view="terminal"] button.menu-row:hover:not(:disabled) .menu-title, [data-view="terminal"] button.menu-row:focus-visible .menu-title { color: var(--accent); }
-[data-view="terminal"] .menu-tick { color: var(--ok); }
-[data-view="terminal"] .menu-say { font-size: inherit; line-height: inherit; }
+:where(#chat)[data-view="terminal"] .foot-menu, [data-view="terminal"] .foot-menu:not(:where(#chat, #chat *)) { position: static; width: auto; max-height: 60dvh; border: 0; border-top: 1px solid var(--rule); border-radius: 0; background: none; box-shadow: none; font-size: inherit; counter-reset: pick; }
+:where(#chat)[data-view="terminal"] .menu-list, [data-view="terminal"] .menu-list:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .menu-foot, [data-view="terminal"] .menu-foot:not(:where(#chat, #chat *)) { padding: 0 calc(2 * var(--cell-w)); border: 0; }
+:where(#chat)[data-view="terminal"] .menu-foot, [data-view="terminal"] .menu-foot:not(:where(#chat, #chat *)) { padding-bottom: calc(var(--line) * .5em); }
+:where(#chat)[data-view="terminal"] .menu-foot .effort-line, [data-view="terminal"] .menu-foot .effort-line:not(:where(#chat, #chat *)) { margin-top: calc(var(--line) * .5em); }
+:where(#chat)[data-view="terminal"] .menu-head, [data-view="terminal"] .menu-head:not(:where(#chat, #chat *)) { padding: 0; color: var(--strong); font-weight: bold; }
+:where(#chat)[data-view="terminal"] .menu-note, [data-view="terminal"] .menu-note:not(:where(#chat, #chat *)) { margin: 0 0 calc(var(--line) * .5em); font-size: inherit; line-height: inherit; }
+:where(#chat)[data-view="terminal"] .menu-row, [data-view="terminal"] .menu-row:not(:where(#chat, #chat *)) { display: flex; align-items: baseline; gap: 0; padding: 0; border-radius: 0; counter-increment: pick; }
+:where(#chat)[data-view="terminal"] button.menu-row:hover:not(:disabled), [data-view="terminal"] button.menu-row:hover:not(:disabled):not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] button.menu-row:focus-visible, [data-view="terminal"] button.menu-row:focus-visible:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .menu-row.on, [data-view="terminal"] .menu-row.on:not(:where(#chat, #chat *)) { background: none; }
+:where(#chat)[data-view="terminal"] .menu-row > .menu-icon, [data-view="terminal"] .menu-row > .menu-icon:not(:where(#chat, #chat *)) { width: calc(2 * var(--cell-w)); height: auto; color: var(--accent); }
+:where(#chat)[data-view="terminal"] button.menu-row:hover:not(:disabled) > .menu-icon::before, [data-view="terminal"] button.menu-row:hover:not(:disabled) > .menu-icon:not(:where(#chat, #chat *))::before, :where(#chat)[data-view="terminal"] button.menu-row:focus-visible > .menu-icon::before, [data-view="terminal"] button.menu-row:focus-visible > .menu-icon:not(:where(#chat, #chat *))::before { content: "❯"; }
+:where(#chat)[data-view="terminal"] .menu-text, [data-view="terminal"] .menu-text:not(:where(#chat, #chat *)) { display: flex; flex-wrap: wrap; column-gap: calc(2 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] .menu-title::before, [data-view="terminal"] .menu-title:not(:where(#chat, #chat *))::before { content: counter(pick) ". "; color: var(--muted); }
+:where(#chat)[data-view="terminal"] .menu-title, [data-view="terminal"] .menu-title:not(:where(#chat, #chat *)) { min-width: calc(30 * var(--cell-w)); }
+:where(#chat)[data-view="terminal"] button.menu-row:hover:not(:disabled) .menu-title, [data-view="terminal"] button.menu-row:hover:not(:disabled) .menu-title:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] button.menu-row:focus-visible .menu-title, [data-view="terminal"] button.menu-row:focus-visible .menu-title:not(:where(#chat, #chat *)) { color: var(--accent); }
+:where(#chat)[data-view="terminal"] .menu-tick, [data-view="terminal"] .menu-tick:not(:where(#chat, #chat *)) { color: var(--ok); }
+:where(#chat)[data-view="terminal"] .menu-say, [data-view="terminal"] .menu-say:not(:where(#chat, #chat *)) { font-size: inherit; line-height: inherit; }
 .effort-line { display: grid; width: min(100%, calc(44 * var(--cell-w, 8px))); margin: 0 0 calc(var(--line, 1.4) * .5em) calc(2 * var(--cell-w, 8px)); }
 .effort-ends { display: flex; justify-content: space-between; color: var(--muted); }
 .effort-track { display: grid; grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--rule); margin-top: calc(var(--line, 1.4) * .5em); line-height: 1; }
@@ -1649,8 +1707,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 .effort-names button.on { color: var(--strong); font-weight: bold; }
 .effort-names button:hover:not(:disabled), .effort-names button:focus-visible { color: var(--accent); outline: 0; }
 
-[data-view="terminal"] .foot-btn, [data-view="terminal"] .send,
-[data-view="terminal"] [data-permission-mode] .send {
+:where(#chat)[data-view="terminal"] .foot-btn, [data-view="terminal"] .foot-btn:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .send, [data-view="terminal"] .send:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] [data-permission-mode] .send, [data-view="terminal"] [data-permission-mode] .send:not(:where(#chat, #chat *)) {
   width: auto;
   height: auto;
   border-radius: 0;
@@ -1660,18 +1717,51 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   line-height: inherit;
   filter: none;
 }
-[data-view="terminal"] .foot-btn:hover, [data-view="terminal"] .send:hover:not(:disabled) { color: var(--strong); }
-[data-view="terminal"] [data-permission-mode="acceptEdits"] .foot-mode { color: var(--auto-accept); }
-[data-view="terminal"] [data-permission-mode="plan"] .foot-mode { color: var(--plan); }
-[data-view="terminal"] [data-permission-mode="bypassPermissions"] .foot-mode, [data-view="terminal"] [data-permission-mode="auto"] .foot-mode { color: var(--err); }
-[data-view="terminal"] .chips { padding: 0 0 .5em; }
-[data-view="terminal"] .chip-photo img, [data-view="terminal"] .chip-file, [data-view="terminal"] .sent-file { border-radius: 0; }
-[data-view="terminal"] .composer-note { padding: 0 calc(3 * var(--cell-w)) .5em; }
+:where(#chat)[data-view="terminal"] .foot-btn:hover, [data-view="terminal"] .foot-btn:hover:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .send:hover:not(:disabled), [data-view="terminal"] .send:hover:not(:disabled):not(:where(#chat, #chat *)) { color: var(--strong); }
+:where(#chat)[data-view="terminal"] [data-permission-mode="acceptEdits"] .foot-mode, [data-view="terminal"] [data-permission-mode="acceptEdits"] .foot-mode:not(:where(#chat, #chat *)) { color: var(--auto-accept); }
+:where(#chat)[data-view="terminal"] [data-permission-mode="plan"] .foot-mode, [data-view="terminal"] [data-permission-mode="plan"] .foot-mode:not(:where(#chat, #chat *)) { color: var(--plan); }
+:where(#chat)[data-view="terminal"] [data-permission-mode="bypassPermissions"] .foot-mode, [data-view="terminal"] [data-permission-mode="bypassPermissions"] .foot-mode:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] [data-permission-mode="auto"] .foot-mode, [data-view="terminal"] [data-permission-mode="auto"] .foot-mode:not(:where(#chat, #chat *)) { color: var(--err); }
+:where(#chat)[data-view="terminal"] .chips, [data-view="terminal"] .chips:not(:where(#chat, #chat *)) { padding: 0 0 .5em; }
+:where(#chat)[data-view="terminal"] .chip-photo img, [data-view="terminal"] .chip-photo img:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .chip-file, [data-view="terminal"] .chip-file:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .sent-file, [data-view="terminal"] .sent-file:not(:where(#chat, #chat *)) { border-radius: 0; }
+:where(#chat)[data-view="terminal"] .composer-note, [data-view="terminal"] .composer-note:not(:where(#chat, #chat *)) { padding: 0 calc(3 * var(--cell-w)) .5em; }
+
+/* ---- The Claude Desktop look ----
+   The Claude app's chat: one column down the middle, what was typed in a soft bubble at its right, Claude's replies as
+   plain text under it with no line down their side (a tool's line keeps a small dot of how it went), tables split by
+   rows alone, and the box a reply is typed in rounded, in the same column */
+:where(#chat)[data-view="desktop"] .messages, [data-view="desktop"] .messages:not(:where(#chat, #chat *)) { padding: 28px 24px 48px; }
+:where(#chat)[data-view="desktop"] .messages > *, [data-view="desktop"] .messages > *:not(:where(#chat, #chat *)) { width: 100%; max-width: var(--column); margin-inline: auto; }
+:where(#chat)[data-view="desktop"] .msg, [data-view="desktop"] .msg:not(:where(#chat, #chat *)) { padding: 10px 0; }
+:where(#chat)[data-view="desktop"] .msg.user, [data-view="desktop"] .msg.user:not(:where(#chat, #chat *)) { align-items: flex-end; }
+:where(#chat)[data-view="desktop"] .msg.user .bubble, [data-view="desktop"] .msg.user .bubble:not(:where(#chat, #chat *)) { margin: 6px 0; max-width: min(85%, 640px); border: 0; border-radius: 16px; background: var(--user-bg); color: var(--user-text); padding: 10px 16px; }
+:where(#chat)[data-view="desktop"] .tl, [data-view="desktop"] .tl:not(:where(#chat, #chat *)) { padding-left: 0; }
+:where(#chat)[data-view="desktop"] .tl::after, [data-view="desktop"] .tl:not(:where(#chat, #chat *))::after { display: none; }
+:where(#chat)[data-view="desktop"] .msg.assistant::before, [data-view="desktop"] .msg.assistant:not(:where(#chat, #chat *))::before { display: none; }
+:where(#chat)[data-view="desktop"] .msg.tool, [data-view="desktop"] .msg.tool:not(:where(#chat, #chat *)) { padding-left: 16px; }
+:where(#chat)[data-view="desktop"] .msg.tool::before, [data-view="desktop"] .msg.tool:not(:where(#chat, #chat *))::before { left: 1px; width: 6px; height: 6px; }
+:where(#chat)[data-view="desktop"] .md, [data-view="desktop"] .md:not(:where(#chat, #chat *)) { line-height: 1.65; }
+:where(#chat)[data-view="desktop"] .md p, [data-view="desktop"] .md p:not(:where(#chat, #chat *)) { margin: .45em 0; }
+:where(#chat)[data-view="desktop"] .md table, [data-view="desktop"] .md table:not(:where(#chat, #chat *)) { margin: 14px 0; }
+:where(#chat)[data-view="desktop"] .md th, [data-view="desktop"] .md th:not(:where(#chat, #chat *)), :where(#chat)[data-view="desktop"] .md td, [data-view="desktop"] .md td:not(:where(#chat, #chat *)) { border: 0; border-bottom: 1px solid var(--border); padding: 9px 28px 9px 0; }
+:where(#chat)[data-view="desktop"] .md th, [data-view="desktop"] .md th:not(:where(#chat, #chat *)) { font-weight: 600; }
+:where(#chat)[data-view="desktop"] .md pre, [data-view="desktop"] .md pre:not(:where(#chat, #chat *)) { border-radius: 10px; padding: 12px 14px; }
+:where(#chat)[data-view="desktop"] .md a, [data-view="desktop"] .md a:not(:where(#chat, #chat *)) { text-decoration: underline; text-underline-offset: 2px; }
+:where(#chat)[data-view="desktop"] .pinned, [data-view="desktop"] .pinned:not(:where(#chat, #chat *)) { padding-inline: max(24px, calc((100% - var(--column)) / 2)); }
+:where(#chat)[data-view="desktop"] .pinned .bubble, [data-view="desktop"] .pinned .bubble:not(:where(#chat, #chat *)) { margin-left: auto; border: 0; border-radius: 14px; background: var(--user-bg); color: var(--user-text); padding: 6px 14px; }
+:where(#chat)[data-view="desktop"] .composer-box, [data-view="desktop"] .composer-box:not(:where(#chat, #chat *)) { max-width: var(--column); border-radius: 18px; box-shadow: 0 2px 10px #00000012; }
+:where(#chat)[data-view="desktop"] .composer textarea, [data-view="desktop"] .composer textarea:not(:where(#chat, #chat *)) { padding: 14px 18px 8px; }
+/* (the box a session is searched in, and what it finds, in the same column) */
+:where(#chat)[data-view="desktop"] .chat-find { padding-inline: max(16px, calc((100% - var(--column)) / 2)); border-bottom: 0; }
+:where(#chat)[data-view="desktop"] .find-hits { left: max(16px, calc((100% - var(--column)) / 2)); right: max(16px, calc((100% - var(--column)) / 2)); }
+:where(#chat)[data-view="desktop"] .find-q { border-radius: 10px; padding: 6px 12px; }
+@media (max-width: 700px) {
+  :where(#chat)[data-view="desktop"] .messages, [data-view="desktop"] .messages:not(:where(#chat, #chat *)) { padding: 18px 14px 32px; }
+}
 
 /* ---- Phones ---- */
 
 @media (max-width: 760px) {
-  #app, [data-view="terminal"] #app { grid-template-columns: minmax(0, 1fr); }
+  #app, :where(#chat)[data-view="terminal"] #app, [data-view="terminal"] #app:not(:where(#chat, #chat *)) { grid-template-columns: minmax(0, 1fr); }
   #chat-pane { grid-column: 1; }
   body.chat-open #list-pane { display: none; }
   .divider { display: none; }
@@ -1689,7 +1779,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 
 /* A touch keyboard zooms the page into anything typed in under 16px */
 @media (pointer: coarse) {
-  .composer textarea, [data-view="terminal"] .composer textarea, .other, #search, .new-form input, .new-form select, .new-form textarea { font-size: 16px; letter-spacing: normal; }
+  .composer textarea, :where(#chat)[data-view="terminal"] .composer textarea, [data-view="terminal"] .composer textarea:not(:where(#chat, #chat *)), .other, #search, .new-form input, .new-form select, .new-form textarea { font-size: 16px; letter-spacing: normal; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1734,8 +1824,9 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 
 @media (pointer: coarse) {
   /* Type a size up, and whatever is tapped big enough for a finger */
-  :root { --size: 16px; --tap: 44px; }
-  :root[data-view="terminal"] { --size: 13px; --cell-w: 8px; --line: calc(17 / 13); }
+  :root, :where(#chat)[data-view] { --size: 16px; --tap: 44px; }
+  :root[data-view="terminal"], :where(#chat)[data-view="terminal"] { --size: 13px; --cell-w: 8px; --line: calc(17 / 13); }
+  :root[data-view="desktop"], :where(#chat)[data-view="desktop"] { --size: 16px; }
   html { -webkit-tap-highlight-color: transparent; }
   body { overscroll-behavior: none; }
   .session-list, .messages { overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
@@ -1808,30 +1899,30 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .new-form label.check input { width: 22px; height: 22px; padding: 0; }
 
   /* The terminal look stays a terminal: its own type, a size up, with room around what's tapped */
-  [data-view="terminal"] .bar { padding: .7em var(--cell-w); min-height: 48px; gap: calc(1.5 * var(--cell-w)); }
-  [data-view="terminal"] .view-switch button { padding: .55em var(--cell-w); }
-  [data-view="terminal"] .row { padding: .6em var(--cell-w); }
-  [data-view="terminal"] .project, [data-view="terminal"] .more-link, [data-view="terminal"] .earlier { padding-top: .75em; padding-bottom: .75em; }
-  [data-view="terminal"] .hit { padding-top: .45em; padding-bottom: .45em; }
-  [data-view="terminal"] .machine-open { padding: .6em var(--cell-w); }
-  [data-view="terminal"] .head-link { width: auto; height: auto; margin: 0; padding: .3em 0 .3em .6em; }
-  [data-view="terminal"] .head-icon { width: 1.3em; height: 1.3em; }
-  [data-view="terminal"] .primary, [data-view="terminal"] .ghost, [data-view="terminal"] .stop { padding: .6em calc(1.5 * var(--cell-w)); min-height: 0; }
-  [data-view="terminal"] .messages { padding: .6em var(--cell-w) 2.5em; }
-  [data-view="terminal"] .card-actions button, [data-view="terminal"] .option { min-height: 0; padding-top: .55em; padding-bottom: .55em; flex: none; }
-  [data-view="terminal"] .composer { padding-left: var(--cell-w); padding-right: var(--cell-w); }
-  [data-view="terminal"] .composer textarea { padding: .5em 0; }
-  [data-view="terminal"] .composer-foot { padding: 0 calc(2 * var(--cell-w)); }
-  [data-view="terminal"] .foot-btn, [data-view="terminal"] .send, [data-view="terminal"] [data-permission-mode] .send { width: auto; height: auto; min-height: var(--tap); border-radius: 0; font-size: inherit; }
-  [data-view="terminal"] .foot-mode { line-height: var(--tap); font-size: inherit; }
-  [data-view="terminal"] .foot-mode { flex: 0 1 auto; }
-  [data-view="terminal"] .foot-auto { min-height: var(--tap); }
-  [data-view="terminal"] .foot-break { display: block; order: 1; flex-basis: 100%; height: 0; }
-  [data-view="terminal"] .foot-space { order: 3; }
-  [data-view="terminal"] .foot-btn { order: 4; }
-  [data-view="terminal"] .send { order: 5; }
-  [data-view="terminal"] .foot-model, [data-view="terminal"] .foot-effort { min-height: var(--tap); }
-  [data-view="terminal"] .foot-hint { display: none; }
+  :where(#chat)[data-view="terminal"] .bar, [data-view="terminal"] .bar:not(:where(#chat, #chat *)) { padding: .7em var(--cell-w); min-height: 48px; gap: calc(1.5 * var(--cell-w)); }
+  :where(#chat)[data-view="terminal"] .view-switch button, [data-view="terminal"] .view-switch button:not(:where(#chat, #chat *)) { padding: .55em var(--cell-w); }
+  :where(#chat)[data-view="terminal"] .row, [data-view="terminal"] .row:not(:where(#chat, #chat *)) { padding: .6em var(--cell-w); }
+  :where(#chat)[data-view="terminal"] .project, [data-view="terminal"] .project:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .more-link, [data-view="terminal"] .more-link:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .earlier, [data-view="terminal"] .earlier:not(:where(#chat, #chat *)) { padding-top: .75em; padding-bottom: .75em; }
+  :where(#chat)[data-view="terminal"] .hit, [data-view="terminal"] .hit:not(:where(#chat, #chat *)) { padding-top: .45em; padding-bottom: .45em; }
+  :where(#chat)[data-view="terminal"] .machine-open, [data-view="terminal"] .machine-open:not(:where(#chat, #chat *)) { padding: .6em var(--cell-w); }
+  :where(#chat)[data-view="terminal"] .head-link, [data-view="terminal"] .head-link:not(:where(#chat, #chat *)) { width: auto; height: auto; margin: 0; padding: .3em 0 .3em .6em; }
+  :where(#chat)[data-view="terminal"] .head-icon, [data-view="terminal"] .head-icon:not(:where(#chat, #chat *)) { width: 1.3em; height: 1.3em; }
+  :where(#chat)[data-view="terminal"] .primary, [data-view="terminal"] .primary:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .ghost, [data-view="terminal"] .ghost:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .stop, [data-view="terminal"] .stop:not(:where(#chat, #chat *)) { padding: .6em calc(1.5 * var(--cell-w)); min-height: 0; }
+  :where(#chat)[data-view="terminal"] .messages, [data-view="terminal"] .messages:not(:where(#chat, #chat *)) { padding: .6em var(--cell-w) 2.5em; }
+  :where(#chat)[data-view="terminal"] .card-actions button, [data-view="terminal"] .card-actions button:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .option, [data-view="terminal"] .option:not(:where(#chat, #chat *)) { min-height: 0; padding-top: .55em; padding-bottom: .55em; flex: none; }
+  :where(#chat)[data-view="terminal"] .composer, [data-view="terminal"] .composer:not(:where(#chat, #chat *)) { padding-left: var(--cell-w); padding-right: var(--cell-w); }
+  :where(#chat)[data-view="terminal"] .composer textarea, [data-view="terminal"] .composer textarea:not(:where(#chat, #chat *)) { padding: .5em 0; }
+  :where(#chat)[data-view="terminal"] .composer-foot, [data-view="terminal"] .composer-foot:not(:where(#chat, #chat *)) { padding: 0 calc(2 * var(--cell-w)); }
+  :where(#chat)[data-view="terminal"] .foot-btn, [data-view="terminal"] .foot-btn:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .send, [data-view="terminal"] .send:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] [data-permission-mode] .send, [data-view="terminal"] [data-permission-mode] .send:not(:where(#chat, #chat *)) { width: auto; height: auto; min-height: var(--tap); border-radius: 0; font-size: inherit; }
+  :where(#chat)[data-view="terminal"] .foot-mode, [data-view="terminal"] .foot-mode:not(:where(#chat, #chat *)) { line-height: var(--tap); font-size: inherit; }
+  :where(#chat)[data-view="terminal"] .foot-mode, [data-view="terminal"] .foot-mode:not(:where(#chat, #chat *)) { flex: 0 1 auto; }
+  :where(#chat)[data-view="terminal"] .foot-auto, [data-view="terminal"] .foot-auto:not(:where(#chat, #chat *)) { min-height: var(--tap); }
+  :where(#chat)[data-view="terminal"] .foot-break, [data-view="terminal"] .foot-break:not(:where(#chat, #chat *)) { display: block; order: 1; flex-basis: 100%; height: 0; }
+  :where(#chat)[data-view="terminal"] .foot-space, [data-view="terminal"] .foot-space:not(:where(#chat, #chat *)) { order: 3; }
+  :where(#chat)[data-view="terminal"] .foot-btn, [data-view="terminal"] .foot-btn:not(:where(#chat, #chat *)) { order: 4; }
+  :where(#chat)[data-view="terminal"] .send, [data-view="terminal"] .send:not(:where(#chat, #chat *)) { order: 5; }
+  :where(#chat)[data-view="terminal"] .foot-model, [data-view="terminal"] .foot-model:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .foot-effort, [data-view="terminal"] .foot-effort:not(:where(#chat, #chat *)) { min-height: var(--tap); }
+  :where(#chat)[data-view="terminal"] .foot-hint, [data-view="terminal"] .foot-hint:not(:where(#chat, #chat *)) { display: none; }
   /* (a phone has room for the model and effort in full, or the mode's name: its icon stays, and the box's ring is its colour) */
   .mode-btn { height: 42px; padding: 0 10px; }
   .mode-btn span { display: none; }
@@ -1843,7 +1934,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .menu-row { padding: 9px 10px; }
   .menu-row:disabled { padding: 6px 10px; }
   .menu-row:disabled .menu-say { display: none; }
-  [data-view="terminal"] .latest { border-radius: 0; }
+  :where(#chat)[data-view="terminal"] .latest, [data-view="terminal"] .latest:not(:where(#chat, #chat *)) { border-radius: 0; }
 }
 
 @media (max-width: 760px) {
@@ -1853,7 +1944,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .chat-head { gap: 6px; }
   .back { padding-right: 0; min-width: 34px; }
   .chat-head .badge { font-size: 0; width: 12px; height: 12px; padding: 0; border: 0; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-  [data-view="terminal"] .chat-head .badge { width: var(--cell-w); height: var(--cell-w); padding: 0; }
+  :where(#chat)[data-view="terminal"] .chat-head .badge, [data-view="terminal"] .chat-head .badge:not(:where(#chat, #chat *)) { width: var(--cell-w); height: var(--cell-w); padding: 0; }
   .chat-head:not(.more-open) .view-switch.in-chat, .chat-head:not(.more-open) #release, .chat-head:not(.more-open) #remove { display: none; }
   .chat-head:not(.more-open)::after { display: none; }
   .chat-head .ghost { order: 12; }
