@@ -1,11 +1,11 @@
 {
-  "release": 103,
+  "release": 105,
   "made": "2026-10-23",
-  "plugin": "6.2.103",
+  "plugin": "6.2.105",
   "agent": "6.2.4",
   "files": {
     ".claude-plugin/marketplace.json": "7b64a511acba002d84d9f66516d8466a942bb451930eb42db9d94b51e5c76bbf",
-    "mod/.claude-plugin/plugin.json": "bfdf897f2451086ace4d6cae2de5f0e743fd9b43cfc5f500a4e7218aeb3fbbcb",
+    "mod/.claude-plugin/plugin.json": "99ad4a63ee42e6d223ff3804371d23ae238f5602ddf8d307c5d69f68d65f900b",
     "mod/agent/agent.mjs": "b08c521165b78a9039b1fa75bc20f7e420aca81cabc11bee4920e2461521f9c7",
     "mod/agent/cswap.mjs": "c92b960abcaf91422677e1f011867dff5be02f2644e9b0fefef8da5d2bd6baa0",
     "mod/agent/files.mjs": "534c4f6912ee91dff6cad707cb521c8be8ab50fbd0c85f901908548d056cc66e",
@@ -20,7 +20,7 @@
     "mod/agent/transcript.mjs": "08bd4fb9716fec04d3720bc096d5838c5027d96a8db79f9a0fb5f628aefb46a1",
     "mod/agent/verify.mjs": "6b09e70b160cc1f9eb2253d72d0960387e119eb81273b05dc102bb08825af5a8",
     "mod/hooks/hooks.json": "cb0fef141cfd7f4af971712659c7475ddb5686fa8a21c48188fa7e816d615986",
-    "mod/hooks/lib.js": "9c75edffc1ecd5c4a539fa25d306d452aca836877ec0586204dc6c8191a7327d",
+    "mod/hooks/lib.js": "53f6102dd0ffee42bd953b45d2c1d9ec5a504953bcc9df944d21e8e9b07668aa",
     "mod/hooks/register.js": "dc6b7fb1a9697c6796ae765626f9e8ec3ec26c08a2d8975da29e717894bf4e7f",
     "mod/hooks/relay.sh": "b21b5a716cd02402a69cd5d482831b1a288e66294a6f13fb272af07db17bf1c4",
     "mod/hooks/rows.js": "92cdeb63c94ca5778e69cdf7209bdddac07171fc41ee8716faf3af6dda8946ea",
