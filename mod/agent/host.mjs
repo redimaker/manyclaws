@@ -449,7 +449,7 @@ export class Host {
     const proc = spawn(claude, argv, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
     // (one started with nothing to do is idle from the first, and is closed in time like any other left idle)
     const waiting = !String(prompt ?? '').trim()
-    const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', startedAt: Date.now(), lastActive: Date.now(), timer: null, tail: '', asked: new Map(), listed: typeof listed === 'boolean' ? listed : undefined }
+    const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', turn: 'working', background: 0, startedAt: Date.now(), lastActive: Date.now(), timer: null, tail: '', asked: new Map(), listed: typeof listed === 'boolean' ? listed : undefined }
     this.hosted.set(sid, h)
     this.remember(sid)
     this.log(`started ${sid} in ${cwd} (pid ${proc.pid})`)
@@ -478,9 +478,16 @@ export class Host {
           h.mode = msg.permissionMode
           this.onChange()
         }
+        // What it runs in the background (a workflow, a subagent, a command), listed whole whenever that changes. What
+        // Claude Code runs there of its own accord (`ambient`) it does not wait for itself, and neither does the agent
+        if (msg.type === 'system' && msg.subtype === 'background_tasks_changed' && Array.isArray(msg.tasks)) {
+          h.background = msg.tasks.filter((t) => t && !t.ambient).length
+          this.active(h)
+        }
         // A turn ends with a result; until the next prompt the session is idle
         if (msg.type === 'result') this.active(h, 'idle')
-        else if (msg.type === 'assistant' || msg.type === 'user') this.active(h, 'working')
+        // (what a subagent says, one in the background too, is not the session's own turn)
+        else if ((msg.type === 'assistant' || msg.type === 'user') && !msg.parent_tool_use_id) this.active(h, 'working')
         // (by its first reply its transcript is written, and can be marked)
         if (msg.type === 'assistant' || msg.type === 'result') this.mark(h)
       }
@@ -563,7 +570,14 @@ export class Host {
     return null
   }
 
-  active(h, state) {
+  // `turn`: where the session's own turn is, working or idle; left out, as it was (what runs in the background changed)
+  active(h, turn = h.turn) {
+    h.turn = turn
+    // A turn that has ended while what it started in the background runs on is working all the same, and is not closed
+    // for being idle: closed, Claude Code waits ten minutes for that work and then stops it (CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS).
+    // A workflow started from the page was stopped that way again and again, 30 and 10 minutes after the turn that
+    // started it had ended (2026-10-22).
+    const state = turn === 'idle' && h.background > 0 ? 'working' : turn
     const changed = h.state !== state
     h.state = state
     h.lastActive = Date.now()
