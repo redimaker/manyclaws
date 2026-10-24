@@ -3800,11 +3800,76 @@ function connectAsk(body, id, paired, name) {
 
 function openSettings() {
   leaveChat()
-  fill(el('set-connect-body'), connectBox('settings'))
   markTile()
   markHaiku()
   renderAlertsButton()
+  drawSettingsNav()
 }
+
+// ---- Settings is in two groups: what is this device's own (#/settings) and what is the account's (#/account), each on a
+// page of its own, kept apart (deon, 2026-10-24: "Something to keep account and device info separate but still have
+// both very visible. Not just a long laundry list of options"). Beside either page the two are listed, each with its
+// parts under it, and the part that is in sight is marked as the page is scrolled; on a phone the two are side by side
+// over the page, with the parts of the one that is open under them. A part of either is gone to from there.
+const SETTINGS_GROUPS = [
+  { route: '#/settings', name: 'This device', says: () => 'What the list shows and how the page looks, here', body: 'settings-body' },
+  { route: '#/account', name: 'Account', says: () => app.account?.user?.email || 'Your email, computers and browsers', body: 'account-body' },
+]
+// A group's parts, in their order: [id, what it is called]. This device's are the page's own; the account's are the
+// ones its page has for this account (ACCOUNT_PARTS), whether or not it has been drawn yet.
+function settingsParts(group) {
+  if (group.route === '#/settings') return [...el('settings-body').querySelectorAll(':scope > .acct-part')].map((p) => [p.id, p.querySelector('h2').textContent])
+  const a = app.account
+  return a ? ACCOUNT_PARTS.filter(([, , has]) => !has || has(a)).map(([id, name]) => [id, name]) : []
+}
+function drawSettingsNav() {
+  const here = location.hash.split('?')[0] === '#/settings' ? '#/settings' : '#/account'
+  for (const nav of document.querySelectorAll('.set-nav'))
+    fill(
+      nav,
+      ...SETTINGS_GROUPS.map((g) =>
+        h(
+          'div',
+          { class: 'set-group' + (g.route === here ? ' on' : ''), 'data-group': g.route.slice(2) },
+          h('a', { class: 'set-group-head', href: g.route, 'aria-current': g.route === here ? 'page' : null }, h('span', { class: 'set-group-name' }, g.name), h('span', { class: 'set-group-says' }, g.says())),
+          h('ul', { class: 'set-parts' }, ...settingsParts(g).map(([id, name]) => h('li', null, h('a', { href: g.route, 'data-to': id, onclick: goSettingsPart }, name)))),
+        ),
+      ),
+    )
+  // (a part asked for from the other group: gone to once its page is drawn)
+  const wanted = app.settingsPart && el(app.settingsPart)
+  if (wanted && !wanted.closest('[hidden]')) {
+    app.settingsPart = ''
+    wanted.scrollIntoView({ block: 'start' })
+  }
+  markSettingsPart()
+}
+function goSettingsPart(ev) {
+  const a = ev.currentTarget
+  ev.preventDefault()
+  if (location.hash.split('?')[0] === a.getAttribute('href')) return el(a.dataset.to)?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  app.settingsPart = a.dataset.to
+  location.hash = a.getAttribute('href')
+}
+// The part in sight: the last whose top has come to the top of the page, or at its foot the last of them, however short
+function markSettingsPart() {
+  const nav = [...document.querySelectorAll('.set-nav')].find((n) => !n.closest('[hidden]'))
+  const body = nav?.parentElement.querySelector('.guide')
+  if (!body) return
+  const parts = [...body.querySelectorAll('.acct-part')]
+  const top = body.getBoundingClientRect().top
+  let at = parts.findLast((p) => p.getBoundingClientRect().top - top <= 96)?.id ?? parts[0]?.id
+  if (body.scrollTop > 0 && body.scrollTop + body.clientHeight >= body.scrollHeight - 4) at = parts.at(-1)?.id
+  for (const link of nav.querySelectorAll('.set-group.on [data-to]')) {
+    const on = link.dataset.to === at
+    if (on === link.classList.contains('on')) continue
+    link.classList.toggle('on', on)
+    // (on a phone, where the parts are a row of their own, the one in sight is brought into it)
+    const row = link.closest('.set-parts')
+    if (on && row.scrollWidth > row.clientWidth) row.scrollTo({ left: row.scrollLeft + link.getBoundingClientRect().left - row.getBoundingClientRect().left - 16 })
+  }
+}
+for (const id of ['settings-body', 'account-body']) el(id).addEventListener('scroll', () => requestAnimationFrame(markSettingsPart), { passive: true })
 
 // What a tile shows, as this device kept it: anything it did not keep is as it is to begin with
 function tileKept() {
@@ -8201,6 +8266,7 @@ async function openGuide(which) {
   else if (which === 'account/unopened') renderUnopened()
   else if (which === 'account/upgrade') renderUpgrade()
   else renderAccount()
+  if (which !== 'setup') drawSettingsNav()
 }
 
 // ---- A computer's own page (#/computer/<machine>), from the gear by its name in the list:
@@ -9933,6 +9999,18 @@ async function accountPut(path, method, body) {
 const accountHead = (tag, title, lede) => h('header', { class: 'acct-head' }, h('p', { class: 'acct-tag' }, tag), h('h1', null, title), lede && h('p', { class: 'acct-lede' }, lede))
 // A part of an account's page: what it is called, and what it has
 const accountPart = (title, attrs, ...body) => h('section', { class: 'acct-part', ...attrs }, h('h2', null, title), h('div', { class: 'acct-body' }, ...body))
+// The parts of the account's page as renderAccount draws them, in its order, for Settings to list beside it: each one's
+// id, what it is called there, and where not every account has it, whether this one does
+const ACCOUNT_PARTS = [
+  ['sign-in', 'Email and password'],
+  ['subscription', 'Subscription', (a) => !!a.billing?.on],
+  ['computers', 'Computers'],
+  ['browsers', 'Browsers'],
+  ['kept', 'Stored sessions'],
+  ['server-token', 'This server', (a) => !!a.agentToken],
+  ['sign-out', 'Sign out'],
+  ['admin', 'People', (a) => !!a.user?.admin],
+]
 
 function renderAccount() {
   const a = app.account
@@ -9983,6 +10061,7 @@ function renderAccount() {
     u.admin && accountPart('People', { id: 'admin' }, h('p', { class: 'muted' }, 'Reading…')),
   )
   if (u.admin) renderAdmin()
+  drawSettingsNav()
 }
 
 // The one-time upgrade, on a page of its own: which of the account's computers it is for,

@@ -135,6 +135,21 @@
 [data-site] #set-alerts-says { color: var(--s-text-2); }
 [data-site] #set-alerts[data-state="on"] #set-alerts-says, [data-site] #set-alerts[data-state="open"] #set-alerts-says { color: var(--s-text); }
 
+/* ---- Settings' two groups, beside the page (app.js, drawSettingsNav): each named in the serif, the one that is open in
+   full and the other quieter, with its parts under it; the part in sight has the accent down its side. The page beside
+   them goes by its own width, so that a part's name is over what it has where the two leave it narrow. */
+[data-site] .set-frame > .guide { container: acct / inline-size; }
+[data-site] .set-nav { width: 256px; padding: 32px 16px 32px var(--gutter); border-right: 1px solid var(--s-line); }
+[data-site] .set-group + .set-group { margin-top: 36px; }
+[data-site] .set-group-head { padding: 0 0 0 12px; border-radius: 0; color: var(--s-faint); }
+[data-site] .set-group-name { color: var(--s-muted); font-family: var(--s-serif); font-size: 20px; font-weight: 500; line-height: 1.3; letter-spacing: -.01em; }
+[data-site] :is(.set-group.on, .set-group-head:hover) .set-group-name { color: var(--s-text); }
+[data-site] .set-group-says { margin-top: 2px; font-size: 13px; line-height: 1.4; }
+[data-site] .set-parts { margin-top: 12px; }
+[data-site] .set-parts a { padding: 5px 12px; border-radius: 0; color: var(--s-muted); font-size: 14px; line-height: 1.5; }
+[data-site] .set-parts a:hover { color: var(--s-text); }
+[data-site] .set-group.on .set-parts a.on { background: none; color: var(--s-text); box-shadow: inset 2px 0 0 var(--s-accent); }
+
 /* ---- What is said of how things stand, in a card of its own */
 [data-site] #setup-status { margin: 0 0 28px; }
 [data-site] #setup-status .guide-status { margin: 0; padding: 12px 16px; border: 1px solid var(--s-line); border-radius: 12px; background: var(--s-surface); color: var(--s-text-2); }
@@ -189,6 +204,17 @@
   [data-site] :is(#account, #setup, #new, #computer, #settings-page) .back { display: inline-flex; }
   [data-site] #settings-page .set-row { min-height: 44px; }
   [data-site] #settings-page .view-switch button { padding: 8px 14px; }
+  /* (the two groups side by side over the page, as the switch on it is drawn, and the open one's parts in a row) */
+  [data-site] .set-nav { width: auto; gap: 10px 0; padding: 12px var(--gutter); border-right: 0; border-bottom: 1px solid var(--s-line); }
+  [data-site] .set-group-head { padding: 8px 12px; border: 1px solid var(--s-line); }
+  [data-site] .set-group:first-child .set-group-head { border-radius: 8px 0 0 8px; }
+  [data-site] .set-group:last-child .set-group-head { border-left: 0; border-radius: 0 8px 8px 0; }
+  [data-site] .set-group-name { font-family: var(--s-sans); font-size: 15px; line-height: 1.4; letter-spacing: normal; }
+  [data-site] .set-group.on .set-group-head { border-color: var(--s-btn); background: var(--s-btn); }
+  [data-site] .set-group.on .set-group-name { color: var(--s-btn-text); }
+  [data-site] .set-group.on .set-parts { margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); }
+  [data-site] .set-parts a { padding: 6px 10px; border-radius: 6px; }
+  [data-site] .set-group.on .set-parts a.on { background: var(--s-surface-2); box-shadow: none; }
 }
 /* (a touch keyboard zooms the page into anything typed in under 16px, and a finger wants more room than a pointer) */
 @media (pointer: coarse) {
