@@ -1573,7 +1573,16 @@ function connect() {
   on('branch', (ev) => branchTold(JSON.parse(ev.data)))
   // The favorites were changed, here or on another device
   on('favorites', (ev) => {
-    app.favorites = JSON.parse(ev.data).favorites
+    const { favorites } = JSON.parse(ev.data)
+    // (of an order from here before the last one: passed over, as its answer is. Of the last one: it stands for that
+    // one's answer, which may come after what is told after it, and is then passed over too)
+    if (ordering.said) {
+      if (orderOf(favorites) !== ordering.said) return
+      ordering.said = ''
+      ordering.last = 0
+      clearTimeout(ordering.wait)
+    }
+    app.favorites = favorites
     // (one that did not open here may be one this page has kept again since, under its own key)
     lookAgain()
     renderList()
@@ -3313,6 +3322,13 @@ function favoriteRow(f, how = { favorite: true }) {
 // The favorites in a new order: shown at once, and told to the server. (`ids` are the ones
 // in their places, as they are to be. A favorite that is at the top for its reminder is
 // not among them, and keeps the place it has: left out, the server would put it last.)
+// (Put in order again before the server has answered, the last order is the one that stands: the answer to one before
+// it is not drawn, nor what the server tells this page of one before it, which comes on the stream after that order's
+// answer as often as before it, and after the next order is drawn. What it tells of the last one comes after all of
+// those, so from then on what it tells is taken again, and that order's answer, if it is still to come, is not;
+// where what it tells of it does not come, the favorites are read again.)
+const ordering = { sent: 0, last: 0, said: '', wait: 0 } // the last order from here: its number while on its way, its ids until told of
+const orderOf = (list) => list.map((f) => f.id ?? f).join('\n')
 async function orderFavorites(ids) {
   const moved = new Set(ids)
   const next = [...ids]
@@ -3320,9 +3336,27 @@ async function orderFavorites(ids) {
   const at = new Map(ids.map((id, i) => [id, i]))
   app.favorites = [...app.favorites].sort((a, b) => at.get(a.id) - at.get(b.id))
   renderList()
+  const mine = (ordering.last = ++ordering.sent)
+  ordering.said = orderOf(ids)
+  clearTimeout(ordering.wait)
   const r = await fetch('/api/favorites', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ order: ids }) }).catch(() => null)
-  if (r?.ok) app.favorites = (await r.json()).favorites
+  // (what it says read, and opened, before it is known whether it is still the last word: what the server tells meanwhile may be later)
+  const answer = r?.ok ? await r.json().catch(() => null) : null
+  if (ordering.last !== mine) return
+  ordering.last = 0
+  if (answer) app.favorites = answer.favorites
   renderList()
+  if (ordering.said) ordering.wait = setTimeout(favoritesAgain, 5000)
+}
+// The favorites as the server has them, where what it would have told of the last order from here did not come
+async function favoritesAgain() {
+  ordering.said = ''
+  const r = await fetch('/api/favorites').catch(() => null)
+  const now = r?.ok ? await r.json().catch(() => null) : null
+  if (!now || ordering.last || ordering.said) return
+  app.favorites = now.favorites
+  renderList()
+  renderStar()
 }
 
 // While something in the list is pressed, by a mouse button or a finger, the list isn't
