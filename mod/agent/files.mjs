@@ -11,9 +11,10 @@
 //
 // A file is found, and read, only inside the folders this machine opens files from
 // (`within`): the ones its owner lets sessions be started in, or the ones named for this
-// in its agent.json. Where it really is decides, links followed: a link inside those
-// folders to a file outside them opens nothing. So a phone or a browser of the account's
-// reads the projects it works in and not the rest of the machine.
+// in its agent.json, and the temporary ones (`tempRoots`). Where it really is decides,
+// links followed: a link inside those folders to a file outside them opens nothing. So a
+// phone or a browser of the account's reads the projects it works in, and what its
+// sessions left in the temporary folders, and not the rest of the machine.
 //
 // A file is written under the same rule (`place`, `write`): one the account's own device
 // sends is put in its session's folder, or among that folder's uploads, under a name no
@@ -48,15 +49,19 @@ export function fileRoots(folders) {
       roots.push(fs.realpathSync(path.resolve(String(f).replace(/^~(?=$|[\\/])/, os.homedir()))))
     } catch {}
   }
-  return roots
+  return [...new Set(roots)]
 }
+// The temporary folders, which every machine that opens files at all opens them from too: a screenshot, a log or
+// anything else a session made on its way is there more often than in its project (deon, 2026-10-24: "Manyclaws
+// should always allow files in tmp by default"). They are read, and not written but where sessions may be started.
+export const tempRoots = () => [os.tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp', '/var/tmp'])]
 // Where a path really is, if that is inside one of those folders: null otherwise
 const sameCase = (p) => (process.platform === 'win32' ? p.toLowerCase() : p)
 async function inside(p, within) {
   const real = await fs.promises.realpath(p).catch(() => null)
   return real && within.some((root) => sameCase(real) === sameCase(root) || sameCase(real).startsWith(sameCase(root.endsWith(path.sep) ? root : root + path.sep))) ? real : null
 }
-export const OUTSIDE = 'that file is outside the folders this machine opens files from: the ones sessions may be started in, or the ones its agent.json names ("files")'
+export const OUTSIDE = 'that file is outside the folders this machine opens files from: the ones sessions may be started in or its agent.json names ("files"), and the temporary ones'
 
 // The ways a link's target may be read: the path in it, and the line it points at. Most
 // likely first: a line written after the path is taken as one before the whole is tried

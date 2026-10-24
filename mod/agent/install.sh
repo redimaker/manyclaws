@@ -59,7 +59,8 @@
 #                       do anything it is prompted to with nobody asked: leave it out of a list
 #                       here to have none. The list is "spawn": { "modes": [...] } in agent.json.
 #   --files DIR         a folder the page may open files from; repeat for several. With none,
-#                       the --spawn folders. A file anywhere else on the machine is not opened.
+#                       the --spawn folders. The temporary folders are always among them. A file
+#                       anywhere else on the machine is not opened.
 #                       (Files are put only into the --spawn folders: "upload": true in
 #                       agent.json has them put into these too, and "upload": false nowhere.)
 #   --relay             send this machine's ManyClaws mod through the agent, so the
@@ -528,9 +529,9 @@ else
   else case " ${modes[*]} " in *" bypassPermissions "*) echo "Sessions may be started with their permissions bypassed, as you asked (--mode bypassPermissions)." ;; *) echo "Sessions are not started with their permissions bypassed (--mode bypassPermissions allows it)." ;; esac
   fi
 fi
-if [ ${#files[@]} -gt 0 ]; then echo "The page may open files from: ${files[*]}"
-elif [ ${#spawn[@]} -gt 0 ] || [ "$auto_folders" = 1 ]; then echo "The page may open files from those folders, and from nowhere else on this machine (--files DIR names others)."
-else echo "The page opens no files from this machine (--files DIR names folders it may)."; fi
+if [ ${#files[@]} -gt 0 ]; then echo "The page may open files from: ${files[*]}, and from the temporary folders"
+elif [ ${#spawn[@]} -gt 0 ] || [ "$auto_folders" = 1 ]; then echo "The page may open files from those folders and the temporary ones, and from nowhere else on this machine (--files DIR names others)."
+else echo "The page may open files from the temporary folders, and from nowhere else on this machine (--files DIR names others)."; fi
 if [ ${#spawn[@]} -gt 0 ] || [ "$auto_folders" = 1 ]; then echo "The page may put files into the folders sessions are started in, and nowhere else (\"upload\": false in agent.json has none put anywhere)."
 else echo "The page puts no files on this machine."; fi
 
