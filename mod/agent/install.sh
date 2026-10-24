@@ -95,6 +95,12 @@
 # Run again with new options to change them. The machine keeps its identity. Run again
 # without --update, the options given are the ones it has from then on: without --spawn,
 # starting sessions is off. To bring an agent up to date as it is, --update.
+
+# All that follows is read before any of it is run, as one: an update puts the release's copy of
+# this installer where the one running may be (the copy kept beside the agent), and bash, which
+# reads a script as it runs it, would go on in the new one from where it had got to in the old,
+# in the middle of another line there. It ends with `exit`, so that nothing after it is read.
+{
 set -euo pipefail
 
 HOME_DIR="${MANYCLAWS_HOME:-$HOME/.manyclaws}"
@@ -545,3 +551,5 @@ elif [ "$by_claude" = 1 ] || [ "$waiting" = 1 ]; then
   if [ "$waiting" = 1 ]; then echo "It has no API token or encryption key yet, and asked for none: it takes both from the ManyClaws plugin."; fi
   MANYCLAWS_HOME="$NHOME" "$node_bin" "$(native "$HOME_DIR/agent/agent.mjs")" plugin --look || echo "ONE STEP IS LEFT, AND IT IS THE PERSON'S: connect this computer. Start a new Claude Code session on it: the ManyClaws plugin shows a code, to type under Connect a computer where you are signed in to ManyClaws, and approve."
 fi
+exit
+}
