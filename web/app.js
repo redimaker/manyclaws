@@ -7906,6 +7906,13 @@ matchMedia('(max-width: 760px)').addEventListener('change', () => {
 el('more').addEventListener('click', () => {
   const open = el('more').closest('.chat-head').classList.toggle('more-open')
   el('more').setAttribute('aria-expanded', String(open))
+  // (asked for while a reply is typed, they have the screen: the keyboard goes down, which on a phone leaves them no room)
+  if (open && document.activeElement === el('input')) el('input').blur()
+})
+// and put away again at a tap in the reply box: what the keyboard leaves of the screen is the chat's and the reply's
+el('input').addEventListener('focus', () => {
+  el('more').closest('.chat-head').classList.remove('more-open')
+  el('more').setAttribute('aria-expanded', 'false')
 })
 
 // Back to the latest, offered once the chat has been scrolled well away from it

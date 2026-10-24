@@ -1814,7 +1814,12 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   box-shadow: 0 2px 8px #0000002e;
 }
 .latest.fresh { border-color: var(--accent); color: var(--accent); }
-.chat-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* With little of the screen left (a keyboard up on a phone), the chat gives up its room and nothing else does: the head
+   is not squeezed under what follows it, and the prompt kept in sight is no more of the chat than there is room for
+   (it was drawn over the reply box) */
+.chat-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; container-type: size; }
+.chat-head { flex-shrink: 0; }
+.pinned.open .bubble { max-height: min(45vh, calc(100cqh - 2.5em)); }
 
 /* Pulled down from its top, the list is read again */
 .pull { display: none; height: 0; overflow: hidden; align-items: flex-end; justify-content: center; gap: 8px; color: var(--muted); font-size: .9em; }
