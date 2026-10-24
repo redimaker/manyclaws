@@ -17,7 +17,7 @@ import { Cswap } from './cswap.mjs'
 import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused, WIRE, mayStart, allowedOn, pluginDigest } from './seal.mjs'
 import { pluginRelease, pluginFiles, installedPlugins } from './verify.mjs'
 import { historyRows } from './rows.mjs'
-import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, FILE_MAX } from './files.mjs'
+import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, tempRoots, FILE_MAX } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
 export const VERSION = '6.2.4'
@@ -174,14 +174,15 @@ export async function run(config, flags = {}) {
   const ready = !!(server && config.token && keys)
   const sealKey = keys ? contentKey(keys.key) : null
   // Files are opened from here for the account's own devices, and only from inside the folders this machine's owner
-  // lets sessions be started in, or the ones agent.json names for it (`"files": [...]`); `"files": false` opens none.
+  // lets sessions be started in, or the ones agent.json names for it (`"files": [...]`), and the temporary folders,
+  // where so much of what a session makes is (tempRoots); `"files": false` opens none, those included.
   // (as those folders really are on disk: a file is one of theirs by where it really is, links followed. files.mjs)
   // (and the folders a person used, where sessions may be started in those: what they are is worked out from the index
   // now, and again as it is brought up to date)
   host.refreshAuto()
   let filesFrom, servesFiles, takesInto, takesFiles
   const refreshFileRoots = () => {
-    filesFrom = config.files === false ? null : fileRoots(Array.isArray(config.files) ? config.files : host.startFolders())
+    filesFrom = config.files === false ? null : fileRoots([...(Array.isArray(config.files) ? config.files : host.startFolders()), ...tempRoots()])
     servesFiles = !!filesFrom?.length
     takesInto = config.upload === false || !servesFiles ? null : fileRoots([...host.startFolders(), ...(config.upload === true && Array.isArray(config.files) ? config.files : [])])
     takesFiles = !!takesInto?.length
