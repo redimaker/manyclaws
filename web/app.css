@@ -439,21 +439,26 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 
 /* Session list */
 .session-list { flex: 1; overflow-y: auto; padding-bottom: env(safe-area-inset-bottom); }
+/* A group's heading (the favorites, the active ones, each computer): in the look's strongest colour, over a line from
+   the group before it, so that the list reads as its groups (deon, 2026-10-25: "Make the favorite/active/machine name
+   titles stand out more"). What it says beside its name is quieter. */
 .group-head {
   position: sticky;
   top: 0;
   z-index: 1;
   background: var(--panel);
-  padding: 10px 12px 4px;
-  font-size: 11px;
+  padding: 14px 12px 6px;
+  font-size: max(12px, calc(var(--size) * .9));
   font-weight: 700;
+  letter-spacing: .06em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--strong);
   display: flex;
   justify-content: space-between;
   gap: 8px;
 }
-.group-head .plan { font-weight: 400; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-head:not(:first-child) { border-top: 1px solid var(--border); margin-top: 6px; }
+.group-head .plan { color: var(--muted); font-weight: 400; letter-spacing: normal; text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row { display: flex; gap: 8px; padding: 6px 12px; color: inherit; text-decoration: none; }
 /* (pointed at, where there is something to point with: a phone goes on holding the last
    thing tapped to be pointed at, which lit a row nobody was on) */
@@ -1490,7 +1495,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 :where(#chat)[data-view="terminal"] .head-link, [data-view="terminal"] .head-link:not(:where(#chat, #chat *)) { width: auto; height: auto; margin-right: 0; border-radius: 0; }
 :where(#chat)[data-view="terminal"] .head-icon, [data-view="terminal"] .head-icon:not(:where(#chat, #chat *)) { width: 1.15em; height: 1.15em; }
 :where(#chat)[data-view="terminal"] .view-switch button, [data-view="terminal"] .view-switch button:not(:where(#chat, #chat *)) { font-size: inherit; line-height: inherit; padding: 0 var(--cell-w); }
-:where(#chat)[data-view="terminal"] .group-head, [data-view="terminal"] .group-head:not(:where(#chat, #chat *)) { font-size: inherit; font-weight: 400; text-transform: none; padding: 1em var(--cell-w) 0; }
+:where(#chat)[data-view="terminal"] .group-head, [data-view="terminal"] .group-head:not(:where(#chat, #chat *)) { font-size: inherit; font-weight: 700; letter-spacing: normal; text-transform: none; padding: 1em var(--cell-w) .2em; }
 :where(#chat)[data-view="terminal"] .row, [data-view="terminal"] .row:not(:where(#chat, #chat *)) { padding: .3em var(--cell-w); gap: var(--cell-w); }
 :where(#chat)[data-view="terminal"] .row .grip, [data-view="terminal"] .row .grip:not(:where(#chat, #chat *)) { width: var(--cell-w); font-size: .8em; }
 :where(#chat)[data-view="terminal"] .row-sub, [data-view="terminal"] .row-sub:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .row-preview, [data-view="terminal"] .row-preview:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .row-prompt, [data-view="terminal"] .row-prompt:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .row-time, [data-view="terminal"] .row-time:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .row-id, [data-view="terminal"] .row-id:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .chat-sub, [data-view="terminal"] .chat-sub:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .badge, [data-view="terminal"] .badge:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .card-sub, [data-view="terminal"] .card-sub:not(:where(#chat, #chat *)), :where(#chat)[data-view="terminal"] .composer-note, [data-view="terminal"] .composer-note:not(:where(#chat, #chat *)) { font-size: inherit; }
@@ -1846,7 +1851,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .conn { width: 10px; height: 10px; }
   .search-box { padding: 10px 14px; }
   #search { padding: 10px 12px; border-radius: 10px; }
-  .group-head { font-size: 12px; padding: 14px 14px 6px; align-items: center; }
+  .group-head { padding: 18px 14px 8px; align-items: center; }
   .machine-open { margin: -8px -8px -8px 0; padding: 10px; }
   .machine-open .menu-icon { width: 18px; height: 18px; }
   .machine-note { top: 7px; right: 7px; width: 8px; height: 8px; }
