@@ -31,8 +31,10 @@
     </a>
     <nav>
       <a href="#price">Price</a>
-      <a href="/app" target="_top">Sign in</a>
-      <a class="go small" href="/app#signup" target="_top">{{#trial}}Try it free{{/trial}}{{^trial}}Start <span data-price="monthly-short">$4.99</span>{{/trial}}</a>
+      {{^in}}<a href="/app" target="_top">Sign in</a>
+      <a class="go small" href="/app#signup" target="_top">{{#trial}}Try it free{{/trial}}{{^trial}}Start <span data-price="monthly-short">$4.99</span>{{/trial}}</a>{{/in}}
+      {{#in}}<a href="/app#/settings" target="_top">Settings</a>
+      <a class="go small" href="/app" target="_top">Open ManyClaws</a>{{/in}}
     </nav>
   </header>
 
@@ -46,7 +48,7 @@
       <h1>It&rsquo;s waiting<br>for a <em>yes.</em></h1>
       <p class="lede">Claude Code stops and asks before it runs things. Then it waits, however long you&rsquo;re gone. ManyClaws puts every session you have, on every computer and every Claude account, on your phone or browser, so the answer takes ten seconds instead of the afternoon.</p>
       <div class="hero-go">
-        <a class="go" href="/app#signup" target="_top">{{#trial}}Try it free for {{trial}}{{/trial}}{{^trial}}Start for <span data-price="monthly">$4.99 a month</span>{{/trial}}</a>
+        {{^in}}<a class="go" href="/app#signup" target="_top">{{#trial}}Try it free for {{trial}}{{/trial}}{{^trial}}Start for <span data-price="monthly">$4.99 a month</span>{{/trial}}</a>{{/in}}{{#in}}<a class="go" href="/app" target="_top">Open your sessions</a>{{/in}}
       </div>
       <p class="hero-note tag">02:14 <i></i> three sessions <i></i> nobody home</p>
     </section>
@@ -167,17 +169,17 @@ on your phone, and approve it with <span class="s">Face ID</span>.</code></pre>
         <h2>Less than the coffee that went cold.</h2>
       </div>
       <div class="tags">
-        <a class="ticket ticket-year" href="/app#signup" target="_top" data-plan="yearly">
+        <a class="ticket ticket-year" href="{{join}}" target="_top" data-plan="yearly">
           <span class="ticket-name">By the year</span>
           <span class="ticket-sum"><b data-price="yearly-sum">$49.99</b><i>a year</i></span>
           <span class="ticket-note" data-price="saving">Two months free, near enough</span>
-          <span class="ticket-go">Start with this one</span>
+          <span class="ticket-go">{{^in}}Start with this one{{/in}}{{#in}}Your subscription{{/in}}</span>
         </a>
-        <a class="ticket ticket-month" href="/app#signup" target="_top" data-plan="monthly">
+        <a class="ticket ticket-month" href="{{join}}" target="_top" data-plan="monthly">
           <span class="ticket-name">By the month</span>
           <span class="ticket-sum"><b data-price="monthly-sum">$4.99</b><i>a month</i></span>
           <span class="ticket-note">Stop whenever you like</span>
-          <span class="ticket-go">Or this one</span>
+          <span class="ticket-go">{{^in}}Or this one{{/in}}{{#in}}Your subscription{{/in}}</span>
         </a>
       </div>
       <ol class="way">
@@ -237,13 +239,13 @@ on your phone, and approve it with <span class="s">Face ID</span>.</code></pre>
     <section class="last">
       <img src="/site/img/real/row.webp?v=2" alt="Five people in crab and lobster costumes side by side on a sofa, each at a laptop" width="1800" height="1005" loading="lazy">
       <h2>Let them <em>work.</em></h2>
-      <a class="go" href="/app#signup" target="_top">{{#trial}}Try it free for {{trial}}{{/trial}}{{^trial}}Start for <span data-price="monthly">$4.99 a month</span>{{/trial}}</a>
+      {{^in}}<a class="go" href="/app#signup" target="_top">{{#trial}}Try it free for {{trial}}{{/trial}}{{^trial}}Start for <span data-price="monthly">$4.99 a month</span>{{/trial}}</a>{{/in}}{{#in}}<a class="go" href="/app" target="_top">Open your sessions</a>{{/in}}
     </section>
   </main>
 
   <footer class="foot">
     <p class="foot-mark">ManyClaws</p>
-    <p class="foot-links"><a href="/app" target="_top">Sign in</a><a href="/legal#terms">Terms</a><a href="/legal#privacy">Privacy</a><a href="/legal#refunds">Refunds</a><a href="mailto:support@manyclaws.dev">support@manyclaws.dev</a></p>
+    <p class="foot-links">{{^in}}<a href="/app" target="_top">Sign in</a>{{/in}}{{#in}}<a href="/app" target="_top">Open ManyClaws</a>{{/in}}<a href="/legal#terms">Terms</a><a href="/legal#privacy">Privacy</a><a href="/legal#refunds">Refunds</a><a href="mailto:support@manyclaws.dev">support@manyclaws.dev</a></p>
     <p class="foot-small">ManyClaws is an independent product. Claude and Claude Code are trademarks of Anthropic, PBC, which has no part in this. No crab has ever been given a shell prompt.</p>
   </footer>
 </body>

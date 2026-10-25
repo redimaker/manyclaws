@@ -2028,6 +2028,32 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 .acct-head, .acct-mark, .back-word { display: none; }
 .acct-part + .acct-part, #setup-status + .acct-part { margin-top: 26px; }
 .acct-body h3 { font-size: 1em; margin: 20px 0 8px; }
+/* Settings in its two groups, this device's and the account's (app.js, drawSettingsNav): listed beside the page, each
+   with its parts under it and the one in sight marked; on a phone the two side by side over the page, and the parts of
+   the open one in a row under them */
+.set-frame { display: flex; flex: 1; min-height: 0; }
+.set-frame > .guide { flex: 1; min-width: 0; }
+.set-nav { flex: none; width: 220px; overflow-y: auto; padding: 20px 10px 20px 16px; border-right: 1px solid var(--border); }
+.set-group + .set-group { margin-top: 20px; }
+.set-group-head { display: block; padding: 4px 8px; border-radius: 4px; color: var(--muted); text-decoration: none; }
+.set-group-name { display: block; font-weight: 600; }
+.set-group-says { display: block; font-size: .85em; overflow-wrap: anywhere; }
+.set-group.on .set-group-name, .set-group-head:hover .set-group-name { color: var(--text); }
+.set-parts { margin: 4px 0 0; padding: 0; list-style: none; }
+.set-parts a { display: block; padding: 3px 8px 3px 16px; border-radius: 4px; color: var(--muted); text-decoration: none; }
+.set-parts a:hover { color: var(--text); }
+.set-group.on .set-parts a.on { color: var(--text); background: var(--input-bg); }
+@media (max-width: 760px) {
+  .set-frame { flex-direction: column; }
+  .set-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: auto; overflow: visible; padding: 10px 14px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .set-group { display: contents; }
+  .set-group-head { grid-row: 1; padding: 6px 8px; border: 1px solid var(--input-border); text-align: center; }
+  .set-group.on .set-group-head { background: var(--input-bg); }
+  .set-group-says, .set-parts { display: none; }
+  .set-group.on .set-parts { grid-row: 2; grid-column: 1 / -1; display: flex; gap: 4px; margin: 0; overflow-x: auto; scrollbar-width: none; }
+  .set-group.on .set-parts::-webkit-scrollbar { display: none; }
+  .set-parts a { padding: 5px 10px; white-space: nowrap; }
+}
 /* How another folder is allowed, under a computer's list of them: folded away until asked for */
 .folders-more { margin: 14px 0 6px; }
 .folders-more summary { color: var(--muted); cursor: pointer; }
