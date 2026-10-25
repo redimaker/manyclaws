@@ -19,25 +19,44 @@ async function show(note) {
   // What a session says comes sealed: opened with the account's key this device keeps,
   // where it has it; where it hasn't, the note's own plain title and body are shown,
   // which are the server's and say nothing of the session
+  let opened = null
   if (note.sealed) {
     const got = await openSealed(note.sealed).catch(() => null)
     // (a session says all of it in one sealed thing, `n`: the server passes it on and cannot say what it is about.
     // A reminder's words are two, `title` and `body`.)
-    const opened = got?.n && typeof got.n === 'object' ? got.n : got
+    opened = got?.n && typeof got.n === 'object' ? got.n : got
     if (opened) {
       note.title = String(opened.title || 'ManyClaws') + (opened.where ? ' · ' + opened.where : '')
       note.body = (String(opened.prefix || '') + String(opened.body ?? '')).replace(/\s+/g, ' ').trim().slice(0, 240)
     }
   }
-  await self.registration.showNotification(note.title || 'ManyClaws', {
-    body: note.body || '',
-    // One notification to a session: a newer one takes the older one's place, and says so again
-    tag: note.tag || undefined,
-    renotify: !!note.tag,
-    icon: '/icons/icon-192.png',
-    badge: '/icons/badge-96.png',
-    data: { url: note.url || '/' },
-  })
+  let error = ''
+  try {
+    await self.registration.showNotification(note.title || 'ManyClaws', {
+      body: note.body || '',
+      // One notification to a session: a newer one takes the older one's place, and says so again
+      tag: note.tag || undefined,
+      renotify: !!note.tag,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/badge-96.png',
+      data: { url: note.url || '/' },
+    })
+  } catch (err) {
+    error = String(err?.name ?? err) + (err?.message ? ': ' + err.message : '')
+  }
+  await tellShown(note, !!opened, error)
+}
+
+// (for now: the server is told what came of each notification, for its log. Which device this is, by its push
+// address; whether the key here opened it; whether it was shown, and how many of its tag this device holds now; and
+// whether notifications are allowed here. Nothing of what it says. deon, 2026-10-25, of notifications his iPhone and
+// Mac were sent and did not show.)
+async function tellShown(note, opened, error) {
+  try {
+    const sub = await self.registration.pushManager.getSubscription()
+    const count = note.tag ? (await self.registration.getNotifications({ tag: note.tag }).catch(() => [])).length : 0
+    await fetch('/api/push/seen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint: sub?.endpoint ?? '', tag: note.tag ?? '', opened, permission: self.Notification?.permission ?? '', count, error }) })
+  } catch {}
 }
 
 // ---- Opening what's sealed (the same sealing as seal.js, done here with WebCrypto)
