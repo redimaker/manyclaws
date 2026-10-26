@@ -697,6 +697,12 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .mk-says { min-height: 1.5em; font-size: 14px; color: var(--n-soft); }
 .mk-says:empty { display: none; }
 .mk-box .ns-note { margin: 14px 0 0; }
+/* (in a window too short for all of it, the parts of it closer together: with a reminder and its notification's line, it is
+   taller than a 640px window has room for, and was scrolled in) */
+@media (max-height: 700px) {
+  .mk-box :is(.mk-field, .ns-listed) { margin-top: 10px; }
+  .mk-box .ns-note { margin-top: 10px; }
+}
 .mk-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 20px 0 12px; }
 .mk-plain { padding: 8px 2px; border: 0; background: none; color: var(--n-muted); font: inherit; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
 .mk-plain:hover { color: var(--n-text); }
