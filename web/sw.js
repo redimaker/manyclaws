@@ -30,22 +30,29 @@ async function show(note) {
       note.body = (String(opened.prefix || '') + String(opened.body ?? '')).replace(/\s+/g, ' ').trim().slice(0, 240)
     }
   }
+  // One notification to a session: a newer one takes the older one's place, and says so. Apple's systems put a newer one
+  // in an older one's place without a word where the two have the same tag (they keep no renotify), so each has a tag of
+  // its own, and once it is shown the session's others are closed (deon, 2026-10-26: his iPhone and Mac were shown each
+  // one, and neither said so)
+  const sid = note.tag || ''
+  const tag = sid ? `${sid}#${Date.now()}` : undefined
   let error = ''
   try {
     await self.registration.showNotification(note.title || 'ManyClaws', {
       body: note.body || '',
-      // One notification to a session: a newer one takes the older one's place, and says so again
-      tag: note.tag || undefined,
-      renotify: !!note.tag,
+      tag,
       icon: '/icons/icon-192.png',
       badge: '/icons/badge-96.png',
-      data: { url: note.url || '/' },
+      data: { url: note.url || '/', sid },
     })
   } catch (err) {
     error = String(err?.name ?? err) + (err?.message ? ': ' + err.message : '')
   }
+  if (sid) for (const old of await shownOf(sid)) if (old.tag !== tag) old.close()
   await tellShown(note, !!opened, error)
 }
+// The notifications this device shows now of a session
+const shownOf = async (sid) => (await Promise.resolve(self.registration.getNotifications?.()).catch(() => null) ?? []).filter((n) => n.data?.sid === sid)
 
 // (for now: the server is told what came of each notification, for its log. Which device this is, by its push
 // address; whether the key here opened it; whether it was shown, and how many of its tag this device holds now; and
@@ -54,7 +61,7 @@ async function show(note) {
 async function tellShown(note, opened, error) {
   try {
     const sub = await self.registration.pushManager.getSubscription()
-    const count = note.tag ? (await self.registration.getNotifications({ tag: note.tag }).catch(() => [])).length : 0
+    const count = note.tag ? (await shownOf(note.tag)).length : 0
     await fetch('/api/push/seen', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint: sub?.endpoint ?? '', tag: note.tag ?? '', opened, permission: self.Notification?.permission ?? '', count, error }) })
   } catch {}
 }
