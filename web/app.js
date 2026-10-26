@@ -2312,13 +2312,14 @@ function promptNodes() {
   if (got.indexing) say('indexing', `Still indexing ${got.indexing} files; more may turn up.`)
   return nodes
 }
-// One prompt: the name of its session and when it was typed, where that is (as this device's tiles say it), what was
-// typed, marked as a prompt is, and the last thing Claude said to it
+// One prompt: what was typed, and when; the last thing Claude said to it, after the mark; and under them the name of its
+// session, and where that is (as this device's tiles say it) (deon, 2026-10-26: "the top line should be the prompt you
+// typed ... Then reply after > ... and then server name and session below that")
 function promptRow(x) {
   const live = app.sessions.get(x.sid)
   const name = markOf(x.sid)?.name || live?.title || x.session.title || (x.session.first_prompt ?? '').slice(0, 80) || folderOf(x.session.cwd) || x.sid.slice(0, 8)
   const m = app.machines.get(x.mid)
-  const sub = app.tile.where ? dotted(folderOf(x.session.cwd), whereLabel(m ? machineName(m) : x.machine, x.mid)) : []
+  const sub = app.tile.where ? dotted(name, folderOf(x.session.cwd), whereLabel(m ? machineName(m) : x.machine, x.mid)) : [name]
   const here = app.past?.sid === x.sid && app.past.at === x.uuid
   const state = live && !live.ended && live.online ? live.state : 'past'
   return h(
@@ -2328,10 +2329,10 @@ function promptRow(x) {
     h(
       'div',
       { class: 'row-main' },
-      h('div', { class: 'row-top' }, h('span', { class: 'row-title' }, name), app.tile.time && h('span', { class: 'row-time', title: 'You typed it ' + whenText(x.ts) }, ago(x.ts))),
-      sub.length && h('div', { class: 'row-sub' }, sub),
-      h('div', { class: 'row-prompt' }, h('span', { class: 'row-prompt-mark', 'aria-hidden': 'true' }, '❯'), h('span', { class: 'row-said' }, x.text)),
-      h('div', { class: 'row-preview' }, x.reply?.text ?? ''),
+      h('div', { class: 'row-top' }, h('span', { class: 'row-title', title: x.text }, x.text), app.tile.time && h('span', { class: 'row-time', title: 'You typed it ' + whenText(x.ts) }, ago(x.ts))),
+      // (one not answered yet keeps the line, empty, so that every row is as tall as the others)
+      h('div', { class: 'row-prompt' }, x.reply?.text && h('span', { class: 'row-prompt-mark', 'aria-hidden': 'true' }, '❯'), h('span', { class: 'row-said' }, x.reply?.text ?? '')),
+      h('div', { class: 'row-sub' }, sub),
     ),
   )
 }
