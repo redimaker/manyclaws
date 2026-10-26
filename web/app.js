@@ -93,6 +93,7 @@ const app = {
   promptAt: new Map(), // when its user last typed to each session, as this page has read it: session id -> time
   haiku: null, // the last search Haiku was asked for, on each computer that could start one: { q, runs: [{ mid, sid, state, folders, found, why }] }
   drafts: {}, // what's typed and not sent, by session: { text, at }
+  recall: null, // the session's prompt the box holds, gone back to with Up and on with Down: { sid, at, typed }
   expect: null, // a session just started or resumed, not reporting yet: { sid, mid, until }
   computer: null, // the computer whose own page is showing: { mid, known, cwd, mode, read, reading, starting, error, colorError }
   favorites: [], // the sessions kept at the top of the list, in the order they were put in: { id, machine, title, project, where }
@@ -5321,6 +5322,7 @@ function pastNodes(page, { follow = false } = {}) {
     }
     const node = renderMessage(m)
     if (m.uuid) node.dataset.uuid = m.uuid
+    if (m.role === 'user') node._prompt = m.text
     nodes.push(node)
   }
   return nodes
@@ -7614,6 +7616,43 @@ el('input').addEventListener('input', () => {
   keepDraft()
 })
 
+// Up, on the box's first line, puts the session's prompt before the one it holds in it, and Down, on its last line, the
+// one after; after the last, what was being typed is back (as Claude Code does at a terminal). The caret is put at the
+// start going back and at the end going on, so the next press goes on the same way. What is typed over one is a draft
+// like any other, and a press after it starts again from the last prompt.
+el('input').addEventListener('keydown', (ev) => {
+  const step = { ArrowUp: -1, ArrowDown: 1 }[ev.key]
+  if (!step || ev.shiftKey || ev.altKey || ev.ctrlKey || ev.metaKey || ev.isComposing) return
+  const input = el('input')
+  const { value, selectionStart: from, selectionEnd: to } = input
+  // (elsewhere in what it holds, or with some of it selected, the keys move in the text)
+  if (from !== to || (step < 0 ? value.slice(0, from) : value.slice(to)).includes('\n')) return
+  const said = promptsSaid()
+  const sid = draftKey()
+  const was = app.recall?.sid === sid ? app.recall : { sid, at: said.length, typed: value }
+  const at = Math.min(Math.max(was.at + step, 0), said.length)
+  if (at === was.at) return
+  ev.preventDefault()
+  input.value = at === said.length ? was.typed : said[at]
+  app.recall = { ...was, at }
+  autosize()
+  const caret = step < 0 ? 0 : input.value.length
+  input.setSelectionRange(caret, caret)
+})
+
+// The prompts of the session the chat shows, the oldest first: those it has drawn (and, of one that reports, the one its
+// rows begin after, where they begin partway through), then those sent from here that it has not said yet. Each without
+// the notes of the photos and files sent with it, and once where the same was sent twice running.
+function promptsSaid() {
+  const drawn = [...el('messages').querySelectorAll(':scope > .msg.user:not(.pending)')].map((n) => n._prompt)
+  const said = []
+  for (const text of [app.past ? null : app.promptBefore?.text, ...drawn, ...app.pending.map((p) => p.text)]) {
+    const typed = withoutNotes(String(text ?? '')).trim()
+    if (typed && typed !== said.at(-1)) said.push(typed)
+  }
+  return said
+}
+
 // ---- Drafts: what's typed and not sent stays with its session on this device, so a
 // look at another session, or a reload, doesn't lose it
 
@@ -7650,6 +7689,8 @@ function saveDrafts() {
 }
 
 function keepDraft() {
+  // (what the box holds now is what was typed: a prompt gone back to with Up is not held any more)
+  app.recall = null
   const key = draftKey()
   if (!key) return
   const text = el('input').value
@@ -7662,6 +7703,7 @@ function keepDraft() {
 }
 
 function showDraft() {
+  app.recall = null
   el('input').value = app.drafts[draftKey()]?.text ?? ''
   autosize()
 }
