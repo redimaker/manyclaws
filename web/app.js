@@ -5406,8 +5406,10 @@ function renderPastHeader() {
   el('composer').hidden = !canReply
   el('input').disabled = !canReply
   el('send').disabled = !canReply
-  el('attach').hidden = true
+  // (a photo goes with the reply that wakes it, as with any reply: a file, which goes into its folder on its computer, does not)
+  el('attach').hidden = !canReply
   el('attach-file').hidden = true
+  renderChips()
   el('input').placeholder = live || s?.hosted ? 'Reply to Claude…' : elsewhere ? 'Continue in a copy…' : 'Reply to resume this session…'
 }
 
@@ -5478,14 +5480,22 @@ async function setSessionMode(s, mode) {
 
 // A reply to a past session: the machine's agent starts Claude Code on it again. One
 // that's open in a terminal there is continued in a copy instead.
-async function resumePast(text) {
+async function resumePast(typed) {
   const p = app.past
-  const node = userNode([text], { note: 'resuming on ' + machineName(app.machines.get(p.mid)) + '…', pending: true })
+  const node = userNode([typed], { note: 'resuming on ' + machineName(app.machines.get(p.mid)) + '…', pending: true })
   el('messages').append(node)
   scrollToEnd()
   el('input').value = ''
   autosize()
   keepDraft()
+  // (the photos still on their way up go with it, as with a reply to a session that reports: each is its note in what is said)
+  await app.uploads
+  const photos = app.attachments.filter((a) => a.sid === p.sid && a.id && !a.file)
+  app.attachments = app.attachments.filter((a) => !photos.includes(a))
+  renderChips()
+  node.querySelector('.bubble').append(...photos.map((a) => thumb(a.name, a.url)))
+  if (!typed && !photos.length) return void node.remove()
+  const text = [typed || 'See the attached photo.', ...photos.map(photoNote)].join('\n\n').trim()
   // (which machine it is, and what it allows, is known once the stream has said)
   await snapshotSeen
   const m = app.machines.get(p.mid)
@@ -5501,12 +5511,14 @@ async function resumePast(text) {
   const data = unsigned ? { error: NO_KEY } : ((await r?.json().catch(() => ({}))) ?? {})
   if (!r?.ok) {
     node.querySelector('.from').textContent = 'not sent: ' + (data.error ?? r?.status ?? 'the server did not answer')
-    // What was typed goes back where it can be sent again
+    // What was typed goes back where it can be sent again, and its photos with it
     if (app.past === p && !el('input').value) {
-      el('input').value = text
+      el('input').value = typed
       autosize()
       keepDraft()
     }
+    app.attachments.push(...photos)
+    renderChips()
     return
   }
   // It goes on as a session that reports: the reply isn't part of the transcript's page
@@ -7660,7 +7672,7 @@ function autosize() {
 async function send() {
   if (app.past) {
     const reply = el('input').value.trim()
-    return reply ? resumePast(reply) : undefined
+    return reply || app.uploading || app.attachments.some((a) => a.sid === app.past.sid) ? resumePast(reply) : undefined
   }
   const sid = app.current
   const text = el('input').value.trim()
@@ -7796,8 +7808,10 @@ el('chat').addEventListener('drop', (ev) => {
 })
 
 function canAttach() {
-  return !!app.current && !el('chat').hidden && !el('composer').hidden
+  return !!composerSid() && !el('chat').hidden && !el('composer').hidden
 }
+// The session the reply box is for: one that reports, or one asleep on its computer, which a reply wakes
+const composerSid = () => app.current ?? app.past?.sid ?? null
 
 function imageFiles(data) {
   const files = [...(data.files ?? [])]
@@ -7819,7 +7833,7 @@ function isTextCopy(data) {
 }
 
 function attachFiles(files) {
-  const sid = app.current
+  const sid = composerSid()
   for (const file of [...files].filter((f) => f.type.startsWith('image/'))) {
     app.uploading++
     // One at a time, so the photos keep the order they were added in
@@ -7874,7 +7888,7 @@ async function upload(sid, file) {
     const sent = b64(await vault.sealBytes(new Uint8Array(await blob.arrayBuffer()), app.key))
     // Shown while it uploads. A data: address, which the page's security policy allows for images
     entry.url = `data:${type};base64,${data}`
-    if (app.current === sid) {
+    if (composerSid() === sid) {
       app.attachments.push(entry)
       renderChips()
     }
@@ -7928,7 +7942,7 @@ function toBase64(blob) {
 
 function renderChips() {
   const box = el('chips')
-  const mine = app.attachments.filter((p) => p.sid === app.current)
+  const mine = app.attachments.filter((p) => p.sid === composerSid())
   box.hidden = !mine.length
   box.replaceChildren(
     ...mine.map((p) =>
