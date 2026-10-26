@@ -4642,9 +4642,10 @@ async function titleSearch(q) {
   return { found: [...found.values()].sort((a, b) => (b.s.lastActivity ?? 0) - (a.s.lastActivity ?? 0)), unreachable }
 }
 
-// What was typed to them: the words in their user's prompts alone, on every machine, each session with its matches
+// What was typed to them: the words in what their people typed alone (not a task's word, another session's, or a
+// subagent's), on every machine, each session with its matches
 async function promptSearch(q) {
-  const sealed = await sealFor({ q, roles: ['user'], limit: 30, subagents: false })
+  const sealed = await sealFor({ q, typed: true, limit: 30 })
   if (!sealed) return { found: [], locked: true }
   const r = await fetch('/api/search?c=' + encodeURIComponent(sealed)).catch(() => null)
   if (!r?.ok) return { found: [], failed: true }
@@ -4657,6 +4658,8 @@ async function promptSearch(q) {
     const got = x.r && typeof x.r === 'object' ? x.r : null
     indexing += got?.indexing ?? 0
     for (const g of got?.results ?? []) {
+      // (a search this page asked Haiku for is no prompt anyone typed)
+      if (g.session?.first_prompt?.startsWith(HAIKU_SAYS)) continue
       const live = isReporting(g.sid) ? app.sessions.get(g.sid) : null
       found.push({ mid, s: live ?? catalogOf(mid, g.session ?? { sid: g.sid }, m?.open ?? {}, m?.hosted ?? []), live: !!live, hits: g.hits ?? [], last: g.hits?.[0]?.ts ?? 0 })
     }

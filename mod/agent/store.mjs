@@ -30,6 +30,8 @@ export class Store {
     // (recentPrompts): a line indexed before that has none, and is judged by its words alone
     if (!this.db.prepare('PRAGMA table_info(docs)').all().some((c) => c.name === 'origin')) this.db.exec('ALTER TABLE docs ADD COLUMN origin TEXT')
     this.db.exec('CREATE INDEX IF NOT EXISTS docs_said ON docs (role, side, ts)')
+    // One text at a time, matched and drawn as the index would (snippetOf): this connection's alone, in memory
+    this.db.exec("CREATE VIRTUAL TABLE temp.said USING fts5(text, tokenize = 'unicode61 remove_diacritics 2')")
     this.matched = new Map() // a search's sessions, for the searches that follow it down
     const q = (sql) => this.db.prepare(sql)
     this.sql = {
@@ -51,6 +53,9 @@ export class Store {
       delSession: q('DELETE FROM sessions WHERE path = ?'),
       session: q('SELECT * FROM sessions WHERE sid = ?'),
       count: q('SELECT (SELECT COUNT(*) FROM sessions) AS sessions, (SELECT COUNT(*) FROM files) AS files, (SELECT COUNT(*) FROM docs) AS docs'),
+      said: q('INSERT INTO said (rowid, text) VALUES (1, ?)'),
+      saidSnippet: q("SELECT snippet(said, 0, char(1), char(2), '…', 24) AS snippet FROM said WHERE said MATCH ?"),
+      unsaid: q('DELETE FROM said'),
     }
   }
 
@@ -153,7 +158,8 @@ export class Store {
 
   // Words are all required, in any order; "a phrase" in quotes stays together; the
   // last word matches as a beginning, so a search works while it's being typed.
-  search({ q, limit = 30, sid = '', since = 0, until = 0, roles = [], subagents = true, sort = 'recent' } = {}) {
+  // `typed`: in the prompts its people typed alone (typedPrompt), not a subagent's, and in what they typed of them.
+  search({ q, limit = 30, sid = '', since = 0, until = 0, typed = false, subagents = true, sort = 'recent' } = {}) {
     const match = ftsQuery(q)
     if (!match) return []
     const where = ['fts MATCH ?']
@@ -170,17 +176,14 @@ export class Store {
       where.push('d.ts <= ?')
       args.push(until)
     }
-    if (roles.length) {
-      where.push(`d.role IN (${roles.map(() => '?').join(', ')})`)
-      args.push(...roles)
-    }
-    if (!subagents) where.push('d.side = 0')
+    if (typed) where.push("d.role = 'user'", 'd.side = 0')
+    else if (!subagents) where.push('d.side = 0')
     const order = sort === 'relevance' ? 'bm25(fts), d.ts DESC' : 'd.ts DESC'
+    const want = Math.min(Math.max(1, limit), 200) * 6
     // \u0001 and \u0002 mark the match, for the page to draw
-    const hits = this.db
-      .prepare(`SELECT d.sid, d.file, d.uuid, d.ts, d.role, d.side, snippet(fts, 0, char(1), char(2), '…', 24) AS snippet
-        FROM fts JOIN docs d ON d.id = fts.rowid WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ?`)
-      .all(...args, Math.min(Math.max(1, limit), 200) * 6)
+    const select = this.db.prepare(`SELECT d.sid, d.file, d.uuid, d.ts, d.role, d.side, snippet(fts, 0, char(1), char(2), '…', 24) AS snippet${typed ? ', d.origin, fts.text' : ''}
+        FROM fts JOIN docs d ON d.id = fts.rowid WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT ? OFFSET ?`)
+    const hits = typed ? this.typedHits(select, args, match, want) : select.all(...args, want, 0)
     // Grouped by session, in the order their first hit came, a few hits each
     const groups = new Map()
     for (const h of hits) {
@@ -194,6 +197,34 @@ export class Store {
       if (g.hits.length < 3) g.hits.push({ uuid: h.uuid, ts: h.ts, role: h.role, snippet: h.snippet, ...(h.side ? { subagent: h.file } : {}) })
     }
     return [...groups.values()].map((g) => ({ ...g, session: this.session(g.sid) ?? this.remnant(g.sid) }))
+  }
+
+  // A search's hits in what its people typed, read a page at a time until there are `want`: a user line none of them
+  // typed is passed over, and one with more in it than they typed is matched again in what they did, and its snippet
+  // drawn from that
+  typedHits(select, args, match, want) {
+    const hits = []
+    for (let offset = 0; hits.length < want; offset += 2000) {
+      const rows = select.all(...args, 2000, offset)
+      for (const r of rows) {
+        const said = ownWords(typedPrompt(r.text, r.origin))
+        const snippet = !said ? '' : said === r.text ? r.snippet : this.snippetOf(said, match)
+        if (snippet) hits.push({ ...r, snippet })
+        if (hits.length >= want) break
+      }
+      if (rows.length < 2000) break
+    }
+    return hits
+  }
+
+  // A snippet of one text for an FTS query, as the index draws one; '' where the text does not match it
+  snippetOf(text, match) {
+    this.sql.said.run(text)
+    try {
+      return this.sql.saidSnippet.get(match)?.snippet ?? ''
+    } finally {
+      this.sql.unsaid.run()
+    }
   }
 
   // ---- Search as a way down: the projects with matches, the sessions in one, the matches in one
@@ -336,9 +367,18 @@ export function typedPrompt(text, origin) {
     // (Claude in Chrome's instructions, which the app puts in front of a prompt typed in VS Code)
     .replace(/<browser_instruction>[\s\S]*?<\/browser_instruction>\s*/g, '')
     .trim()
-  // (a slash command, a shell line, and what Claude Code writes where a turn was stopped)
-  return !said || /^(\/[\w:.-]+(\s|$)|! |\[Request interrupted)/.test(said) ? '' : said
+  // (a slash command, a shell line, what Claude Code writes where a turn was stopped, and a task's word too long to be
+  // kept whole, which has lost its end)
+  return !said || /^(\/[\w:.-]+(\s|$)|! |\[Request interrupted|<task-notification>)/.test(said) ? '' : said
 }
+
+// What a person typed of a prompt, without what was put with it in their words' place: the page's note of each photo
+// sent with it (which its list of prompts draws as the photo), and the marks around what was pasted into it
+const ownWords = (said) =>
+  said
+    .replace(/\s*\[Attachment [a-f0-9]{16}: [^\]]*\]/g, '')
+    .replace(/<\/?pasted_content\b[^>]*>/g, '')
+    .trim()
 
 // An FTS5 query from what someone typed: each word quoted (so punctuation in it is
 // only text), all required
