@@ -1,5 +1,5 @@
 {
-  "release": 125,
+  "release": 126,
   "made": "2026-10-26",
   "plugin": "6.2.125",
   "agent": "6.2.6",
@@ -29,7 +29,7 @@
     "mod/tests/mod.test.ts": "0110839c334bd6c2943053eca314e8d39cc2b8c8bb9cb72645d2c3d6c3ba98ec",
     "web/app.css": "c495c0770fb2f2b1657ef45a29361af0dcc2e43ff03bc4b5a78c2ef4731b0f83",
     "web/app.js": "8d375ee243db6075c85100b91547fcdfacb0911eaf6d633ef412138d6b36a86f",
-    "web/home.html": "2eebf9aaeb1a797c9ea098797522eb35bab5dc923e2069948e5c10422865ad25",
+    "web/home.html": "3aa09c72097c7ebcffb093817065decd5c4df41643adb397fb8b874732645575",
     "web/icons/apple-touch-icon.png": "112c3e38c33ebbc48af0e34e32e611a3c5764543883176201f434d2ffae97044",
     "web/icons/badge-96.png": "d2144540484405c14a48d6456bd030b9f8a0d685ea2595728bf8709409b2a9f0",
     "web/icons/icon-192.png": "fece5fc1fa8a2bc433d5045b6940b8ec575839b54e00b5fa59789d58a412d87a",
