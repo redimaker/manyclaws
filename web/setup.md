@@ -47,7 +47,7 @@ Claude Code then shows which account the computer joined. If it isn't yours, typ
 
 ## 4. The agent
 
-The agent is a small background service. It lets you start a session on the computer from your phone, pick up one that has ended, and search everything Claude Code has done there. It needs Node.js 22.13 or later, on macOS, Linux or Windows (where Git Bash, which Claude Code uses there, installs it, and Task Scheduler starts it as you sign in).
+The agent is a small background service. It lets you start a session on the computer from your phone, pick up one that has ended, and search everything Claude Code has done there. It needs Node.js 22.13 or later (`node --version`), on macOS, Linux or Windows (where Git Bash, which Claude Code uses there, installs it, and Task Scheduler starts it as you sign in).
 
 **From your page:** open the computer's gear and press **Let my phone start sessions on** it. Your phone can then start sessions only in folders you've used Claude Code in on that computer in the last 90 days, and never in your home folder or above it, a temporary folder, or one inside a folder whose name starts with a dot. The computer's page lists them.
 
@@ -119,6 +119,7 @@ bash mod/agent/install.sh --from mod
 
 ## For Claude Code, when you are asked to follow this guide
 
+- First check what the computer has, without asking: `claude --version` must be 2.1.287 or later. If it is older, say so, and that `claude update` brings it up to date, and stop. `node --version` matters only for the agent (step 4), which needs 22.13 or later: if Node.js is older or not there, say so when you are done, and go on.
 - Do step 2 yourself, without stopping to ask: install the plugin. It asks the person for nothing.
 - Step 3 is the person's, and it is the most important thing you tell them: start a new Claude Code session, type the code of nine digits it shows under **Connect a computer** ({{origin}}/app#/connect), press **Connect** and give their passkey. `/manyclaws connect` makes another code.
 - Do not install the agent unless you are asked to: it is set up from their page (step 4). Where you are asked to, run it as step 4 has it, by hand, with no other option unless the person named one.

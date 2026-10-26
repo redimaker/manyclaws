@@ -173,6 +173,8 @@
 [data-site] .acct-body .shut-name b { font-size: 16px; }
 [data-site] .acct-body .shut-steps li + li { margin-top: 10px; }
 [data-site] .acct-body .shut-steps .code-box { max-width: 440px; margin: 8px 0; }
+/* (the page on setting up gives whole commands: as wide as the part, so a short window breaks them as little as it can) */
+[data-site] #setup-body .shut-steps .code-box { max-width: none; }
 [data-site] .acct-body .token-row .ghost, [data-site] .acct-body .person .ghost { min-height: 32px; padding: 6px 14px; font-size: 14px; }
 [data-site] .acct-body code { padding: 2px 6px; border-radius: 6px; background: var(--s-surface-2); font-family: var(--s-mono); font-size: .88em; overflow-wrap: anywhere; }
 [data-site] .acct-body .code-box { margin-bottom: 0; }
