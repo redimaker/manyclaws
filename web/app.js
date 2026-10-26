@@ -1471,7 +1471,10 @@ function connect() {
     if (snapshot.ping) app.quietMs = Math.max(1000, snapshot.ping * 2.5)
     pageBuild(snapshot.build)
     // (the plugin and the agent the server hands out now: a computer's own are held against them)
+    const handed = app.latest?.plugin
     app.latest = snapshot.latest ?? {}
+    // (the page on setting up names the plugin's folder by that version)
+    if (app.latest.plugin !== handed && !el('setup').hidden) renderSetup()
     // (and the release this page is of, as the release key signed it; and what the root signed of the account's devices)
     void loadRelease().then(() => (renderList(), app.computer && renderComputer()))
     void loadDevicesList().then(() => (renderList(), app.computer && renderComputer()))
@@ -9916,18 +9919,27 @@ function keptPart(redraw) {
   ]
 }
 
-// How a computer is set up is the same for everyone: the line to paste into Claude Code
-// on it, which installs the plugin from the guide (the server's /setup, which has nothing
-// of anyone's in it), and then the code the plugin shows there, typed here and approved
-// with this browser's passkey. Nothing of the account's is typed into Claude Code. This
-// browser has to have the key, under a passkey, to approve it: where it has not, that is
-// what the page shows first.
+// Where the plugin reports unless a computer names another server (MANYCLAWS_URL)
+const PLUGIN_HOME = 'https://manyclaws.dev'
+// What a computer needs: Claude Code for the plugin, and Node.js for the agent, as the guide has them
+const NEEDS = { claude: '2.1.287', node: '22.13' }
+
+// How a computer is set up is the same for everyone, and so is what this page says of it:
+// what it needs; the plugin installed by hand, the code it shows there typed here and
+// approved with this browser's passkey, and the agent; how it is taken off again; and,
+// last, the line to paste into Claude Code there instead, which installs the plugin from
+// the guide (the server's /setup, which has nothing of anyone's in it). Nothing of the
+// account's is in any of it. This browser has to have the key, under a passkey, to approve
+// a computer: where it has not, that is what the page shows first.
 function renderSetup() {
   const a = app.account
   if (!a) return
   const guide = a.server + '/setup'
+  // (the plugin's folder is named for its version: the one the server hands out, as the guide has it)
+  const folder = `~/.claude/plugins/cache/manyclaws/manyclaws/${app.latest?.plugin ?? '<version>'}`
   const body = el('setup-body')
   const at = body.scrollTop
+  const steps = (...li) => h('ol', { class: 'shut-steps' }, ...li.filter(Boolean).map((x) => h('li', null, ...[x].flat())))
   fill(
     body,
     accountHead('Set up a computer', 'Connect a computer', 'Each computer you run Claude Code on is connected with a code its ManyClaws plugin shows there: you type it here and approve it with your passkey. Nothing of yours is typed into Claude Code.'),
@@ -9940,16 +9952,55 @@ function renderSetup() {
         ...(app.key ? [h('p', { 'data-part': 'setup-key' }, 'This browser has your key, but not under a passkey, so it cannot approve a computer. Type the computer’s code on one of your devices that keeps it under one.')] : keyPart(renderSetup)),
       ),
     accountPart(
-      'Set up a computer',
+      'What it needs',
+      { id: 'setup-needs' },
+      h(
+        'ul',
+        { class: 'shut-steps' },
+        h('li', { 'data-part': 'needs-claude' }, `Claude Code ${NEEDS.claude} or later on the computer, in a terminal, VS Code or the desktop app.`),
+        h('li', { 'data-part': 'needs-node' }, `Node.js ${NEEDS.node} or later, only for starting sessions on it from your phone (the agent). macOS, Linux or Windows, where the agent is installed from Git Bash.`),
+        h('li', { 'data-part': 'needs-key' }, 'A phone or browser signed in here that keeps your key under a passkey, to approve the computer.'),
+      ),
+    ),
+    accountPart(
+      'Install by hand',
+      { id: 'setup-hand' },
+      h('p', null, 'In a terminal on the computer:'),
+      steps(
+        // (the plugin reports to manyclaws.dev unless the computer names another server)
+        a.server !== PLUGIN_HOME && ['Say where this server is: in ', h('code', null, '~/.claude/settings.json'), ', give ', h('code', null, 'env'), ' this entry, keeping whatever else the file holds:', codeBox(`"env": { "MANYCLAWS_URL": "${a.server}" }`)],
+        ['Add the marketplace and install the plugin, from the public repository github.com/redimaker/manyclaws:', codeBox('claude plugin marketplace add redimaker/manyclaws\nclaude plugin install manyclaws@manyclaws'), 'The install reports options that are “not yet set”: connecting the computer sets them.'],
+        'Start a new Claude Code session there, in a terminal, VS Code or the desktop app. It shows a code of nine digits.',
+        'Enter it under Connect a computer, here or on your phone, and approve the computer with your passkey.',
+      ),
+      h('p', { 'data-part': 'setup-connect' }, h('a', { href: '#/connect', class: 'primary button-link' }, 'Connect a computer')),
+      h('h3', null, 'Starting sessions from your phone'),
+      h('p', { 'data-part': 'setup-agent' }, 'That is the agent’s, a small background service, and it is up to you. Turn it on from the computer’s gear on your page, with Let my phone start sessions on it, or install it by hand from the plugin’s folder (on Windows, in Git Bash):'),
+      codeBox(`p=${folder}\nbash "$p/agent/install.sh" --from "$p" --auto-folders`),
+    ),
+    accountPart(
+      'Uninstall',
+      { id: 'setup-remove' },
+      steps(
+        ['On the computer, remove the agent, if it has it (on Windows, in Git Bash):', codeBox('bash ~/.manyclaws/agent/install.sh --uninstall')],
+        ['Then the plugin:', codeBox('claude plugin uninstall manyclaws@manyclaws')],
+        ['Disconnect the computer under ', h('a', { href: '#/account' }, 'Settings, Account'), ', Computers: what it sends is refused from then on.'],
+      ),
+    ),
+    accountPart(
+      'With Claude Code',
       { id: 'setup-device' },
-      // (the short way first: one line pasted into Claude Code there, which has nothing of the account's in it)
-      h('p', { 'data-part': 'setup-say' }, 'On the computer, start Claude Code and paste this:'),
+      // (what Claude Code cannot see to for itself: whether the computer has what it needs, and how to tell)
+      h('p', { 'data-part': 'setup-check' }, 'Claude Code can do the install for you. First check that the computer has what it needs, in a terminal there:'),
+      codeBox('claude --version\nnode --version'),
+      h('p', { 'data-part': 'setup-versions' }, `Claude Code needs to say ${NEEDS.claude} or later. Node.js, v${NEEDS.node} or later, is needed only for starting sessions from your phone.`),
+      // (one line pasted into Claude Code there, which has nothing of the account's in it)
+      h('p', { 'data-part': 'setup-say' }, 'Then start Claude Code there and paste this:'),
       codeBox(`Read ${guide}.md and set this computer up.`),
       // (what the person does themselves: the rest is Claude Code's, by the guide)
-      h('p', { 'data-part': 'setup-where' }, 'Claude Code installs the plugin from the guide. Then start a new Claude Code session there: it shows a code of nine digits. Enter it under Connect a computer, here or on your phone, and approve the computer.'),
-      h('p', { 'data-part': 'setup-connect' }, h('a', { href: '#/connect', class: 'primary button-link' }, 'Connect a computer')),
-      // (and the guide itself, for whoever would rather do each step)
-      h('p', null, h('a', { href: guide, target: '_blank', rel: 'noopener', id: 'setup-guide' }, 'Or set it up by hand')),
+      h('p', { 'data-part': 'setup-where' }, 'Claude Code installs the plugin from the guide. Then start a new Claude Code session there: it shows a code of nine digits. Enter it under ', h('a', { href: '#/connect' }, 'Connect a computer'), ', here or on your phone, and approve the computer.'),
+      // (and the guide itself, which has the rest: keeping it up to date, installing from source, and what is sent)
+      h('p', null, h('a', { href: guide, target: '_blank', rel: 'noopener', id: 'setup-guide' }, 'The whole guide'), ': keeping it up to date, installing from source, and what is sent.'),
     ),
   )
   body.scrollTop = at
