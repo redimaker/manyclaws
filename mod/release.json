@@ -1,6 +1,6 @@
 {
-  "release": 120,
-  "made": "2026-10-25",
+  "release": 123,
+  "made": "2026-10-26",
   "plugin": "6.2.6",
   "agent": "6.2.6",
   "files": {
@@ -27,8 +27,8 @@
     "mod/hooks/seal.js": "9780fdb0f2c59a704041de1ddcd961597354c1109618dd607d952e6cda70d0f8",
     "mod/tests/lib.test.ts": "10b3510b322536376cdc0f86a75b2a0f51098d1ab2f8addd521901666964b42a",
     "mod/tests/mod.test.ts": "67c2cae4b921008dc4d6d3cd3949b13abee04f665919959bf0d9551469787897",
-    "web/app.css": "2f42f4c358bdeea4ade5b967a7c19eabe4fac19c35117375950182d6e636e6ec",
-    "web/app.js": "3f644d095fdeedb3133aa9c4abde6832b085139eccdb4096567b5604a7e944f4",
+    "web/app.css": "7d2af1b946bfa998c70b020912b6df8077131ee5e31aa3a1ef3f1dc896a76437",
+    "web/app.js": "d5a54ec7a579094c6379eb4cfc26b23da32f920e619137bdebdb89ee6344c8ad",
     "web/home.html": "2eebf9aaeb1a797c9ea098797522eb35bab5dc923e2069948e5c10422865ad25",
     "web/icons/apple-touch-icon.png": "112c3e38c33ebbc48af0e34e32e611a3c5764543883176201f434d2ffae97044",
     "web/icons/badge-96.png": "d2144540484405c14a48d6456bd030b9f8a0d685ea2595728bf8709409b2a9f0",
@@ -36,7 +36,7 @@
     "web/icons/icon-512.png": "68210fa4a61d9536b2f840ac4841a569f1972c86e412c383794ee3aa54e38135",
     "web/icons/icon-maskable-512.png": "6d67517211466100180fb453856ce78e65512dda3e614b02537aa83c5fefe77a",
     "web/icons/tab-64.png": "af273af0b387c9db6c071c1210afcf003e1ce641428a5c3a34d3e92202f43761",
-    "web/index.html": "b4ffa73ac46512a1dcb8e5a6f8c3e344d2a90804f579ce4548e001ec92c79c71",
+    "web/index.html": "855d37b51dcab102dc81f59eebbd633a0cc22e2fc02912eb3f314e92f337b23a",
     "web/keys.js": "2298da2f6965ef8000f9c473c0969b245c2e2582093ae367c92a8655bb8ea3fb",
     "web/legal.html": "a39406028c9e30ff12b0d58400acf27578cf4315e212625eb5c48efec5916808",
     "web/manifest.webmanifest": "2beffc6e8cb380634e3d25072b23fdfaf4794b559c2ba519d3427a14cd321c3a",
@@ -77,7 +77,7 @@
     "web/site/site.css": "3b913d0ae1ae95345f134f07bba35c305ab643229b02fea0524aae9a6cf89116",
     "web/site/site.js": "cfde4e232c316cb66cfe876674caff9e9518f42b0f604a657942b55e0f61d4be",
     "web/site/theme.js": "50514b3119d5b9141799ce338f09d20f66e5dadd588b5dc4c597b389f0bd6cac",
-    "web/sw.js": "4013b24f44969ddee333a6c05808b3b103c99148cdde6ddacbc6bc7d4348204b",
+    "web/sw.js": "643faf617505206ea99bdf10eae9a107af8e2d6dfd5a93e775246d107ca2dde0",
     "web/upgrade.md": "f1425c2be05f7f8b7c7373795330df5afafe32be9febe1f78550896169f7eacf"
   }
 }
