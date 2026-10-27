@@ -78,6 +78,7 @@ const DEVICES_EVERY_MS = 5 * 60_000 // and it is read this often with no order t
 const TOOL_PREFIX = 'mcp__manyclaws__'
 const RELAY_MS = 250 // how often the relay's folder is looked in, while a permission prompt may come by it (relayTick)
 const RELAY_MODE_MS = 3000 // and how often the permission mode it keeps is read
+const ULTRACODE_FLAG_MS = 2000 // how often the session's flag settings are read for Ultracode as an app sets it (ultracodeFlagNow)
 const MODES = new Set(['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions'])
 
 const instance = randomId() // this load of the module, said in what `ping` answers (sealed, as every answer is) and nowhere else: a reload is a new one
@@ -131,7 +132,9 @@ let permissionMode = null // the permission mode, as last reported
 let classicHeard = false // a settings hook event (classic.*) has reached this plugin
 let managedHere = null // a promise of whether an organization manages Claude Code here (classicSkipped)
 let effortNow // the effort the session thinks at, as last reported: null when it has none, undefined until something says
-let ultracodeNow = null // whether Ultracode is on (dynamic workflows on every task, beside the effort), as /effort last said: null until it has
+let ultracodeNow = null // whether Ultracode is on (dynamic workflows on every task, beside the effort), as /effort or the app last set it: null until either has
+let ultracodeFlag // Ultracode in the session's flag settings, where an app sets it, as last read (ultracodeFlagNow): undefined until read
+let ultracodeFlagAt = 0 // when that was last read
 let modelAskedUntil = 0 // a /model the page asked for is on its way: until then, the switch is not asked about again
 let lastReplyAt = 0 // when this process last had a reply of the main conversation (0: none yet)
 let replyCacheMs = HOUR_CACHE_MS // how long that reply's prompt cache stays warm
@@ -188,8 +191,10 @@ export function register(on, options) {
       await currentSessionId($)
       runningTurn = e.turnId
       stepsDone.clear()
-      // (the prompt's own settings hook has just said the mode, where only the relay says it)
+      // (the prompt's own settings hook has just said the mode, where only the relay says it; and Ultracode as the app
+      // has it, at every prompt)
       if (!e.agentId) await relayMode($, true)
+      if (!e.agentId) await ultracodeFlagNow($, true)
       // (the turn the server asked the answer of is the first to start after it asked)
       if (answerAsked && !answerTurn) answerTurn = e.turnId
       await setState($, 'working')
@@ -1852,13 +1857,39 @@ async function relayMode($, now = false) {
   }
 }
 
+// Ultracode as an app turns it on or off: VS Code's switch sets the session's `ultracode` flag setting (the
+// apply_flag_settings control request), which nothing in the conversation says until the next prompt, and no event
+// tells this plugin of. Read at most every few seconds, unless `now`, and taken where it has changed since it was
+// last read: /effort ultracode, which leaves that setting as it was, is taken from its own answer (noteSetting), and
+// whichever of the two changed last is what the card says (deon, 2026-10-26: turned on in VS Code, the page said off)
+async function ultracodeFlagNow($, now = false) {
+  if (!config) return
+  const at = await $.clock.now()
+  if (!now && at - ultracodeFlagAt < ULTRACODE_FLAG_MS) return
+  ultracodeFlagAt = at
+  let set
+  try {
+    set = (await $.settings.read({ source: 'flag' }))?.ultracode
+  } catch {
+    return
+  }
+  const flag = typeof set === 'boolean' ? set : null
+  if (flag === ultracodeFlag) return
+  ultracodeFlag = flag
+  if (flag === null || flag === ultracodeNow) return
+  ultracodeNow = flag
+  cardChanged(true)
+}
+
 // A look in the relay's folder: for a permission prompt, while one may come there (a call left to auto mode's
-// classifier, or one asked in the app's dialog and on the page), and for the mode now and then
+// classifier, or one asked in the app's dialog and on the page), and for the mode now and then; and at the session's
+// flag settings, for Ultracode as the app sets it
 async function relayTick($) {
   if (relayBusy || !config || !sessionId) return
   relayBusy = true
   try {
     await relayMode($)
+    await ultracodeFlagNow($)
     if (!held.size && !asking.length) return
     const folder = await relayFolder($)
     const asks = (await $.fs.list(folder)).map((x) => x.name).filter((n) => n.endsWith('.ask') && !relayTaken.has(n))

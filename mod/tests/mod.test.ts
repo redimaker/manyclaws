@@ -1823,6 +1823,34 @@ test('Ultracode is on the card as /effort says it, beside the effort; and /effor
   expect(JSON.stringify(s.events())).not.toMatch(/ultracode|Ultracode/i)
 })
 
+test("Ultracode as the app sets it (VS Code's switch is the session's flag setting): on the card within a few seconds, with no prompt; /effort after it stands until the app changes it again (deon, 2026-10-26: turned on in VS Code, the page said off)", async ($, on) => {
+  const m = await made()
+  let flag: any = {}
+  on('settings.read', ($: any, e: any) => ({ value: e.source === 'flag' ? flag : {} }))
+  const s = session(on, m)
+  await start($)
+  await s.clock.advance(3000)
+  const ultra = () => opened(s, m).cards.at(-1).ultracode
+  expect(ultra()).toBe(null)
+  flag = { ultracode: true }
+  await s.clock.advance(3000)
+  expect(ultra()).toBe(true)
+  // Turned off from the page, by /effort, which leaves the flag as it was: what /effort said stands
+  const answer = (id: string, text: string) => ($ as any).session.append(said(id, 'command', 'user', [{ type: 'text', text: `<local-command-stdout>${text}</local-command-stdout>` }]))
+  await answer('c1', 'Ultracode off. Effort stays high.')
+  await s.clock.advance(3000)
+  expect(ultra()).toBe(false)
+  // and the app's switch, turned off and on again, is what the card says then
+  flag = { ultracode: false }
+  await s.clock.advance(3000)
+  expect(ultra()).toBe(false)
+  flag = { ultracode: true }
+  await s.clock.advance(3000)
+  expect(ultra()).toBe(true)
+  // (nothing of it in the open)
+  expect(JSON.stringify(s.events())).not.toMatch(/ultracode|Ultracode/i)
+})
+
 // ---- What is left in the open of a session is what the server cannot do without: nothing that numbers, sizes or
 // names what is said
 
