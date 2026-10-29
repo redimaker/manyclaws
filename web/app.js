@@ -92,6 +92,8 @@ const app = {
   sortBy: 'standard', // the order the active sessions are in, on this device (SORTS)
   promptAt: new Map(), // when its user last typed to each session, as this page has read it: session id -> time
   haiku: null, // the last search Haiku was asked for, on each computer that could start one: { q, runs: [{ mid, sid, state, folders, found, why }] }
+  lanes: null, // the Timeline, as the computers last said it: { items, computers, asked, loaded, unreachable, missed, loading, locked, failed }
+  lanesTimer: 0,
   drafts: {}, // what's typed and not sent, by session: { text, at }
   expect: null, // a session just started or resumed, not reporting yet: { sid, mid, until }
   computer: null, // the computer whose own page is showing: { mid, known, cwd, mode, read, reading, starting, error, colorError }
@@ -462,6 +464,8 @@ function h(tag, attrs, ...children) {
   for (const [k, v] of Object.entries(attrs ?? {})) {
     if (v === undefined || v === null || v === false) continue
     if (k === 'class') node.className = v
+    // (a style is set by the script, property by property: the page's policy runs no style written into an attribute)
+    else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v)
     else if (k.startsWith('on')) listen(node, k.slice(2), v)
     else node.setAttribute(k, v === true ? '' : v)
   }
@@ -1912,6 +1916,10 @@ function route() {
   el('computer').hidden = !computer
   if (!computer) closeComputer()
   if (computer) return openComputer(decodeURIComponent(computer[1]))
+  const lanes = path === '#/lanes'
+  el('lanes').hidden = !lanes
+  if (!lanes) closeLanes()
+  if (lanes) return openLanes()
   if (path === '#/setup' || ACCOUNT_PAGES.includes(path)) return openGuide(path.slice(2))
   if (path === '#/settings') return openSettings()
   if (connect) return openConnect()
@@ -2338,6 +2346,367 @@ function promptRow(x) {
       h('div', { class: 'row-sub' }, sub),
     ),
   )
+}
+
+// ---- The Timeline (#/lanes): every session of the last week, on every computer whose agent keeps it, as a lane of its
+// own, side by side, so that what was done when can be read across them (deon, 2026-10-29). A lane is a column of
+// blocks, each a stretch of its session on one thing in a few words, which Claude Haiku made on that computer where it
+// was turned on there (lanes.mjs in the agent), and otherwise rough ones, named by their first prompts. The latest is
+// at the top, every lane on the same clock, which is given at the left; a stretch where nothing was said anywhere is
+// drawn short, as a faint break that says how long it was. The lane last typed to is at the left, and the order is
+// worked out again once in half an hour, not as each is typed to. Lines join a session to the one it was forked from,
+// and a block to one in another session that carries on with the same thing soon after. A press on a block opens its
+// session there, as a search hit does. For a large screen: it takes the whole window, and the way to it is not shown on a
+// phone.
+const LANES_DAYS = 7
+const LANES_ORDER_MS = 30 * 60_000 // how long the lanes keep their order (deon: "only update this sort order once every 30 mins")
+const LANES_AGAIN_MS = 60_000 // how often what the computers have is read again while the Timeline is open
+const LANE_W = [176, 280] // how wide a lane is, at the least and the most
+const LANES_AXIS = 84 // the clock at the left
+const LANE_MIN = 24 // the least a block is drawn tall, to say anything in
+const LANES_BREAK_MS = 45 * 60_000 // a stretch with nothing said anywhere that is drawn as a break
+const LANES_BREAK_PX = 36 // (room in it for how long it was, over the day the clock says under it)
+const LANES_LINK_MS = 3 * 3600_000 // a block carries on with one in another session that ended at most this long before it
+
+async function loadLanes() {
+  const asked = Date.now()
+  app.lanes = { ...(app.lanes ?? { items: [] }), asked, loading: true }
+  const sealed = await sealFor({ since: asked - LANES_DAYS * 86400_000 })
+  if (!sealed) return void ((app.lanes = { ...app.lanes, items: [], locked: true, loading: false }), renderLanes())
+  const r = await fetch('/api/lanes?c=' + encodeURIComponent(sealed)).catch(() => null)
+  if (app.lanes?.asked !== asked) return
+  if (!r?.ok) return void ((app.lanes = { ...app.lanes, loading: false, failed: true }), renderLanes())
+  const data = await r.json()
+  const items = []
+  const computers = []
+  const missed = []
+  for (const x of data.results ?? []) {
+    const got = x.r && typeof x.r === 'object' ? x.r : null
+    if (!got || !Array.isArray(got.sessions)) {
+      missed.push(x.machine?.name ?? 'a computer')
+      continue
+    }
+    const mid = x.machine?.id
+    computers.push({ mid, name: x.machine?.name ?? '', on: got.on === true, pending: Number(got.pending) || 0, working: got.working ?? null, why: typeof got.why === 'string' ? got.why : '', indexing: got.indexing ?? 0 })
+    for (const s of got.sessions) {
+      if (typeof s?.sid !== 'string' || !Array.isArray(s.blocks)) continue
+      // (a block is a minute long at the least, so that it has a place on the clock)
+      const blocks = s.blocks.filter((b) => typeof b?.uuid === 'string' && Number.isFinite(b.ts)).map((b) => ({ ...b, end: Math.max(b.ts + 60_000, Number(b.end) || 0), n: Number(b.n) || 1, says: String(b.says ?? ''), tags: Array.isArray(b.tags) ? b.tags.map(String) : [] }))
+      if (blocks.length) items.push({ ...s, key: `${mid}/${s.sid}`, mid, machine: x.machine?.name ?? '', blocks })
+    }
+  }
+  app.lanes = { items, computers, asked, loaded: Date.now(), unreachable: data.unreachable ?? [], missed }
+  renderLanes()
+}
+
+async function openLanes() {
+  leaveChat()
+  document.body.classList.add('lanes-open')
+  renderLanes()
+  clearInterval(app.lanesTimer)
+  app.lanesTimer = setInterval(() => !document.hidden && loadLanes(), LANES_AGAIN_MS)
+  // (which computers the account has is known once the stream has said: a page opened here asks them after that)
+  await snapshotSeen
+  if (document.body.classList.contains('lanes-open')) loadLanes()
+}
+function closeLanes() {
+  if (!document.body.classList.contains('lanes-open')) return
+  document.body.classList.remove('lanes-open')
+  clearInterval(app.lanesTimer)
+  app.lanesTimer = 0
+}
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && document.body.classList.contains('lanes-open') && loadLanes())
+
+// The lanes in the order they keep for half an hour: the last typed to first, as it was when that was last worked out;
+// a session that has come since, at the left, the latest first (kept on the device, as the list's order is). A lane
+// whose computer did not answer this time keeps its place for when it does
+function lanesInOrder(items) {
+  const at = (x) => x.lastInput || x.last_ts || 0
+  let kept = null
+  try {
+    kept = JSON.parse(localStorage.getItem('mc.lanesOrder'))
+  } catch {}
+  const now = Date.now()
+  if (!kept || !Array.isArray(kept.keys) || !(now - kept.at < LANES_ORDER_MS)) kept = { at: now, keys: [...items].sort((a, b) => at(b) - at(a)).map((x) => x.key) }
+  else {
+    const known = new Set(kept.keys)
+    kept.keys = [...items.filter((x) => !known.has(x.key)).sort((a, b) => at(b) - at(a)).map((x) => x.key), ...kept.keys]
+  }
+  // (one that is not here now keeps its place, for when its computer answers again)
+  kept.keys = kept.keys.slice(0, 1000)
+  try {
+    localStorage.setItem('mc.lanesOrder', JSON.stringify(kept))
+  } catch {}
+  const place = new Map(kept.keys.map((k, i) => [k, i]))
+  return [...items].sort((a, b) => place.get(a.key) - place.get(b.key))
+}
+
+// The clock, from now at the top down to the first block: each stretch between two times something began or ended is
+// as tall as it was long, less so the longer it was (a busy hour has room for all that went on in it), and one where
+// nothing was said anywhere for long is a break. Then every block is made tall enough to say something in. `y(t)` is
+// where a time is drawn; `breaks` and `ticks` are what the clock at the left says
+function lanesClock(items, now) {
+  const all = items.flatMap((x) => x.blocks)
+  const times = [...new Set([now, ...all.flatMap((b) => [b.ts, b.end])])].sort((a, b) => b - a)
+  // (each stretch, newest first: [times[i], times[i + 1]], and whether any block is on then)
+  const heights = []
+  const busy = []
+  for (let i = 0; i < times.length - 1; i++) {
+    const [top, bottom] = [times[i], times[i + 1]]
+    const on = all.some((b) => b.ts <= bottom && b.end >= top)
+    const minutes = (top - bottom) / 60_000
+    busy.push(on)
+    heights.push(on ? Math.max(4, 9 * Math.sqrt(minutes)) : top - bottom >= LANES_BREAK_MS ? LANES_BREAK_PX : Math.max(2, 3 * Math.sqrt(minutes)))
+  }
+  const index = new Map(times.map((t, i) => [t, i]))
+  // (a block too short to say anything in has the stretches it spans made taller)
+  for (const b of [...all].sort((a, b) => b.end - a.end)) {
+    const [from, to] = [index.get(b.end), index.get(b.ts)]
+    let tall = 0
+    for (let i = from; i < to; i++) tall += heights[i]
+    if (tall >= LANE_MIN) continue
+    if (from === to) continue
+    for (let i = from; i < to; i++) heights[i] *= LANE_MIN / tall
+  }
+  const top = 34 // (room over the latest for the day it is)
+  const ys = [top]
+  for (const h of heights) ys.push(ys.at(-1) + h)
+  const y = (t) => {
+    if (t >= times[0]) return top
+    if (t <= times.at(-1)) return ys.at(-1)
+    let lo = 0
+    let hi = times.length - 1
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1
+      if (times[mid] >= t) lo = mid
+      else hi = mid
+    }
+    return ys[lo] + ((times[lo] - t) / (times[lo] - times[hi] || 1)) * (ys[hi] - ys[lo])
+  }
+  const breaks = []
+  for (let i = 0; i < heights.length; i++) if (!busy[i] && times[i] - times[i + 1] >= LANES_BREAK_MS) breaks.push({ y: ys[i], h: heights[i], from: times[i + 1], to: times[i] })
+  // What the clock says: at the top of each stretch between breaks, the time (and the day where it is another), and the
+  // hours in it where there is room
+  const ticks = []
+  const day = (t) => new Date(t).toDateString()
+  const add = (t, at, strong) => {
+    const last = ticks.at(-1)
+    if (last && at - last.y < 15 && !strong) return
+    if (last && at - last.y < 15) ticks.pop()
+    ticks.push({ y: at, t, day: !last || day(last.t) !== day(t) })
+  }
+  const gaps = new Set(breaks.map((b) => b.to))
+  const below = new Set(breaks.map((b) => b.from))
+  for (let i = 0; i < times.length; i++) {
+    if (i === 0 || below.has(times[i])) add(times[i], ys[i], true)
+    if (i === times.length - 1) break
+    // (the hours inside this stretch, newest first; a break has none)
+    if (!busy[i] && gaps.has(times[i])) continue
+    const hour = new Date(times[i])
+    hour.setMinutes(0, 0, 0)
+    for (let t = hour.getTime(); t > times[i + 1]; t -= 3600_000) if (t < times[i]) add(t, y(t), false)
+  }
+  return { y, height: ys.at(-1) + 20, breaks, ticks }
+}
+
+// How long a break was, said short
+function lanesGap(ms) {
+  const h = Math.round(ms / 3600_000)
+  if (ms < 3600_000) return Math.round(ms / 60_000) + ' min'
+  if (h < 24) return h + ' h'
+  const d = Math.floor(h / 24)
+  return `${d} day${d === 1 ? '' : 's'}` + (h % 24 ? ` ${h % 24} h` : '')
+}
+
+// Which blocks carry on with one in another session: the same thing, by the words of what each was about (each word
+// counting for less the more blocks have it), soon after; the best one for each, and each block on one line at most
+const LANES_STOP = new Set(['the', 'a', 'an', 'and', 'or', 'of', 'for', 'to', 'in', 'on', 'at', 'with', 'from', 'by', 'it', 'its', 'is', 'why', 'how', 'what', 'into', 'up', 'out', 'new', 'fix', 'fixing', 'add', 'adding', 'check', 'checking', 'make', 'making', 'more'])
+const lanesWords = (b) => new Set([...b.tags, b.says].join(' ').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2 && !LANES_STOP.has(w)))
+function lanesLinks(items) {
+  const blocks = items.flatMap((x) => x.blocks.filter((b) => !b.rough && !b.cont).map((b) => ({ x, b, words: lanesWords(b) })))
+  const many = new Map()
+  for (const { words } of blocks) for (const w of words) many.set(w, (many.get(w) ?? 0) + 1)
+  const weight = (w) => Math.log((blocks.length + 1) / (many.get(w) ?? 1))
+  const sum = (words) => [...words].reduce((n, w) => n + weight(w), 0)
+  const links = []
+  const used = new Set()
+  for (const to of blocks) {
+    let best = null
+    for (const from of blocks) {
+      // (from the one that began first: two sessions on the same thing at the same time are joined once)
+      if (from.x === to.x || used.has(from.b) || from.b.ts >= to.b.ts || from.b.end > to.b.ts + 10 * 60_000 || to.b.ts - from.b.end > LANES_LINK_MS) continue
+      // (a fork's own line says it already)
+      if (to.x.fork?.from === from.x.sid || from.x.fork?.from === to.x.sid) continue
+      const shared = [...to.words].filter((w) => from.words.has(w))
+      const score = sum(shared) / Math.max(1e-9, Math.min(sum(from.words), sum(to.words)))
+      if (shared.length >= 2 && score >= 0.45 && (!best || score > best.score)) best = { from, score }
+    }
+    if (!best) continue
+    used.add(best.from.b)
+    links.push({ from: best.from, to })
+  }
+  return links
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg'
+function svgOf(tag, attrs = {}) {
+  const node = document.createElementNS(SVG_NS, tag)
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v)
+  return node
+}
+
+function renderLanes() {
+  const box = el('lanes-body')
+  if (!box || el('lanes').hidden) return
+  const got = app.lanes ?? { items: [], loading: true }
+  renderLanesSays(got)
+  if (got.locked) return fill(box, h('div', { class: 'list-empty' }, NO_KEY_MACHINE))
+  if (!got.items.length) return fill(box, h('div', { class: 'list-empty' }, got.loading ? 'Reading the last week on your computers…' : got.failed ? 'The Timeline could not be read: the server did not answer.' : 'Nothing was said in a session on your computers in the last week.'))
+  const lanes = lanesInOrder(got.items)
+  const now = Date.now()
+  const clock = lanesClock(lanes, now)
+  const wide = Math.min(LANE_W[1], Math.max(LANE_W[0], Math.floor((box.clientWidth - LANES_AXIS - 2) / lanes.length)))
+  const place = new Map(lanes.map((x, i) => [x.key, i]))
+  const middle = (x) => place.get(x.key) * wide + wide / 2
+  const timeOf = (ts) => new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const dayOf = (ts) => new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+  // The heads: what each session is called, where it is, and what it was forked from
+  const nameOf = (x) => markOf(x.sid)?.name || app.sessions.get(x.sid)?.title || x.title || (x.first_prompt ?? '').slice(0, 80) || folderOf(x.cwd) || x.sid.slice(0, 8)
+  const heads = lanes.map((x) => {
+    const live = app.sessions.get(x.sid)
+    const name = nameOf(x)
+    const m = app.machines.get(x.mid)
+    const parent = x.fork && got.items.find((y) => y.mid === x.mid && y.sid === x.fork.from)
+    const from = x.fork && (parent ? nameOf(parent) : markOf(x.fork.from)?.name || app.sessions.get(x.fork.from)?.title || '')
+    const state = live && !live.ended && live.online ? live.state : 'past'
+    return h(
+      'a',
+      { class: 'lane-head', 'data-key': x.key, 'data-color': m?.color || null, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}`, title: name, style: { width: wide + 'px' } },
+      h('span', { class: 'lane-name' }, h('span', { class: 'dot ' + state, title: STATE_LABEL[state] ?? 'Not running' }), h('span', { class: 'lane-title' }, name)),
+      h('span', { class: 'lane-where' }, dotted(folderOf(x.cwd), whereLabel(m ? machineName(m) : x.machine, x.mid))),
+      x.fork && h('span', { class: 'lane-fork', title: 'Forked from ' + (from || 'another session') }, '↳ from ', from || 'another session'),
+    )
+  })
+  // The blocks
+  const cols = lanes.map((x) =>
+    h(
+      'div',
+      { class: 'lane', 'data-key': x.key, style: { left: place.get(x.key) * wide + 'px', width: wide + 'px' } },
+      x.blocks.map((b) => {
+        const top = clock.y(b.end)
+        const tall = Math.max(LANE_MIN - 2, clock.y(b.ts) - top - 2)
+        const when = `${dayOf(b.ts)}, ${timeOf(b.ts)}${b.end - b.ts >= 60_000 ? ' – ' + timeOf(b.end) : ''}`
+        const about = [b.rough ? `${b.says || 'No prompt'} (not read by Claude Haiku yet: named by its first prompt)` : b.says, when, `${b.n} turn${b.n === 1 ? '' : 's'}`, b.tags.join(', ')].filter(Boolean).join('\n')
+        return h(
+          'a',
+          { class: 'lane-block' + (b.rough ? ' rough' : '') + (b.cont ? ' cont' : '') + (tall < 40 ? ' short' : ''), 'data-color': app.machines.get(x.mid)?.color || null, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}?at=${encodeURIComponent(b.uuid)}`, title: about, style: { top: top + 'px', height: tall + 'px' } },
+          h('span', { class: 'lane-says' }, b.says || 'No prompt'),
+        )
+      }),
+    ),
+  )
+  // The lines: from where a session was forked to its first block, and from a block to the one that carries it on
+  const width = lanes.length * wide
+  const svg = svgOf('svg', { class: 'lane-links', width, height: clock.height, viewBox: `0 0 ${width} ${clock.height}`, 'aria-hidden': 'true' })
+  const curve = (x1, y1, x2, y2, kind) => {
+    const bend = Math.max(18, Math.abs(y1 - y2) / 2)
+    svg.append(svgOf('path', { class: 'lane-link ' + kind, d: `M ${x1} ${y1} C ${x1} ${y1 - bend}, ${x2} ${y2 + bend}, ${x2} ${y2}` }))
+    svg.append(svgOf('circle', { class: 'lane-link-end ' + kind, cx: x1, cy: y1, r: 2.5 }))
+  }
+  const oldest = Math.min(...lanes.map((x) => x.blocks[0].ts))
+  for (const x of lanes) {
+    const parent = x.fork && lanes.find((y) => y.mid === x.mid && y.sid === x.fork.from)
+    const first = x.blocks[0]
+    // (one forked before the week the Timeline shows says so in its head, and has no line)
+    if (!parent || !first || x.fork.at < oldest) continue
+    curve(middle(parent), clock.y(x.fork.at), middle(x), clock.y(first.ts), 'fork')
+  }
+  for (const { from, to } of lanesLinks(lanes)) curve(middle(from.x), clock.y(from.b.end), middle(to.x), clock.y(to.b.ts), 'same')
+  // The clock, and the breaks across every lane
+  const axis = h(
+    'div',
+    { class: 'lanes-axis', style: { height: clock.height + 'px' } },
+    clock.ticks.map((t) => h('span', { class: 'lanes-tick' + (t.day ? ' day' : ''), style: { top: t.y + 'px' } }, t.day && h('b', null, dayOf(t.t)), timeOf(t.t))),
+    clock.breaks.map((b) => h('span', { class: 'lanes-gap', style: { top: b.y + 3 + 'px' }, title: `Nothing was said in any of these sessions from ${dayOf(b.from)}, ${timeOf(b.from)} to ${timeOf(b.to)}` }, lanesGap(b.to - b.from))),
+  )
+  const area = h(
+    'div',
+    { class: 'lanes-area', style: { width: width + 'px', height: clock.height + 'px' } },
+    h('div', { class: 'lanes-now', style: { top: clock.y(now) + 'px' } }),
+    clock.breaks.map((b) => h('div', { class: 'lanes-break', style: { top: b.y + 'px', height: b.h + 'px' } })),
+    cols,
+    svg,
+  )
+  const left = box.scrollLeft
+  const down = box.scrollTop
+  fill(box, h('div', { class: 'lanes-grid', style: { gridTemplateColumns: `${LANES_AXIS}px ${width}px` } }, h('div', { class: 'lanes-corner' }, 'Now'), h('div', { class: 'lanes-heads' }, heads), axis, area))
+  box.scrollLeft = left
+  box.scrollTop = down
+}
+
+// What the Timeline has to say over its lanes: on which computers Claude Haiku makes the blocks, and how far it has got;
+// where it does not, the way to have it; and what is not in it, and why
+function renderLanesSays(got) {
+  const says = []
+  const computers = got.computers ?? []
+  const off = computers.filter((c) => !c.on && app.machines.get(c.mid)?.online)
+  const on = computers.filter((c) => c.on)
+  for (const c of on) {
+    const name = whereLabel(c.name, c.mid)
+    says.push(
+      h(
+        'p',
+        { class: 'lanes-say', 'data-key': 'on:' + c.mid },
+        c.why ? ['Claude Haiku could not summarize a session on ', name, `: ${c.why}. It tries again in a while.`] : c.pending ? ['Claude Haiku is summarizing ', name, `'s sessions: ${c.pending} to go. Until then they are named by their first prompts.`] : ['Claude Haiku summarizes ', name, "'s sessions as they go on."],
+        ' ',
+        h('button', { type: 'button', class: 'lanes-do', 'data-part': 'lanes-off', onclick: () => lanesHaiku([c], false) }, 'Turn off'),
+      ),
+    )
+  }
+  if (off.length)
+    says.push(
+      h(
+        'p',
+        { class: 'lanes-say', 'data-key': 'off' },
+        'The blocks on ',
+        off.flatMap((c, i) => [i ? (i === off.length - 1 ? ' and ' : ', ') : '', whereLabel(c.name, c.mid)]),
+        ' are named by their first prompts. ',
+        h('button', { type: 'button', class: 'lanes-do', 'data-part': 'lanes-on', onclick: () => lanesHaiku(off, true) }, 'Have Claude Haiku summarize them'),
+      ),
+    )
+  const machines = [...app.machines.values()]
+  const older = machines.filter((m) => m.online && !(m.capabilities ?? []).includes('lanes')).map(machineName)
+  const offline = machines.filter((m) => !m.online).map(machineName)
+  const not = (key, text) => says.push(h('p', { class: 'lanes-say muted', 'data-key': key }, text))
+  if (got.unreachable?.length) not('unreachable', 'Not shown (it did not answer): ' + got.unreachable.join(', '))
+  if (got.missed?.length) not('missed', 'Not shown (what it answered did not come through): ' + got.missed.join(', '))
+  if (offline.length) not('offline', 'Not shown (offline): ' + offline.join(', '))
+  if (older.length) not('older', 'Not shown (its ManyClaws agent is from before the Timeline: update it from its page): ' + older.join(', '))
+  const indexing = computers.reduce((n, c) => n + (c.indexing ?? 0), 0)
+  if (indexing) not('indexing', `Still indexing ${indexing} files; more may turn up.`)
+  redraw(el('lanes-says'), says)
+}
+
+// Claude Haiku making the blocks on these computers, or not: asked of each, signed. It spends Claude tokens there, which
+// is said first
+async function lanesHaiku(computers, on) {
+  if (on) {
+    const where = computers.map((c) => c.name).join(', ')
+    const go = await ask('Summarize with Claude Haiku?', {
+      says: [`On ${where}, Claude Haiku, at high effort, reads what was said in each session of the last week, and then in each as it goes on, and breaks it into blocks of a few words. That spends Claude tokens there, on the Claude account Claude Code is signed in to: a little for each session, more for long ones.`, 'What it makes is kept on that computer. You can turn it off here.'],
+      yes: 'Summarize',
+    })
+    if (!go) return
+  }
+  const failed = []
+  for (const c of computers) {
+    const order = await orderFor(c.mid, 'lanes', { on })
+    if (!order) return tell('Not sent', blockedFor(c.mid) || NO_KEY_MACHINE)
+    const r = await sendJson(`/api/machines/${c.mid}/lanes`, { order })
+    if (!r.ok) failed.push(`${c.name}: ${r.error}`)
+  }
+  if (failed.length) tell(on ? 'Not turned on' : 'Not turned off', failed)
+  loadLanes()
 }
 
 // Updates arrive in bursts, and from sessions at work several times a second: the list

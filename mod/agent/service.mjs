@@ -11,6 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { Store } from './store.mjs'
 import { Indexer } from './indexer.mjs'
+import { Lanes } from './lanes.mjs'
 import { Transcript } from './transcript.mjs'
 import { Host, HostError, CARRY_MAX, expandHome, findClaude, findGitBash, sessionEnv, taskCmd, taskXml, taskFile } from './host.mjs'
 import { Cswap } from './cswap.mjs'
@@ -20,7 +21,7 @@ import { historyRows } from './rows.mjs'
 import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, tempRoots, FILE_MAX } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
 
-export const VERSION = '6.2.8'
+export const VERSION = '6.2.9'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
@@ -167,6 +168,8 @@ export async function run(config, flags = {}) {
   let tokenRefused = false // the server would not take this machine's token (401): the plugin's is taken in its place
   const host = new Host(config, { store, log, onChange: () => announce(), startedFile: path.join(process.env.MANYCLAWS_HOME || path.join(os.homedir(), '.manyclaws'), 'started.json') })
   const cswap = new Cswap(config, { fail: (text) => new HostError(text) })
+  // The page's Timeline: each session's last week in blocks, which Claude Haiku makes here where the account turned that on
+  const lanes = new Lanes({ store, log, roots: config.roots, on: config.lanes?.on === true, claude: () => config.claude || findClaude(host.shellEnv()), env: () => sessionEnv(host.shellEnv()) })
   // What it signs in with and what it seals with. With all three it is this account's
   // machine; without one of them it says nothing to anybody, and waits (see the end).
   const server = String(config.server ?? '').replace(/\/+$/, '')
@@ -523,6 +526,11 @@ export async function run(config, flags = {}) {
     'search.hits': (args = {}) => store.searchHits(args),
     // The prompts its people typed here, the latest first, each with the last reply to it: the page's Prompts (flat)
     'prompts.recent': (args = {}) => ({ ...store.recentPrompts(args), indexing: indexer.pending.length }),
+    // The page's Timeline: every session of the last week (since `since`, at the most a week ago) with its blocks, each a
+    // stretch of it on one thing, in a few words; and whether Claude Haiku makes them here, and how many it has still to do
+    'lanes.read': (args = {}) => ({ ...lanes.read(args), indexing: indexer.pending.length }),
+    // Whether it does, which is written to agent.json
+    'lanes.set': ({ on } = {}) => setLanes(on === true),
     // A page of a conversation: the last `limit` lines before `before`, or around one line.
     // `subagent` (a file id from a search hit) reads a subagent's own conversation.
     'session.read': ({ sid, subagent, limit = 200, before, around, max = 8000 } = {}) => {
@@ -737,6 +745,23 @@ export async function run(config, flags = {}) {
     return { auto: host.spawnConfig.auto, folders: host.autoList, off: host.spawnConfig.autoOff }
   }
 
+  // Whether Claude Haiku makes the Timeline's blocks of this computer's sessions: written to agent.json, and gone by from now on
+  function setLanes(on) {
+    const file = path.join(ownHome, 'agent.json')
+    let kept = {}
+    try {
+      kept = JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch {}
+    kept.lanes = { ...(kept.lanes ?? {}), on }
+    fs.writeFileSync(file, JSON.stringify(kept, null, 2) + '\n', { mode: 0o600 })
+    config.lanes = kept.lanes
+    if (lanes.on !== on) {
+      lanes.setOn(on)
+      log(on ? "Claude Haiku makes the Timeline's blocks of this computer's sessions" : "Claude Haiku no longer makes the Timeline's blocks of this computer's sessions")
+    }
+    return { on }
+  }
+
   function describe() {
     const about = {
       roots: config.roots,
@@ -766,7 +791,7 @@ export async function run(config, flags = {}) {
       ...machine,
       agent: VERSION,
       node: process.version,
-      capabilities: ['sessions', 'search', 'prompts', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
+      capabilities: ['sessions', 'search', 'prompts', 'lanes', 'measure', 'auto-folders', ...(checks() ? ['upgrade'] : []), ...(host.canStart() ? ['spawn', 'branch', 'listed'] : []), ...(config.relay?.port ? ['relay'] : []), ...(cswap.path ? ['cswap'] : []), ...(servesFiles ? ['files'] : []), ...(takesFiles ? ['upload'] : []), 'sealed', 'orders'],
       sealed: 3,
       spawn: host.canStart(),
       card: seal(about, sealKey),
@@ -977,6 +1002,14 @@ export async function run(config, flags = {}) {
       return { sid: String(w.sid ?? ''), mode: String(w.mode ?? '') }
     },
     'cswap.switch': (a) => ({ to: take(a.order, machine.id, ['cswap']).with.to }),
+    // Claude Haiku making the Timeline's blocks here, or not. Turning it on spends the account's Claude tokens here, as
+    // starting a session does: that is for a device that may start them. Any of the account's devices turns it off.
+    'lanes.set': (a) => {
+      const o = take(a.order, machine.id, ['lanes'])
+      const on = o.with.on === true
+      if (on) startedBy(o, 'has Claude Haiku read its sessions')
+      return { on }
+    },
     // A file is read for whoever signed for it: which file, and where its session runs, are the order's to say
     'file.read': (a) => {
       const w = take(a.order, machine.id, ['file']).with
@@ -1215,6 +1248,7 @@ export async function run(config, flags = {}) {
   }
 
   const stop = () => {
+    lanes.stop()
     host.stopAll()
     store.close()
     process.exit(0)
