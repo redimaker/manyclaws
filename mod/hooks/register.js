@@ -71,6 +71,7 @@ const MAX_RESULT = 1_000_000 // longest string in a call's result
 const HISTORY_WAIT_MS = 3000 // how long a session's history waits for the first poll to say whether the server asks for it
 const CARD_MS = 1000 // a session's card goes at most this often, but for a change of state, which goes at once
 const DONE_WORTH_MS = 30_000 // a turn this long is worth telling a phone it is done
+const DONE_OWED_MS = 20_000 // once the subagents a turn left running are done, how long a turn of their word is waited for (doneOwedTick)
 const ANSWER_FIELD = 200_000 // how long an answer the server asked for (a handoff) may be
 const AGENT_IDLE_MS = 6 * 3600_000 // a subagent not heard of for this long is taken to be gone
 const DEVICES_MS = 2000 // the list of the account's devices is not asked for again sooner than this after it was
@@ -99,6 +100,8 @@ let isFlushing = false
 let lastSent = 0
 let sessionId = null // the current conversation's id; null right after one ends
 let attended = false // a person can be at this session (see isAttended)
+let mainTurnOn = false // the main conversation's turn is running: from its turn.start to its turn.complete
+let doneOwed = null // a turn that ended while subagents it started ran on, whose word to the phones waits for them (turnDone): { since, quiet }
 let runningTurn = null // turnId of the main loop's running turn, for turn.abort
 let turnBefore = null // the turn that started before the session was taken up (while it was being connected), if it is still running
 let state = 'idle'
@@ -195,6 +198,7 @@ export function register(on, options) {
       // has it, at every prompt)
       if (!e.agentId) await relayMode($, true)
       if (!e.agentId) await ultracodeFlagNow($, true)
+      if (!e.agentId) mainTurnOn = true
       // (the turn the server asked the answer of is the first to start after it asked)
       if (answerAsked && !answerTurn) answerTurn = e.turnId
       await setState($, 'working')
@@ -249,6 +253,7 @@ export function register(on, options) {
       else {
         sendDeltas()
         runningTurn = null
+        mainTurnOn = false
         // (a call the classifier refused is not asked about after the turn)
         for (const id of [...held.keys()]) settleHeld(id)
         await turnDone($, e)
@@ -524,6 +529,7 @@ async function begin($, e, given, keys) {
   // (a turn that started while the key was being made is still running: the session's card says so)
   if (turnBefore) {
     runningTurn = turnBefore
+    mainTurnOn = true
     state = 'working'
     stateSince = Date.now()
   }
@@ -612,6 +618,8 @@ function forgetSession() {
   usageNow = { contextPercent: null, costUsd: null }
   subagents.clear()
   spawns = []
+  doneOwed = null
+  mainTurnOn = false
   stepsDone.clear()
   for (const id of [...held.keys()]) settleHeld(id)
   relayTaken.clear()
@@ -754,7 +762,6 @@ const batchOf = (events) => ({ protocol: PROTOCOL, meta: { protocol: PROTOCOL, s
 
 // The card: everything a session says of itself, as the page shows it
 function cardNow() {
-  const now = Date.now()
   return {
     ...meta,
     state,
@@ -768,7 +775,7 @@ function cardNow() {
     permissionMode,
     effort: effortNow ?? null,
     ultracode: ultracodeNow,
-    agents: [...subagents.values()].filter((a) => now - a.lastActivity < AGENT_IDLE_MS).sort((a, b) => a.startedAt - b.startedAt),
+    agents: agentsNow().sort((a, b) => a.startedAt - b.startedAt),
   }
 }
 function cardChanged(urgent = false) {
@@ -829,6 +836,11 @@ function agentStarted(e) {
   subagents.set(id, { id, type: String(e.agent_type || spawn?.type || ''), description: spawn?.description ?? '', background: !!spawn?.background, startedAt: now, lastActivity: now })
   cardChanged()
 }
+// The subagents running now, as the card lists them
+function agentsNow() {
+  const now = Date.now()
+  return [...subagents.values()].filter((a) => now - a.lastActivity < AGENT_IDLE_MS)
+}
 function agentGone(id) {
   if (subagents.delete(id)) cardChanged()
 }
@@ -872,10 +884,16 @@ async function turnDone($, e) {
   else if (e.reason && e.reason !== 'answer') await emitRows($, [{ uuid: e.turnId + ':end', role: 'notice', text: 'Turn ended: ' + e.reason }])
   const spent = took(e)
   if (spent) await emitRows($, [{ uuid: e.turnId + ':took', role: 'notice', text: spent }])
-  if (e.reason !== 'aborted' && !e.isAborted && Number(e.durationMs) >= DONE_WORTH_MS && attended) {
-    if (e.reason && e.reason !== 'answer') tellPhones('done', 'Stopped: ' + e.reason)
-    else if (typeof e.answer === 'string' && e.answer) tellPhones('done', e.answer, { prefix: 'Done: ' })
-    else tellPhones('done', 'Claude has finished.')
+  // Word to the phones that it is done, where it took a while (from the turn that left subagents running, where one
+  // did) and nobody stopped it. Not while subagents it started run on (a workflow's, as Ultracode starts on every task):
+  // once they are done, Claude Code gives Claude their word in a turn of its own, whose end says it with what came of
+  // them, or, where none comes, doneOwedTick does (deon, 2026-10-28, of the dot: "it gives the impression the session is done")
+  const now = await $.clock.now()
+  if (e.reason === 'aborted' || e.isAborted || !attended) doneOwed = null
+  else {
+    const since = doneOwed?.since ?? now - (Number(e.durationMs) || 0)
+    doneOwed = agentsNow().length ? { since, quiet: 0 } : null
+    if (!doneOwed && now - since >= DONE_WORTH_MS) tellDone(e)
   }
   if (answerAsked && answerTurn === e.turnId) {
     await emit($, 'answer', { asked: answerAsked, text: cap(e.answer, ANSWER_FIELD), reason: e.reason, aborted: !!e.isAborted })
@@ -883,6 +901,25 @@ async function turnDone($, e) {
     answerAsked = ''
     answerTurn = null
   }
+}
+
+function tellDone(e) {
+  if (e.reason && e.reason !== 'answer') tellPhones('done', 'Stopped: ' + e.reason)
+  else if (typeof e.answer === 'string' && e.answer) tellPhones('done', e.answer, { prefix: 'Done: ' })
+  else tellPhones('done', 'Claude has finished.')
+}
+
+// The word to the phones a turn owes while the subagents it left running are at work (turnDone): once the last of
+// them is done, and no turn has started for a while to give Claude their word, the phones are told it has finished
+async function doneOwedTick($) {
+  if (!doneOwed || mainTurnOn) return
+  if (agentsNow().length) return void (doneOwed.quiet = 0)
+  const now = await $.clock.now()
+  if (!doneOwed.quiet) return void (doneOwed.quiet = now)
+  if (now - doneOwed.quiet < DONE_OWED_MS) return
+  const { since } = doneOwed
+  doneOwed = null
+  if (now - since >= DONE_WORTH_MS) tellPhones('done', 'Claude has finished.')
 }
 
 async function setState($, next, detail = '') {
@@ -1883,13 +1920,14 @@ async function ultracodeFlagNow($, now = false) {
 
 // A look in the relay's folder: for a permission prompt, while one may come there (a call left to auto mode's
 // classifier, or one asked in the app's dialog and on the page), and for the mode now and then; and at the session's
-// flag settings, for Ultracode as the app sets it
+// flag settings, for Ultracode as the app sets it; and for the word to the phones a turn owes, once its subagents are done
 async function relayTick($) {
   if (relayBusy || !config || !sessionId) return
   relayBusy = true
   try {
     await relayMode($)
     await ultracodeFlagNow($)
+    await doneOwedTick($)
     if (!held.size && !asking.length) return
     const folder = await relayFolder($)
     const asks = (await $.fs.list(folder)).map((x) => x.name).filter((n) => n.endsWith('.ask') && !relayTaken.has(n))

@@ -1700,6 +1700,47 @@ test('a session tells the account\'s phones itself, sealed: when it starts to ne
   expect(opened(s, m).rows.map((r) => [r.role, r.text])).toEqual([['notice', '45s · ↓ 2.4k tokens'], ['notice', 'Interrupted'], ['notice', '1m 30s']])
 })
 
+test("a turn that ends while subagents it started run on (a workflow's, as Ultracode starts on every task) does not tell the phones it is done: the turn that gives Claude their word does, with what it says, timed from the first; where none comes, they are told it has finished a while after (deon, 2026-10-28)", async ($, on) => {
+  engine(on)
+  on('classic.SubagentStart', () => ({}))
+  on('classic.SubagentStop', () => ({}))
+  const m = await made(WORDS)
+  const s: any = session(on, m)
+  await start($)
+  await s.clock.advance(10)
+  const done = () => opened(s, m).notes.filter((n: any) => n.kind === 'done').map((n: any) => n.prefix + n.body)
+  const started = (id: string) => ($ as any).classic.SubagentStart({ hook_event_name: 'SubagentStart', agent_id: id, agent_type: 'general-purpose' })
+  const stopped = (id: string) => ($ as any).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: id })
+  // A turn long enough to be news starts a workflow, whose agent runs on after it: nothing yet
+  await ($ as any).turn.start({ turnId: 't1', text: 'Count every bird' })
+  await started('w1')
+  await ($ as any).turn.complete({ turnId: 't1', reason: 'answer', isAborted: false, durationMs: 40_000, answer: 'Started a workflow to count them.' })
+  await s.clock.advance(2000)
+  expect(done()).toEqual([])
+  // Done, Claude Code gives Claude its word in a turn of its own, short as it is: that turn's end tells them, with its answer
+  await stopped('w1')
+  await s.clock.advance(1000)
+  await ($ as any).turn.start({ turnId: 't2', text: 'The workflow has finished' })
+  await ($ as any).turn.complete({ turnId: 't2', reason: 'answer', isAborted: false, durationMs: 4_000, answer: 'There are 412 birds.' })
+  await s.clock.advance(1000)
+  expect(done()).toEqual(['Done: There are 412 birds.'])
+  // Where no turn comes once it is done, they are told it has finished, a while after
+  await ($ as any).turn.start({ turnId: 't3', text: 'Count the nests' })
+  await started('w2')
+  await ($ as any).turn.complete({ turnId: 't3', reason: 'answer', isAborted: false, durationMs: 40_000, answer: 'Started another.' })
+  await s.clock.advance(1000)
+  await stopped('w2')
+  await s.clock.advance(10_000)
+  expect(done()).toEqual(['Done: There are 412 birds.'])
+  await s.clock.advance(12_000)
+  expect(done()).toEqual(['Done: There are 412 birds.', 'Claude has finished.'])
+  // A short turn that leaves nothing running is still no news to a phone
+  await ($ as any).turn.start({ turnId: 't4', text: 'And the eggs' })
+  await ($ as any).turn.complete({ turnId: 't4', reason: 'answer', isAborted: false, durationMs: 5_000, answer: 'None.' })
+  await s.clock.advance(1000)
+  expect(done()).toEqual(['Done: There are 412 birds.', 'Claude has finished.'])
+})
+
 test('the reply as it is written goes in sealed pieces, and word that they are done with when the reply is in the chat', async ($, on) => {
   const m = await made(WORDS)
   on('turn.step', async function* ($: any, e: any) {

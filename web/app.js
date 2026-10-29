@@ -33,6 +33,11 @@ let searchTimer = 0
 
 const STATE_LABEL = { working: 'Working', attention: 'Needs you', idle: 'Ready', offline: 'Offline', ended: 'Not running' }
 const STATE_ORDER = { attention: 0, working: 1, idle: 2, offline: 3, ended: 4 }
+// How a session stands, as its dot, its label and the chat's working line say it: as its card says, but one whose turn
+// has ended while subagents it started run on (a workflow's, as Ultracode starts on every task) is working until they
+// are done (deon, 2026-10-28: "It stops pulsing if agents are working so it gives the impression the session is done").
+// Its Stop is still its turn's: that stops no subagent left running after it
+const standing = (s) => (s?.state === 'idle' && s.agents?.length ? 'working' : s?.state)
 
 // The page's two looks: the VS Code extension's, and Claude Code's in the terminal
 const VIEWS = ['vscode', 'terminal', 'desktop']
@@ -2332,7 +2337,7 @@ function promptRow(x) {
   const m = app.machines.get(x.mid)
   const sub = app.tile.where ? dotted(name, folderOf(x.session.cwd), whereLabel(m ? machineName(m) : x.machine, x.mid)) : [name]
   const here = app.past?.sid === x.sid && app.past.at === x.uuid
-  const state = live && !live.ended && live.online ? live.state : 'past'
+  const state = live && !live.ended && live.online ? standing(live) : 'past'
   return h(
     'a',
     { class: 'row prompt-row' + (here ? ' active' : ''), 'data-key': `prompt:${x.mid}/${x.sid}/${x.uuid}`, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}?at=${encodeURIComponent(x.uuid)}` },
@@ -2725,7 +2730,7 @@ function renderListSoon() {
 // from, the ones at work changed places at every word, several times a second: nothing
 // stayed under a finger.)
 const sinceOf = (s) => s.since ?? s.lastActivity
-const byStanding = (a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || sinceOf(b) - sinceOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+const byStanding = (a, b) => STATE_ORDER[standing(a)] - STATE_ORDER[standing(b)] || sinceOf(b) - sinceOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 // The orders the list can be in (the button beside the gear). Standard is as it was: the favorites, the active (needs
 // you, then at work, then the rest, each the latest first), and each computer's past sessions. The other two are of
 // everything in one list, with no headings: the session last typed to first, or the one that last said or did
@@ -4016,7 +4021,7 @@ function renderRow(s, { favorite = false, due = false } = {}) {
       ...(favorite ? { 'data-favorite': s.id, draggable: 'false' } : {}),
       ...(mark?.color ? { 'data-color': mark.color } : {}),
     },
-    h('span', { class: 'dot ' + s.state, title: STATE_LABEL[s.state] }),
+    h('span', { class: 'dot ' + standing(s), title: STATE_LABEL[standing(s)] }),
     h(
       'div',
       { class: 'row-main' },
@@ -6068,12 +6073,12 @@ function renderHeader() {
   el('chat-name').title = mark?.name ? s.title : (s.topic ?? '')
   const mode = modeOf(s) && modeOf(s) !== 'default' ? modeOf(s) + ' mode' : null
   const effort = s.effort ? 'effort ' + s.effort : null
-  put(el('chat-sub'), dotted(phoneLayout() ? STATE_LABEL[s.state] : null, '🔒 end-to-end encrypted', whereLabel(whereOf(s), s.machine), s.cwd, s.model, mode, effort, ctx, s.account?.email))
+  put(el('chat-sub'), dotted(phoneLayout() ? STATE_LABEL[standing(s)] : null, '🔒 end-to-end encrypted', whereLabel(whereOf(s), s.machine), s.cwd, s.model, mode, effort, ctx, s.account?.email))
   el('chat-sub').title = el('chat-sub').textContent
   renderStar()
   const badge = el('chat-state')
-  badge.className = 'badge ' + s.state
-  badge.textContent = STATE_LABEL[s.state]
+  badge.className = 'badge ' + standing(s)
+  badge.textContent = STATE_LABEL[standing(s)]
   badge.title = s.ended && s.endReason ? `Claude Code exited (${s.endReason})` : ''
   const stoppable = s.attended && (s.state === 'working' || s.state === 'attention')
   if (!stoppable && app.stopping?.sid === s.id) app.stopping = null
@@ -6096,7 +6101,7 @@ function renderHeader() {
   renderRequests(s)
   renderAgents(s)
   renderBanner(s)
-  setWorking(s.state === 'working')
+  setWorking(standing(s) === 'working')
 
   // The session's permission mode. One the machine's agent is running can be switched
   // from here, to a mode the machine allows, as an editor switches the one it hosts.
