@@ -103,6 +103,7 @@ const app = {
   expect: null, // a session just started or resumed, not reporting yet: { sid, mid, until }
   computer: null, // the computer whose own page is showing: { mid, known, cwd, mode, read, reading, starting, error, colorError }
   favorites: [], // the sessions kept at the top of the list, in the order they were put in: { id, machine, title, project, where }
+  pokes: new Map(), // an update's sessions to be started again once it is done, and told so (Update and poke): machine id -> { name, release, runs, until, state, said }
   marks: new Map(), // what the account has put on its sessions: session id -> { id, machine, title, project, where, name, label, color, remind, notice }
   marking: null, // the session the box for that is open on, and what is chosen in it and not yet saved: { s, color, when, at }
   reminded: new Map(), // the reminders that have come due and been seen to on this page: session id -> the time each was for
@@ -8833,7 +8834,7 @@ function upkeepNode(c, n) {
       { 'data-need': 'update' },
       lead,
       hosted ? hostedSays(c) : null,
-      h('div', { class: 'needs-do' }, ...(hosted ? [button('update-when-done', whenDone(hosted), () => upgradeComputer(c, { now: false }), { primary: false }), ' ', button('update-now', 'Update now', () => upgradeComputer(c, { now: true }))] : [button('update-go', `Update ${name}`, () => upgradeComputer(c, { now: false }))])),
+      h('div', { class: 'needs-do' }, ...(hosted ? [button('update-when-done', whenDone(hosted), () => upgradeComputer(c, { now: false }), { primary: false }), ' ', button('update-now', 'Update now', () => upgradeComputer(c, { now: true })), ' ', button('update-poke', 'Update and poke', () => upgradeComputer(c, { now: true, poke: true }), { primary: false })] : [button('update-go', `Update ${name}`, () => upgradeComputer(c, { now: false }))])),
       ...told,
     )
   }
@@ -8842,7 +8843,7 @@ function upkeepNode(c, n) {
       'div',
       { 'data-need': 'upgrade-waiting' },
       h('p', null, h('b', null, `An update of ${name} to release ${n.release} is waiting.`), n.sessions ? ` Updating now ends the ${n.sessions === 1 ? 'session' : count(n.sessions, 'session')} started from this page; a reply resumes ${n.sessions === 1 ? 'it' : 'them'}.` : ' It is done in a moment.'),
-      n.sessions ? h('div', { class: 'needs-do' }, button('update-now', 'Update now', () => upgradeComputer(c, { now: true, release: n.release }))) : null,
+      n.sessions ? h('div', { class: 'needs-do' }, button('update-now', 'Update now', () => upgradeComputer(c, { now: true, release: n.release })), ' ', button('update-poke', 'Update and poke', () => upgradeComputer(c, { now: true, release: n.release, poke: true }), { primary: false })) : null,
       ...told,
     )
   if (n.kind === 'agent-setup') {
@@ -8876,7 +8877,7 @@ function hostedSays(c) {
     { 'data-part': 'update-hosted' },
     `The agent there is running ${one ? 'a session' : count(runs.length, 'session')} started from this page: `,
     ...named.flatMap((n, i) => (i ? [', ', n] : [n])),
-    `. Updating starts the agent again, which ends ${one ? 'it' : 'them'}, and a reply here resumes ${one ? 'it' : 'each'}. Update now ends ${one ? 'it' : 'them'} now. ${whenDone(runs.length)} waits until ${one ? 'it has' : 'each has'} sat idle for 30 minutes, or ended when you pressed Exit over its chat.`,
+    `. Updating starts the agent again, which ends ${one ? 'it' : 'them'}, and a reply here resumes ${one ? 'it' : 'each'}. Update now ends ${one ? 'it' : 'them'} now. ${whenDone(runs.length)} waits until ${one ? 'it has' : 'each has'} sat idle for 30 minutes, or ended when you pressed Exit over its chat. Update and poke ends ${one ? 'it' : 'them'} now, and once the agent is back starts ${one ? 'it' : 'each'} again and tells ${one ? 'it' : 'each'} to carry on where it was.`,
   )
 }
 
@@ -8902,16 +8903,18 @@ async function allowPlugin(c, n) {
 // A computer brought up to the newest release, on an order for it: its agent has Claude Code fetch the plugin, holds
 // it to that release, and replaces itself, at once (`now`) or once its sessions are done. Where it has no agent, a
 // session's own plugin there does the plugin, and holds what was fetched to its list.
-async function upgradeComputer(c, { now, release }) {
+async function upgradeComputer(c, { now, release, poke = false }) {
   const newest = app.release
   if (!newest?.digest) return
   const name = c.name
   const hosted = c.m?.hosted?.length ?? 0
+  // (the sessions as they run now, for Update and poke: what each is called here, and its mode, model and effort)
+  const runs = (c.m?.hosted ?? []).map((x) => ({ sid: x.sid, cwd: x.cwd ?? '', mode: x.mode ?? '', model: x.model ?? '', effort: x.effort ?? '', label: (app.sessions.get(x.sid) && nameOf(app.sessions.get(x.sid))) || folderOf(x.cwd) || x.sid.slice(0, 8) }))
   const via = c.m ? null : c.live.find((s) => s.attended && s.online)
   const says = c.m
-    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions you started there in a terminal, VS Code or the desktop app keep running, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The session' : count(hosted, 'session')} started from this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : `, once ${hosted === 1 ? 'it is' : 'they are'} done`}; a reply resumes ${hosted === 1 ? 'it' : 'them'}.` : ''}`
+    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions you started there in a terminal, VS Code or the desktop app keep running, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The session' : count(hosted, 'session')} started from this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : `, once ${hosted === 1 ? 'it is' : 'they are'} done`}; ${poke ? `once it is back, ${hosted === 1 ? 'it is' : 'each is'} started again and told: “${POKE_SAYS}” Keep this page open until then.` : `a reply resumes ${hosted === 1 ? 'it' : 'them'}.`}` : ''}`
     : `Updates the ManyClaws plugin on ${name}, through the Claude Code session in ${via?.project ?? 'its folder'}. Nothing running ends: each session uses the new plugin when it is next started.`
-  if (!(await ask(`Update ${name}?`, { says, yes: now ? 'Update now' : hosted ? whenDone(hosted) : `Update ${name}` }))) return
+  if (!(await ask(`Update ${name}?`, { says, yes: poke ? 'Update and poke' : now ? 'Update now' : hosted ? whenDone(hosted) : `Update ${name}` }))) return
   stateOf(c).upkeep = { kind: release ? 'upgrade-waiting' : 'update', busy: true, done: 'Updating…' }
   renderComputer()
   const order = c.m ? await orderFor(c.id, 'upgrade', { release: release ?? newest.release, digest: newest.digest, now }) : await orderFor(via.id, 'call', { method: 'manyclaws.update', args: {} })
@@ -8923,10 +8926,73 @@ async function upgradeComputer(c, { now, release }) {
     ? { kind: stateOf(c).upkeep.kind, error: sentence(failed) }
     : {
         kind: stateOf(c).upkeep.kind,
-        done: !c.m ? `Updated: new sessions on ${name} use release ${v?.release ?? newest.release}.` : v?.agent === 'now' ? `Updating: the agent on ${name} starts again in a moment, on release ${v.release}.` : v?.agent === 'unchanged' ? `Updated: new sessions on ${name} use release ${v.release}.` : `The plugin on ${name} is release ${v?.release ?? newest.release}; its agent follows once its sessions are done.`,
+        done: !c.m ? `Updated: new sessions on ${name} use release ${v?.release ?? newest.release}.` : v?.agent === 'now' ? `Updating: the agent on ${name} starts again in a moment, on release ${v.release}.` : v?.agent === 'unchanged' ? `Updated: new sessions on ${name} use release ${v.release}.${poke ? ' Its agent did not change, so its sessions run on: there was nothing to poke.' : ''}` : `The plugin on ${name} is release ${v?.release ?? newest.release}; its agent follows once its sessions are done.`,
       }
+  // (the agent starts again only where it changed: then what it ran is started again once it is back, and told so)
+  if (!failed && poke && runs.length && v?.agent === 'now') pokeAfter(c, v.release, runs)
   renderComputer()
   renderList()
+}
+
+// ---- Update and poke: the sessions an update ended, started again once the computer's agent is back on the new release
+// (deon, 2026-10-29: "after it updated it restarts all those sessions and sends a prompt to them"). Each is resumed as a
+// reply to it would resume it, in the mode, model and effort it ran in, and told why it ended. This page does it, so it
+// is done while the page is open: the agent that is replaced does not know of it, and the one that replaces it has no
+// sessions of its own to go by.
+const POKE_SAYS = 'Your session just ended: ManyClaws updated this computer, which started its agent again. If you were busy doing something, continue where you left off, and check on any work and agents you had open. If you were not waiting on anything, reply with just: Nothing to see'
+const POKE_WAIT_MS = 5 * 60_000 // how long the agent has to be back on the new release before the sessions are left as they are
+let pokeTimer = 0
+
+function pokeAfter(c, release, runs) {
+  const one = runs.length === 1
+  app.pokes.set(c.id, { name: c.name, release, runs, until: Date.now() + POKE_WAIT_MS, state: 'waiting', said: `Once the agent on ${c.name} is back on release ${release}, ${one ? 'the session it ran is' : `the ${runs.length} sessions it ran are`} started again and told to carry on.` })
+  clearInterval(pokeTimer)
+  pokeTimer = setInterval(pokeTick, 2000)
+}
+
+async function pokeTick() {
+  const waiting = [...app.pokes].filter(([, p]) => p.state === 'waiting')
+  if (!waiting.length) return void clearInterval(pokeTimer)
+  for (const [mid, p] of waiting) {
+    const m = app.machines.get(mid)
+    const gone = new Set(p.runs.map((x) => x.sid))
+    // (back: heard from on the new release, and no longer running any of them)
+    const back = m?.online && (m.release?.release ?? 0) >= p.release && !(m.hosted ?? []).some((x) => gone.has(x.sid))
+    if (!back) {
+      if (Date.now() < p.until) continue
+      p.state = 'failed'
+      p.said = `The agent on ${p.name} was not back on release ${p.release} within ${POKE_WAIT_MS / 60_000} minutes, so its sessions were not started again: a reply to each resumes it.`
+      pokeChanged(mid)
+      continue
+    }
+    p.state = 'starting'
+    p.said = `Starting ${p.runs.length === 1 ? 'its session' : `its ${p.runs.length} sessions`} again on ${p.name}…`
+    pokeChanged(mid)
+    const allowed = m.spawn?.modes?.length ? m.spawn.modes : ['default']
+    const started = []
+    const not = []
+    for (const x of p.runs) {
+      const mode = allowed.includes(x.mode) ? x.mode : allowed.includes('default') ? 'default' : allowed[0]
+      const order = await orderFor(mid, 'open', { sid: x.sid, prompt: POKE_SAYS, mode, ...(x.model ? { model: x.model } : {}), ...(x.effort ? { effort: x.effort } : {}) })
+      const r = order ? await sendJson(`/api/machines/${mid}/sessions/${encodeURIComponent(x.sid)}/resume`, { order }) : { ok: false, error: NO_KEY_MACHINE }
+      if (r.ok) started.push(x.label)
+      else not.push(`${x.label} (${sentence(r.error).replace(/\.$/, '')})`)
+    }
+    p.state = not.length ? 'failed' : 'done'
+    p.said = [started.length && `Started again and told to carry on: ${started.join(', ')}.`, not.length && `Not started again: ${not.join('; ')}. A reply to ${not.length === 1 ? 'it' : 'each'} resumes it.`].filter(Boolean).join(' ')
+    pokeChanged(mid)
+  }
+}
+
+function pokeChanged(mid) {
+  if (app.computer?.mid === mid) renderComputer()
+}
+
+// On the computer's page: how Update and poke is going there
+function pokePart(c) {
+  const p = c && app.pokes.get(c.id)
+  if (!p) return null
+  return accountPart('Update and poke', { id: 'computer-poke', 'data-key': 'poke' }, h('p', { class: p.state === 'failed' ? 'form-note error' : p.state === 'done' ? 'guide-status connected' : 'muted', 'data-part': 'poke-' + p.state }, p.said))
 }
 
 // The agent set up on a computer that has none, by the plugin of a session there, from the plugin's own folder
@@ -9055,7 +9121,7 @@ function renderComputer() {
     h('p', { class: 'muted' }, 'Wherever a session says which computer it is on, ', m.color ? whereLabel(name, m.id) : name, m.color ? ' is a label in this color: in the list, over a chat, and in what a search finds.' : ' is said plainly. Give it a color and it is a label in that color: in the list, over a chat, and in what a search finds.'),
     c.colorError && h('p', { class: 'form-note error', role: 'alert' }, c.colorError),
   )
-  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), colors, newPart(c, m), foldersPart(c, m, at), versionsPart(at), cswapPart(m), removePart(c, m)].filter(Boolean))
+  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), pokePart(at), colors, newPart(c, m), foldersPart(c, m, at), versionsPart(at), cswapPart(m), removePart(c, m)].filter(Boolean))
   // (what is chosen is this page's to say: a drawing leaves what a hand has changed as it is)
   const set = (id, value) => el(id) && el(id).value !== value && (el(id).value = value)
   set('computer-project', c.cwd)
