@@ -2398,8 +2398,12 @@ async function loadLanes() {
     computers.push({ mid, name: x.machine?.name ?? '', on: got.on === true, pending: Number(got.pending) || 0, working: got.working ?? null, why: typeof got.why === 'string' ? got.why : '', indexing: got.indexing ?? 0 })
     for (const s of got.sessions) {
       if (typeof s?.sid !== 'string' || !Array.isArray(s.blocks)) continue
-      // (a block is a minute long at the least, so that it has a place on the clock, and none goes on past now)
-      const blocks = s.blocks.filter((b) => typeof b?.uuid === 'string' && Number.isFinite(b.ts)).map((b) => ({ ...b, end: Math.max(b.ts, Math.min(asked, Math.max(b.ts + 60_000, Number(b.end) || 0))), n: Number(b.n) || 1, says: String(b.says ?? ''), tags: Array.isArray(b.tags) ? b.tags.map(String) : [] }))
+      // (a block is a minute long at the least, so that it has a place on the clock; none goes on past now, nor past the
+      // start of the next in its lane, which it would be drawn over)
+      const blocks = s.blocks
+        .filter((b) => typeof b?.uuid === 'string' && Number.isFinite(b.ts))
+        .sort((a, b) => a.ts - b.ts)
+        .map((b, i, all) => ({ ...b, end: Math.max(b.ts, Math.min(asked, all[i + 1]?.ts ?? Infinity, Math.max(b.ts + 60_000, Number(b.end) || 0))), n: Number(b.n) || 1, says: String(b.says ?? ''), tags: Array.isArray(b.tags) ? b.tags.map(String) : [] }))
       if (blocks.length) items.push({ ...s, key: `${mid}/${s.sid}`, mid, machine: x.machine?.name ?? '', blocks })
     }
   }
@@ -2564,8 +2568,10 @@ function svgOf(tag, attrs = {}) {
 }
 
 // A lane's color: its project's, so that a project is the same color in every lane it is in, and the eye follows it from
-// one session to the next. Warm, as the site's own colors are, and none of them blue or purple
-const LANE_HUES = ['#e2664a', '#d9a25a', '#7fb685', '#d97a9b', '#b5b35c', '#c8a27c', '#6fb3a2']
+// one session to the next. Only ever a thin edge and a short bar, whole, on the site's plain grey surfaces: mixed into
+// the dark as a fill, a yellow or a green is mud (deon, 2026-10-29, of the Timeline in a computer's yellow: "This is
+// still an ugly color"). Warm, as the site's own colors are, and none of them blue or purple
+const LANE_HUES = ['#e2664a', '#e3b04b', '#86c08f', '#e483a6', '#cdb48e', '#a9a69b']
 function laneHue(cwd) {
   let n = 7
   for (const c of folderOf(cwd) || String(cwd ?? '')) n = (n * 31 + c.charCodeAt(0)) >>> 0
