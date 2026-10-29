@@ -2164,7 +2164,10 @@ async function loadEarlierRows() {
 
 // The list: the favorites first, in the order they were put in, with any session whose
 // reminder has come due above them; then the sessions that are open, the ones that need
-// someone first; then each machine with all it has.
+// someone first; then each machine with all it has. A session that is open is among the
+// open ones whatever is at the top: a favorite, or one whose reminder has come due, is
+// there too, as everything on a machine is under it (deon, 2026-10-29: "These sessions are
+// active but not appearing on the active list").
 function renderList() {
   // (a computer's own page says what the computer needs, which is read off the same sessions and machines as the list: drawn again when that has changed)
   if (app.computer?.known && app.computer.said !== computerSaid(app.computer.mid)) renderComputer()
@@ -2186,8 +2189,7 @@ function renderList() {
   // (the sessions whose reminders have come due, the one that came due last first)
   const due = [...app.marks.values()].filter(isDue).sort((a, b) => b.remind - a.remind)
   const first = new Set(due.map((m) => m.id))
-  const kept = new Set([...first, ...app.favorites.map((f) => f.id)])
-  const all = [...app.sessions.values()].filter((s) => !kept.has(s.id))
+  const all = [...app.sessions.values()]
   // A session that is not heard from is not among the active ones, whatever the reason (its Claude Code gone with
   // nothing said, or its computer asleep: this page cannot tell which): it is with the inactive ones, and back by
   // itself when it is heard from again. One this page saw go quiet stays, dimmed, for half a minute first: a server
