@@ -30,6 +30,8 @@ export class Store {
     // (recentPrompts): a line indexed before that has none, and is judged by its words alone
     if (!this.db.prepare('PRAGMA table_info(docs)').all().some((c) => c.name === 'origin')) this.db.exec('ALTER TABLE docs ADD COLUMN origin TEXT')
     this.db.exec('CREATE INDEX IF NOT EXISTS docs_said ON docs (role, side, ts)')
+    // What Claude Haiku made of each session's last week, for the page's Timeline (lanes.mjs): its blocks, and how far it read
+    this.db.exec('CREATE TABLE IF NOT EXISTS lanes (sid TEXT PRIMARY KEY, state TEXT)')
     // One text at a time, matched and drawn as the index would (snippetOf): this connection's alone, in memory
     this.db.exec("CREATE VIRTUAL TABLE temp.said USING fts5(text, tokenize = 'unicode61 remove_diacritics 2')")
     this.matched = new Map() // a search's sessions, for the searches that follow it down
@@ -51,6 +53,8 @@ export class Store {
           first_prompt = excluded.first_prompt, first_ts = excluded.first_ts, last_ts = excluded.last_ts, prompts = excluded.prompts, messages = excluded.messages,
           version = excluded.version, branch = excluded.branch, model = excluded.model, mode = excluded.mode, entrypoint = excluded.entrypoint, size = excluded.size`),
       delSession: q('DELETE FROM sessions WHERE path = ?'),
+      lane: q('SELECT state FROM lanes WHERE sid = ?'),
+      setLane: q('INSERT INTO lanes (sid, state) VALUES (?, ?) ON CONFLICT (sid) DO UPDATE SET state = excluded.state'),
       session: q('SELECT * FROM sessions WHERE sid = ?'),
       count: q('SELECT (SELECT COUNT(*) FROM sessions) AS sessions, (SELECT COUNT(*) FROM files) AS files, (SELECT COUNT(*) FROM docs) AS docs'),
       said: q('INSERT INTO said (rowid, text) VALUES (1, ?)'),
@@ -322,6 +326,64 @@ export class Store {
       }
     }
     return { prompts, sessions }
+  }
+
+  // ---- The Timeline (lanes.mjs): each session's last week as its blocks
+
+  // The sessions with anything said in them since `since`, the last heard from first
+  laneSessions(since) {
+    return this.db.prepare('SELECT sid, path, cwd, title, first_prompt, first_ts, last_ts, size FROM sessions WHERE last_ts >= ? AND messages > 0 ORDER BY last_ts DESC').all(since)
+  }
+
+  // A session's lines since `since`, in order, with their words: not what tools returned, nor its subagents'
+  laneDocs(sid, since) {
+    return this.db.prepare(`SELECT d.uuid, d.ts, d.role, d.origin, f.text FROM docs d JOIN fts f ON f.rowid = d.id
+      WHERE d.sid = ? AND d.side = 0 AND d.ts >= ? AND d.role != 'result' ORDER BY d.ts, d.id`).all(sid, since)
+  }
+
+  // Its first line
+  laneHead(sid) {
+    return this.db.prepare(`SELECT d.uuid, d.ts, d.role, d.origin, f.text FROM docs d JOIN fts f ON f.rowid = d.id
+      WHERE d.sid = ? AND d.side = 0 ORDER BY d.ts, d.id LIMIT 1`).get(sid)
+  }
+
+  // The other sessions that have that same line, its id and time alike: the one it was copied from, and other copies
+  sameLine(head, sid) {
+    return this.db.prepare('SELECT DISTINCT sid FROM docs WHERE role = ? AND side = 0 AND ts = ? AND uuid = ? AND sid != ? LIMIT 8').all(head.role, head.ts, head.uuid, sid).map((r) => r.sid)
+  }
+
+  // The last of a session's lines, from its first on, that another has too: where a copy of that one went its own way
+  sharedUntil(sid, other) {
+    const theirs = new Set(this.db.prepare('SELECT uuid FROM docs WHERE sid = ? AND side = 0').all(other).map((r) => r.uuid))
+    const page = this.db.prepare('SELECT uuid, ts FROM docs WHERE sid = ? AND side = 0 ORDER BY ts, id LIMIT 2000 OFFSET ?')
+    let last = null
+    for (let offset = 0; ; offset += 2000) {
+      const rows = page.all(sid, offset)
+      for (const r of rows) {
+        if (!theirs.has(r.uuid)) return last
+        last = r
+      }
+      if (rows.length < 2000) return last
+    }
+  }
+
+  lane(sid) {
+    const row = this.sql.lane.get(sid)
+    if (!row) return null
+    try {
+      return JSON.parse(row.state)
+    } catch {
+      return null
+    }
+  }
+
+  saveLane(sid, state) {
+    this.sql.setLane.run(sid, JSON.stringify(state))
+  }
+
+  // What was made of sessions that have said nothing since `since`, or are gone, forgotten
+  pruneLanes(since) {
+    this.db.prepare('DELETE FROM lanes WHERE sid NOT IN (SELECT sid FROM sessions WHERE last_ts >= ?)').run(since)
   }
 
   // A session whose own file is gone, as far as its subagents' files tell
