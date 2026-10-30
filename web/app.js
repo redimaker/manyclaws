@@ -2374,8 +2374,9 @@ function promptRow(x) {
 // blocks, each a stretch of its session on one thing in a few words, which Claude Haiku made on that computer where it
 // was turned on there (lanes.mjs in the agent), and otherwise rough ones, named by their first prompts. The latest is
 // at the top, every lane on the same clock, which is given at the left; a stretch where nothing was said anywhere is
-// drawn short, as a faint break that says how long it was. The lane last typed to is at the left, and the order is
-// worked out again once in half an hour, not as each is typed to. Lines join a session to the one it was forked from,
+// drawn short, as a faint break that says how long it was. The lane with the latest in it is at the left, so that the
+// lanes' tops step down from left to right, and the order is worked out again once in half an hour, not as each goes
+// on (deon, 2026-10-30: "at least after 30 minutes it will form a church organ"). Lines join a session to the one it was forked from,
 // and a block to one in another session that carries on with the same thing soon after. A press on a block opens its
 // session there, as a search hit does. For a large screen: it takes the whole window, and the way to it is not shown on a
 // phone.
@@ -2442,28 +2443,30 @@ function closeLanes() {
 }
 document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && document.body.classList.contains('lanes-open') && loadLanes())
 
-// The lanes in the order they keep for half an hour: the last typed to first, as it was when that was last worked out;
-// a session that has come since, at the left, the latest first (kept on the device, as the list's order is). A lane
-// whose computer did not answer this time keeps its place for when it does
-function lanesInOrder(items) {
-  const at = (x) => x.lastInput || x.last_ts || 0
+// The lanes in the order they keep for half an hour: the one with the latest in it first, so that their tops step down
+// from left to right, as each was when that was last worked out (`rank`: when its latest was then; kept on the device,
+// as the list's order is). A session that has come since is put by when its latest was as it came, and keeps that too.
+// The order is worked out again only from what the computers said in the last few minutes (`fresh`): not from what was
+// read the last time the Timeline was open, which is drawn while it is read again. A lane whose computer did not answer
+// then keeps what it had, for when it does
+function lanesInOrder(items, fresh) {
+  const latest = (x) => Math.max(0, ...x.blocks.map((b) => b.end))
   let kept = null
   try {
     kept = JSON.parse(localStorage.getItem('mc.lanesOrder'))
   } catch {}
   const now = Date.now()
-  if (!kept || !Array.isArray(kept.keys) || !(now - kept.at < LANES_ORDER_MS)) kept = { at: now, keys: [...items].sort((a, b) => at(b) - at(a)).map((x) => x.key) }
-  else {
-    const known = new Set(kept.keys)
-    kept.keys = [...items.filter((x) => !known.has(x.key)).sort((a, b) => at(b) - at(a)).map((x) => x.key), ...kept.keys]
-  }
-  // (one that is not here now keeps its place, for when its computer answers again)
-  kept.keys = kept.keys.slice(0, 1000)
+  if (!kept?.rank || typeof kept.rank !== 'object' || !Number.isFinite(kept.at)) kept = { at: 0, rank: {} }
+  if (fresh && !(now - kept.at < LANES_ORDER_MS)) {
+    // (one gone from the week is let go)
+    const rank = Object.fromEntries(Object.entries(kept.rank).filter(([, t]) => t >= now - LANES_DAYS * 86400_000))
+    for (const x of items) rank[x.key] = latest(x)
+    kept = { at: now, rank }
+  } else for (const x of items) kept.rank[x.key] ??= latest(x)
   try {
     localStorage.setItem('mc.lanesOrder', JSON.stringify(kept))
   } catch {}
-  const place = new Map(kept.keys.map((k, i) => [k, i]))
-  return [...items].sort((a, b) => place.get(a.key) - place.get(b.key))
+  return [...items].sort((a, b) => kept.rank[b.key] - kept.rank[a.key])
 }
 
 // The clock, from now at the top down to the first block: each stretch between two times something began or ended is
@@ -2607,8 +2610,8 @@ function renderLanes() {
   // (as far as the filter lets them: the order is the one they keep, of all of them)
   const shown = new Set(got.items.filter(passesLane).map((x) => x.key))
   if (!shown.size) return fill(box, h('div', { class: 'list-empty' }, 'None of the last week’s sessions match the filter.'))
-  const lanes = lanesInOrder(got.items).filter((x) => shown.has(x.key))
   const now = Date.now()
+  const lanes = lanesInOrder(got.items, now - (got.loaded || 0) < 2 * LANES_AGAIN_MS).filter((x) => shown.has(x.key))
   const clock = lanesClock(lanes, now)
   const wide = Math.min(LANE_W[1], Math.max(LANE_W[0], Math.floor((box.clientWidth - LANES_AXIS - 2) / lanes.length)))
   const place = new Map(lanes.map((x, i) => [x.key, i]))
