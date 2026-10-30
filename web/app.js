@@ -2375,15 +2375,19 @@ function promptRow(x) {
 // at the top, every lane on the same clock, which is given at the left; a stretch where nothing was said anywhere is
 // drawn short, as a faint break that says how long it was. The lane with the latest in it is at the left, so that the
 // lanes' tops step down from left to right, and the order is worked out again once in half an hour, not as each goes
-// on (deon, 2026-10-30: "at least after 30 minutes it will form a church organ"). Lines join a session to the one it was forked from,
-// and a block to one in another session that carries on with the same thing soon after. A press on a block opens its
-// session there, as a search hit does. For a large screen: it takes the whole window, and the way to it is not shown on a
-// phone.
+// on (deon, 2026-10-30: "at least after 30 minutes it will form a church organ"). Lines join a session to the one it
+// was forked from, and a block to one in another session that carries on with the same thing soon after. A press on a
+// block opens its session there, as a search hit does. It takes the whole window; on a phone, two lanes at a time, which
+// fill its width and are swiped sideways a lane at a time (deon, 2026-10-30: "Support this on the phone as well with 2
+// lanes and left-right scrolling").
 const LANES_DAYS = 7
 const LANES_ORDER_MS = 30 * 60_000 // how long the lanes keep their order (deon: "only update this sort order once every 30 mins")
 const LANES_AGAIN_MS = 60_000 // how often what the computers have is read again while the Timeline is open
 const LANE_W = [176, 280] // how wide a lane is, at the least and the most
 const LANES_AXIS = 84 // the clock at the left
+const LANES_AXIS_PHONE = 58 // (on a phone, where its days are said shorter)
+const LANES_PHONE = 2 // how many lanes a phone shows side by side
+const lanesAxis = () => (phoneLayout() ? LANES_AXIS_PHONE : LANES_AXIS)
 const LANE_MIN = 24 // the least a block is drawn tall, to say anything in
 const LANES_BREAK_MS = 45 * 60_000 // a stretch with nothing said anywhere that is drawn as a break
 const LANES_BREAK_PX = 42 // (room in it for how long it was, over the day the clock says under it)
@@ -2612,11 +2616,16 @@ function renderLanes() {
   const now = Date.now()
   const lanes = lanesInOrder(got.items, now - (got.loaded || 0) < 2 * LANES_AGAIN_MS).filter((x) => shown.has(x.key))
   const clock = lanesClock(lanes, now)
-  const wide = Math.min(LANE_W[1], Math.max(LANE_W[0], Math.floor((box.clientWidth - LANES_AXIS - 2) / lanes.length)))
+  const phone = phoneLayout()
+  const clockWide = lanesAxis()
+  el('lanes').style.setProperty('--lanes-axis', clockWide + 'px')
+  // (on a phone, two at a time, which fill its width)
+  const wide = phone ? Math.floor((box.clientWidth - clockWide) / Math.min(LANES_PHONE, lanes.length)) : Math.min(LANE_W[1], Math.max(LANE_W[0], Math.floor((box.clientWidth - LANES_AXIS - 2) / lanes.length)))
   const place = new Map(lanes.map((x, i) => [x.key, i]))
   const middle = (x) => place.get(x.key) * wide + wide / 2
   const timeOf = (ts) => new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  const dayOf = (ts) => new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+  // (on a phone, the weekday and the day of the month: Fri 30)
+  const dayOf = (ts) => (phone ? `${new Date(ts).toLocaleDateString(undefined, { weekday: 'short' })} ${new Date(ts).getDate()}` : new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }))
   // The heads: what each session is called, where it is, and what it was forked from, over a bar in its project's color
   const nameOf = (x) => markOf(x.sid)?.name || app.sessions.get(x.sid)?.title || x.title || (x.first_prompt ?? '').slice(0, 80) || folderOf(x.cwd) || x.sid.slice(0, 8)
   const heads = lanes.map((x) => {
@@ -2697,7 +2706,7 @@ function renderLanes() {
   )
   const left = box.scrollLeft
   const down = box.scrollTop
-  fill(box, h('div', { class: 'lanes-grid', style: { gridTemplateColumns: `${LANES_AXIS}px ${width}px` } }, h('div', { class: 'lanes-corner' }), h('div', { class: 'lanes-heads' }, heads), axis, area))
+  fill(box, h('div', { class: 'lanes-grid', style: { gridTemplateColumns: `${clockWide}px ${width}px` } }, h('div', { class: 'lanes-corner' }), h('div', { class: 'lanes-heads' }, heads), axis, area))
   box.scrollLeft = left
   box.scrollTop = down
   showPeek()
@@ -2718,7 +2727,13 @@ function lanesSideways(by) {
   const box = el('lanes-body')
   box.scrollBy({ left: by, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 }
-const lanesPage = () => Math.max(160, el('lanes-body').clientWidth - LANES_AXIS - 80)
+// (a window's width, less a little so that a lane in sight before is in sight after; on a phone, where the lanes come to
+// rest each at the clock, the lanes in sight)
+const lanesPage = () => {
+  const box = el('lanes-body')
+  const lane = document.querySelector('#lanes .lane')?.offsetWidth || LANE_W[0]
+  return phoneLayout() ? Math.max(1, Math.round((box.clientWidth - lanesAxis()) / lane)) * lane : Math.max(160, box.clientWidth - LANES_AXIS - 80)
+}
 el('lanes-left').addEventListener('click', () => lanesSideways(-lanesPage()))
 el('lanes-right').addEventListener('click', () => lanesSideways(lanesPage()))
 el('lanes-body').addEventListener('scroll', () => lanesEdges(), { passive: true })
@@ -2879,10 +2894,16 @@ function showPeek() {
   const lane = block.parentElement
   const box = el('lanes-body')
   area.append(card)
-  const wideCard = card.offsetWidth
-  const right = lane.offsetLeft + lane.offsetWidth + 6
-  const seenRight = box.scrollLeft + box.clientWidth - LANES_AXIS
-  card.style.left = (right + wideCard <= seenRight || lane.offsetLeft - wideCard - 6 < box.scrollLeft ? right : lane.offsetLeft - wideCard - 6) + 'px'
+  if (phoneLayout()) {
+    // (on a phone, across the screen, over the clock too)
+    card.style.width = box.clientWidth - 16 + 'px'
+    card.style.left = box.getBoundingClientRect().left + 8 - area.getBoundingClientRect().left + 'px'
+  } else {
+    const wideCard = card.offsetWidth
+    const right = lane.offsetLeft + lane.offsetWidth + 6
+    const seenRight = box.scrollLeft + box.clientWidth - LANES_AXIS
+    card.style.left = (right + wideCard <= seenRight || lane.offsetLeft - wideCard - 6 < box.scrollLeft ? right : lane.offsetLeft - wideCard - 6) + 'px'
+  }
   const headsTall = document.querySelector('#lanes .lanes-heads')?.offsetHeight ?? 0
   const seenTop = box.scrollTop
   const seenBottom = box.scrollTop + box.clientHeight - headsTall - 8

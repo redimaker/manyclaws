@@ -2177,7 +2177,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 }
 
 /* ---- The Timeline (#/lanes): a lane for each session of the last week, side by side on one clock, the latest at the
-   top. The whole window, on a large screen; the way to it is not shown on a phone. In the app's own colors, and on a
+   top. The whole window; on a phone, in the chat's place, two lanes at a time. In the app's own colors, and on a
    server with a front door in the site's (fonts.css): its dark, its serif for what each lane is and for the days, and
    the crab's red for now and for a block carried on in another session. A lane is in its project's color (laneHue). */
 body.lanes-open #list-pane { display: none; }
@@ -2213,7 +2213,7 @@ body.lanes-open #chat-pane { grid-column: 1 / -1; }
 .lanes-side { position: absolute; top: 50%; z-index: 6; display: grid; place-items: center; width: 34px; height: 34px; margin-top: -17px; padding: 0; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--ln-raised) 92%, transparent); color: var(--ln-text); box-shadow: 0 4px 16px rgba(0, 0, 0, .35); cursor: pointer; backdrop-filter: blur(6px); transition: background-color .15s ease, transform .15s ease; }
 .lanes-side svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .lanes-side:hover { background: var(--ln-raised); transform: scale(1.06); }
-.lanes-side.left { left: calc(84px + 8px); }
+.lanes-side.left { left: calc(var(--lanes-axis, 84px) + 8px); }
 .lanes-side.right { right: 18px; }
 .lanes-side[hidden] { display: none; }
 .lanes-grid { display: grid; grid-template-rows: auto auto; width: max-content; }
@@ -2293,7 +2293,16 @@ body.lanes-open #chat-pane { grid-column: 1 / -1; }
 .peek-gap:empty::after { display: none; }
 .peek-note { color: var(--ln-muted); }
 @media (prefers-reduced-motion: reduce) { .lane-peek.opening { animation: none; } .lane-block, .lanes-side, .lane-eye { transition: none; } }
+/* On a phone: the Timeline in the chat's place, two lanes at a time, which come to rest each at the clock as they are
+   swiped sideways; the buttons at the sides go two lanes */
 @media (max-width: 760px) {
-  .lanes-link { display: none; }
-  .lanes-side { display: none; }
+  body.lanes-open #chat-pane { display: flex; }
+  .lanes-body { scroll-snap-type: x mandatory; scroll-padding-left: var(--lanes-axis); }
+  .lane { scroll-snap-align: start; }
+  .lanes-side { width: 30px; height: 30px; margin-top: -15px; }
+  .lanes-side.left { left: calc(var(--lanes-axis) + 4px); }
+  .lanes-side.right { right: 6px; }
+  .lanes-tick, .lanes-gap { right: 8px; }
+  .lane-head { padding-inline: 10px; }
+  .lane-peek { z-index: 7; max-height: 60vh; }
 }
