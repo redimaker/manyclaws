@@ -1392,6 +1392,28 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 /* (beside the gear, not under it: the gear's edge is the head's, the button's is not) */
 .head-link.sort-open, .head-link.lanes-link { margin-right: 0; }
 .sort-menu .menu-row > .menu-icon { display: none; }
+/* The filter (app.js, FILTERS): a funnel beside the Timeline's button, and one on the Timeline's own head, drawn as the
+   sort's is; with how many are pressed beside it, in the Claude orange, while any are. Its menu is over everything,
+   under the funnel that opened it, and stays open while its choices are pressed */
+.filter-open { position: relative; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+.filter-open[aria-expanded="true"], .filter-open.on { color: var(--text); }
+.head-link.filter-open { margin-right: 0; }
+.filter-count { position: absolute; top: 0; right: -2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent, #d97757); color: #fff; font-size: 10px; font-weight: 600; line-height: 14px; text-align: center; }
+.filter-count[hidden] { display: none; }
+.lanes .chat-head .filter-open { margin-left: auto; align-self: center; }
+.filter-menu { position: fixed; z-index: 30; top: var(--filter-top, 48px); left: var(--filter-left, 8px); right: auto; bottom: auto; width: min(320px, calc(100vw - 16px)); max-height: min(70dvh, 560px); }
+.filter-menu .menu-head { padding-top: 10px; font-size: .85em; text-transform: uppercase; letter-spacing: .04em; }
+.filter-menu .menu-head:first-child { padding-top: 4px; }
+.filter-menu .menu-row { padding-top: 5px; padding-bottom: 5px; }
+.filter-box { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1px solid var(--muted); border-radius: 4px; font-size: 11px; line-height: 1; }
+.menu-row.on .filter-box { border-color: var(--strong); background: var(--strong); color: var(--bg); }
+.filter-clear { justify-content: center; color: var(--muted); }
+.filter-clear:disabled { opacity: .5; }
+/* (over the list and the Timeline while anything is pressed: what they are narrowed to, and the way back) */
+.filter-line { display: flex; align-items: center; gap: 8px; margin: 4px 8px 6px; padding: 6px 10px; border-radius: 6px; background: var(--hover); color: var(--muted); font-size: .9em; }
+.filter-says { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-off { flex: none; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.lanes-says .filter-line { margin: 0 0 8px; }
 /* (what is listed scrolls when there is more than fits; the effort under it is always in sight) */
 .menu-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
 .menu-foot { flex: none; padding: 6px; border-top: 1px solid var(--border); }

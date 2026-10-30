@@ -95,6 +95,7 @@ const app = {
   // open ("m:<machine>", "p:<machine>|<folder>", "s:<machine>|<session>"), and what's been read under them
   search: { q: '', seq: 0, data: null, open: new Set(), sessions: new Map(), hits: new Map(), by: 'title' },
   sortBy: 'standard', // the order the active sessions are in, on this device (SORTS)
+  filter: { machines: [], projects: [], labels: [], when: [], states: [] }, // what the list and the Timeline are narrowed to, on this device (FILTERS)
   promptAt: new Map(), // when its user last typed to each session, as this page has read it: session id -> time
   haiku: null, // the last search Haiku was asked for, on each computer that could start one: { q, runs: [{ mid, sid, state, folders, found, why }] }
   lanes: null, // the Timeline, as the computers last said it: { items, computers, asked, loaded, unreachable, missed, loading, locked, failed }
@@ -104,6 +105,7 @@ const app = {
   expect: null, // a session just started or resumed, not reporting yet: { sid, mid, until }
   computer: null, // the computer whose own page is showing: { mid, known, cwd, mode, read, reading, starting, error, colorError }
   favorites: [], // the sessions kept at the top of the list, in the order they were put in: { id, machine, title, project, where }
+  pokes: new Map(), // an update's sessions to be started again once it is done, and told so (Update and poke): machine id -> { name, release, runs, until, state, said }
   marks: new Map(), // what the account has put on its sessions: session id -> { id, machine, title, project, where, name, label, color, remind, notice }
   marking: null, // the session the box for that is open on, and what is chosen in it and not yet saved: { s, color, when, at }
   reminded: new Map(), // the reminders that have come due and been seen to on this page: session id -> the time each was for
@@ -1287,6 +1289,8 @@ function showApp() {
     app.sortBy = SORTS[localStorage.getItem('mc.sortBy')] ? localStorage.getItem('mc.sortBy') : 'standard'
   } catch {}
   markSort()
+  app.filter = filterKept()
+  markFilter()
   el('show-ended').checked = app.showEnded
   markPastBy()
   markTile()
@@ -2187,28 +2191,31 @@ function renderList() {
   if (nothing && !app.search.q) return redraw(list, [h('div', { class: 'empty list-empty' }, 'No computer is connected to your account yet.', h('br'), h('a', { href: '#/setup', class: 'primary button-link' }, 'Set up a computer'))])
   if (app.search.q) return redraw(list, searchNodes())
   // (the sessions whose reminders have come due, the one that came due last first)
-  const due = [...app.marks.values()].filter(isDue).sort((a, b) => b.remind - a.remind)
+  const due = [...app.marks.values()].filter(isDue).filter(passesKept).sort((a, b) => b.remind - a.remind)
   const first = new Set(due.map((m) => m.id))
   const all = [...app.sessions.values()]
+  const favorites = app.favorites.filter(passesKept)
   // A session that is not heard from is not among the active ones, whatever the reason (its Claude Code gone with
   // nothing said, or its computer asleep: this page cannot tell which): it is with the inactive ones, and back by
   // itself when it is heard from again. One this page saw go quiet stays, dimmed, for half a minute first: a server
   // that is started again hears from nothing for a moment, and the list would empty and fill again each time.
   const quiet = (s) => !s.ended && !s.online
   const gone = (s) => quiet(s) && Date.now() - (s.quietAt ?? 0) >= QUIET_MS
-  const visible = all.filter((s) => app.showEnded || !(s.ended || gone(s)) || s.id === app.current)
+  const visible = all.filter((s) => (app.showEnded || !(s.ended || gone(s)) || s.id === app.current) && passesLive(s))
   // (and the list is drawn again when the first of those has had its half minute)
   clearTimeout(app.quietTimer)
   const next = Math.min(...all.filter((s) => quiet(s) && !gone(s)).map((s) => s.quietAt + QUIET_MS - Date.now()))
   if (Number.isFinite(next)) app.quietTimer = setTimeout(renderListSoon, next + 50)
   const nodes = []
-  if (due.length || app.favorites.length) {
+  if (due.length || favorites.length) {
     nodes.push(h('div', { class: 'group-head', 'data-key': 'favorites' }, h('span', null, 'Favorites'), optionsDone()))
     // A session whose reminder has come due is at the top of them, favorite or not, until the reminder is cleared or put off
     for (const m of due) nodes.push(favoriteRow(app.favorites.find((f) => f.id === m.id) ?? m, { due: true }))
-    for (const f of app.favorites) if (!first.has(f.id)) nodes.push(favoriteRow(f))
+    for (const f of favorites) if (!first.has(f.id)) nodes.push(favoriteRow(f))
   }
   if (app.sortBy !== 'standard') nodes.length = 0
+  // (what it is narrowed to, over all of it, where it is)
+  const narrowed = filterLine('filter')
   if (app.sortBy === 'prompts') nodes.push(...promptNodes())
   else if (app.sortBy !== 'standard') nodes.push(...flatNodes(due))
   else if (visible.length) {
@@ -2222,10 +2229,12 @@ function renderList() {
     )
   }
   if (app.sortBy === 'standard') {
-    for (const m of [...app.machines.values()].sort((a, b) => machineName(a).localeCompare(machineName(b)))) nodes.push(...machineNodes(m))
+    const shown = (id) => !app.filter.machines.length || app.filter.machines.includes(id)
+    for (const m of [...app.machines.values()].sort((a, b) => machineName(a).localeCompare(machineName(b)))) if (shown(m.id)) nodes.push(...machineNodes(m))
     // (and the computers that have no machine, where one needs something: its sessions are heard from, and no agent is)
-    for (const c of looseComputers().sort((a, b) => a.name.localeCompare(b.name))) nodes.push(...looseNodes(c))
+    for (const c of looseComputers().sort((a, b) => a.name.localeCompare(b.name))) if (shown(c.id)) nodes.push(...looseNodes(c))
   }
+  if (narrowed) nodes.unshift(narrowed)
   // (a grip being moved by the keys is still the one in hand once the rows are drawn again)
   const held = document.activeElement?.matches?.('.grip') ? document.activeElement.closest('.row').dataset.favorite : null
   redraw(list, nodes)
@@ -2251,6 +2260,7 @@ function flatNodes(due) {
   for (const s of app.sessions.values()) all.set(s.id, { s, live: true })
   for (const c of app.catalog.values()) for (const s of c.sessions ?? []) if (!all.has(s.id)) all.set(s.id, { s })
   for (const f of app.favorites) if (!all.has(f.id)) all.set(f.id, { s: { ...f, lastActivity: 0, known: false } })
+  for (const [id, x] of all) if (!(x.live ? passesLive(x.s) : passesKept(x.s))) all.delete(id)
   const first = new Set(due.map((m) => m.id))
   const at = SORTS[app.sortBy].at
   const nodes = due.map((m) => favoriteRow(app.favorites.find((f) => f.id === m.id) ?? m, { due: true }))
@@ -2258,7 +2268,7 @@ function flatNodes(due) {
   for (const x of rest) nodes.push(x.live ? renderRow(x.s) : pastRow(x.s, { where: true }))
   const more = [...app.catalog.entries()].filter(([, c]) => c.more)
   if (more.length) nodes.push(h('button', { type: 'button', class: 'more-link', 'data-key': 'more:all', onclick: () => more.forEach(([mid]) => loadCatalog(mid, true)) }, 'Earlier sessions…'))
-  if (!nodes.length) nodes.push(h('div', { class: 'list-empty', 'data-key': 'none' }, 'No sessions yet.'))
+  if (!nodes.length) nodes.push(h('div', { class: 'list-empty', 'data-key': 'none' }, filterCount() ? 'None of the sessions read so far match the filter.' : 'No sessions yet.'))
   return nodes
 }
 
@@ -2313,10 +2323,12 @@ document.addEventListener('visibilitychange', () => document.visibilityState ===
 
 function promptNodes() {
   const got = app.prompts ?? { items: [], loading: true }
-  const nodes = got.items.map(promptRow)
+  const shown = got.items.filter(passesPrompt)
+  const nodes = shown.map(promptRow)
   const say = (key, text) => nodes.push(h('div', { class: 'list-empty', 'data-key': 'prompts:' + key }, text))
   if (got.locked) say('locked', NO_KEY_MACHINE)
   else if (!got.items.length) say('none', got.loading ? 'Reading the prompts on your computers…' : got.failed ? 'The prompts could not be read: the server did not answer.' : 'No prompts yet.')
+  else if (!shown.length) say('none', 'None of the prompts match the filter.')
   // What is not in it, and why: a computer that did not answer, one that is not online, one whose agent is from before
   // it kept prompts, and one with no agent at all
   const machines = [...app.machines.values()]
@@ -2361,8 +2373,9 @@ function promptRow(x) {
 // blocks, each a stretch of its session on one thing in a few words, which Claude Haiku made on that computer where it
 // was turned on there (lanes.mjs in the agent), and otherwise rough ones, named by their first prompts. The latest is
 // at the top, every lane on the same clock, which is given at the left; a stretch where nothing was said anywhere is
-// drawn short, as a faint break that says how long it was. The lane last typed to is at the left, and the order is
-// worked out again once in half an hour, not as each is typed to. Lines join a session to the one it was forked from,
+// drawn short, as a faint break that says how long it was. The lane with the latest in it is at the left, so that the
+// lanes' tops step down from left to right, and the order is worked out again once in half an hour, not as each goes
+// on (deon, 2026-10-30: "at least after 30 minutes it will form a church organ"). Lines join a session to the one it was forked from,
 // and a block to one in another session that carries on with the same thing soon after. A press on a block opens its
 // session there, as a search hit does. For a large screen: it takes the whole window, and the way to it is not shown on a
 // phone.
@@ -2429,28 +2442,30 @@ function closeLanes() {
 }
 document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && document.body.classList.contains('lanes-open') && loadLanes())
 
-// The lanes in the order they keep for half an hour: the last typed to first, as it was when that was last worked out;
-// a session that has come since, at the left, the latest first (kept on the device, as the list's order is). A lane
-// whose computer did not answer this time keeps its place for when it does
-function lanesInOrder(items) {
-  const at = (x) => x.lastInput || x.last_ts || 0
+// The lanes in the order they keep for half an hour: the one with the latest in it first, so that their tops step down
+// from left to right, as each was when that was last worked out (`rank`: when its latest was then; kept on the device,
+// as the list's order is). A session that has come since is put by when its latest was as it came, and keeps that too.
+// The order is worked out again only from what the computers said in the last few minutes (`fresh`): not from what was
+// read the last time the Timeline was open, which is drawn while it is read again. A lane whose computer did not answer
+// then keeps what it had, for when it does
+function lanesInOrder(items, fresh) {
+  const latest = (x) => Math.max(0, ...x.blocks.map((b) => b.end))
   let kept = null
   try {
     kept = JSON.parse(localStorage.getItem('mc.lanesOrder'))
   } catch {}
   const now = Date.now()
-  if (!kept || !Array.isArray(kept.keys) || !(now - kept.at < LANES_ORDER_MS)) kept = { at: now, keys: [...items].sort((a, b) => at(b) - at(a)).map((x) => x.key) }
-  else {
-    const known = new Set(kept.keys)
-    kept.keys = [...items.filter((x) => !known.has(x.key)).sort((a, b) => at(b) - at(a)).map((x) => x.key), ...kept.keys]
-  }
-  // (one that is not here now keeps its place, for when its computer answers again)
-  kept.keys = kept.keys.slice(0, 1000)
+  if (!kept?.rank || typeof kept.rank !== 'object' || !Number.isFinite(kept.at)) kept = { at: 0, rank: {} }
+  if (fresh && !(now - kept.at < LANES_ORDER_MS)) {
+    // (one gone from the week is let go)
+    const rank = Object.fromEntries(Object.entries(kept.rank).filter(([, t]) => t >= now - LANES_DAYS * 86400_000))
+    for (const x of items) rank[x.key] = latest(x)
+    kept = { at: now, rank }
+  } else for (const x of items) kept.rank[x.key] ??= latest(x)
   try {
     localStorage.setItem('mc.lanesOrder', JSON.stringify(kept))
   } catch {}
-  const place = new Map(kept.keys.map((k, i) => [k, i]))
-  return [...items].sort((a, b) => place.get(a.key) - place.get(b.key))
+  return [...items].sort((a, b) => kept.rank[b.key] - kept.rank[a.key])
 }
 
 // The clock, from now at the top down to the first block: each stretch between two times something began or ended is
@@ -2591,8 +2606,11 @@ function renderLanes() {
   renderLanesSays(got)
   if (got.locked) return fill(box, h('div', { class: 'list-empty' }, NO_KEY_MACHINE))
   if (!got.items.length) return fill(box, h('div', { class: 'list-empty' }, got.loading ? 'Reading the last week on your computers…' : got.failed ? 'The Timeline could not be read: the server did not answer.' : 'Nothing was said in a session on your computers in the last week.'))
-  const lanes = lanesInOrder(got.items)
+  // (as far as the filter lets them: the order is the one they keep, of all of them)
+  const shown = new Set(got.items.filter(passesLane).map((x) => x.key))
+  if (!shown.size) return fill(box, h('div', { class: 'list-empty' }, 'None of the last week’s sessions match the filter.'))
   const now = Date.now()
+  const lanes = lanesInOrder(got.items, now - (got.loaded || 0) < 2 * LANES_AGAIN_MS).filter((x) => shown.has(x.key))
   const clock = lanesClock(lanes, now)
   const wide = Math.min(LANE_W[1], Math.max(LANE_W[0], Math.floor((box.clientWidth - LANES_AXIS - 2) / lanes.length)))
   const place = new Map(lanes.map((x, i) => [x.key, i]))
@@ -2914,6 +2932,9 @@ function renderLanesSays(got) {
   if (older.length) not('older', 'Not shown (its ManyClaws agent is from before the Timeline: update it from its page): ' + older.join(', '))
   const indexing = computers.reduce((n, c) => n + (c.indexing ?? 0), 0)
   if (indexing) not('indexing', `Still indexing ${indexing} files; more may turn up.`)
+  // (and what it is narrowed to, first)
+  const narrowed = filterLine('filter')
+  if (narrowed) says.unshift(narrowed)
   redraw(el('lanes-says'), says)
 }
 
@@ -4202,6 +4223,186 @@ el('sort-open').addEventListener('click', () => sortMenu(el('sort-menu').hidden)
 document.addEventListener('pointerdown', (ev) => !el('sort-menu').hidden && !ev.target.closest?.('#sort-menu, #sort-open') && sortMenu(false))
 document.addEventListener('keydown', (ev) => ev.key === 'Escape' && !el('sort-menu').hidden && (sortMenu(false), el('sort-open').focus()))
 
+// ---- The filter: what the list and the Timeline are narrowed to, from the funnel beside the Timeline's button (and the
+// one on the Timeline's own head) (deon, 2026-10-30: "filter on machine, project, label, timeframe etc. Allow
+// multi-select"). Any number of each may be pressed: a session is shown where it is one of those pressed of each kind
+// that has any pressed. Kept on this device, as the order is. The search is not narrowed by it.
+const FILTERS = {
+  machines: 'Computers',
+  projects: 'Projects',
+  labels: 'Labels',
+  when: 'Last active',
+  states: 'State',
+}
+// How long ago, each a stretch of its own, by the days of this device's clock
+const FILTER_WHEN = [
+  ['today', 'Today'],
+  ['yesterday', 'Yesterday'],
+  ['week', '2 to 7 days ago'],
+  ['month', '8 to 30 days ago'],
+  ['older', 'Longer ago'],
+]
+const FILTER_STATES = [
+  ['attention', STATE_LABEL.attention],
+  ['working', STATE_LABEL.working],
+  ['idle', STATE_LABEL.idle],
+  ['past', STATE_LABEL.ended],
+]
+const noFilter = () => Object.fromEntries(Object.keys(FILTERS).map((k) => [k, []]))
+function filterKept() {
+  try {
+    const kept = JSON.parse(localStorage.getItem('mc.filter'))
+    return Object.fromEntries(Object.keys(FILTERS).map((k) => [k, Array.isArray(kept?.[k]) ? kept[k].filter((v) => typeof v === 'string') : []]))
+  } catch {
+    return noFilter()
+  }
+}
+const filterCount = () => Object.values(app.filter).reduce((n, on) => n + on.length, 0)
+// Which of FILTER_WHEN a time is in ('' for none known)
+function agoOf(ts) {
+  if (!(ts > 0)) return ''
+  const midnight = new Date().setHours(0, 0, 0, 0)
+  const days = ts >= midnight ? 0 : Math.ceil((midnight - ts) / 86400_000)
+  return days === 0 ? 'today' : days === 1 ? 'yesterday' : days <= 7 ? 'week' : days <= 30 ? 'month' : 'older'
+}
+// How a session stands, as the State choices say it: one that is not heard from now is not running
+function stateOfId(id) {
+  const s = app.sessions.get(id)
+  return s && !s.ended && s.online ? (standing(s) ?? 'past') : 'past'
+}
+// Whether something in the list or the Timeline is shown: { id, mid, project, at } (its session, its computer, the
+// folder it ran in, and when it was last active)
+function passes({ id, mid, project, at }) {
+  const f = app.filter
+  if (f.machines.length && !f.machines.includes(mid ?? '')) return false
+  if (f.projects.length && !f.projects.includes(project || '')) return false
+  if (f.labels.length && !f.labels.includes(markOf(id)?.label || '')) return false
+  if (f.when.length && !f.when.includes(agoOf(at))) return false
+  if (f.states.length && !f.states.includes(stateOfId(id))) return false
+  return true
+}
+// The same of each kind of thing the list has: a session heard from, one read from its computer, a favorite or a
+// reminder's session, a prompt and a lane
+const liveMid = (s) => machineOn(s)?.id ?? (s.host ? looseId(s.host) : '')
+const passesLive = (s) => passes({ id: s.id, mid: liveMid(s), project: s.project, at: s.lastActivity })
+const passesPast = (s) => passes({ id: s.id, mid: s.machine, project: s.project || folderOf(s.cwd), at: s.lastActivity })
+function passesKept(f) {
+  const live = app.sessions.get(f.id)
+  if (live) return passesLive(live)
+  const past = app.catalog.get(f.machine)?.sessions.find((x) => x.id === f.id)
+  return passes({ id: f.id, mid: f.machine, project: past?.project || f.project, at: past?.lastActivity ?? f.lastActivity })
+}
+const passesPrompt = (x) => passes({ id: x.sid, mid: x.mid, project: folderOf(x.session?.cwd), at: x.ts })
+const passesLane = (x) => passes({ id: x.sid, mid: x.mid, project: folderOf(x.cwd), at: Math.max(x.last_ts || 0, ...x.blocks.map((b) => b.end)) })
+
+// What each kind offers: every one this page knows of, and those pressed whether it does or not
+function filterChoices() {
+  const f = app.filter
+  const sorted = (names) => [...new Set(names.filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+  const machines = new Map([...app.machines.values()].map((m) => [m.id, machineName(m)]))
+  for (const c of looseComputers()) machines.set(c.id, c.name)
+  for (const id of f.machines) if (!machines.has(id)) machines.set(id, id.startsWith('~') ? id.slice(1) : 'A computer not connected now')
+  const projects = [
+    ...[...app.sessions.values()].map((s) => s.project),
+    ...[...app.catalog.values()].flatMap((c) => (c.sessions ?? []).map((s) => s.project)),
+    ...[...app.projects.values()].flatMap((ps) => (ps ?? []).map((p) => folderName(p.cwd))),
+    ...(app.prompts?.items ?? []).map((x) => folderOf(x.session?.cwd)),
+    ...(app.lanes?.items ?? []).map((x) => folderOf(x.cwd)),
+    ...app.favorites.map((x) => x.project),
+    ...f.projects,
+  ]
+  return {
+    machines: [...machines.entries()].sort((a, b) => a[1].localeCompare(b[1])),
+    projects: sorted(projects).map((p) => [p, p]),
+    labels: sorted([...labelsInUse(), ...f.labels]).map((l) => [l, l]),
+    when: FILTER_WHEN,
+    states: FILTER_STATES,
+  }
+}
+function setFilter(next) {
+  app.filter = next
+  try {
+    localStorage.setItem('mc.filter', JSON.stringify(app.filter))
+  } catch {}
+  markFilter()
+  renderList()
+  renderLanes()
+}
+function toggleFilter(kind, value) {
+  const on = app.filter[kind]
+  setFilter({ ...app.filter, [kind]: on.includes(value) ? on.filter((v) => v !== value) : [...on, value] })
+}
+// The funnels say how many are pressed; the menu, where it is open, what each kind offers
+function markFilter() {
+  const n = filterCount()
+  for (const b of document.querySelectorAll('.filter-open')) {
+    b.classList.toggle('on', n > 0)
+    b.title = n ? `Filter: ${n} on` : 'Filter'
+    b.setAttribute('aria-label', n ? `Filter the sessions: ${n} on` : 'Filter the sessions')
+    const count = b.querySelector('.filter-count')
+    count.hidden = !n
+    count.textContent = n ? String(n) : ''
+  }
+  if (!el('filter-menu').hidden) drawFilterMenu()
+}
+function drawFilterMenu() {
+  const choices = filterChoices()
+  const focused = document.activeElement?.closest?.('#filter-list .menu-row')?.dataset.filter
+  fill(
+    el('filter-list'),
+    ...Object.entries(FILTERS).flatMap(([kind, title]) =>
+      choices[kind].length
+        ? [
+            h('div', { class: 'menu-head', 'data-kind': kind }, title),
+            ...choices[kind].map(([value, name]) => {
+              const on = app.filter[kind].includes(value)
+              return h(
+                'button',
+                { type: 'button', class: 'menu-row' + (on ? ' on' : ''), role: 'menuitemcheckbox', 'aria-checked': String(on), 'data-filter': kind + ':' + value, onclick: () => toggleFilter(kind, value) },
+                h('span', { class: 'filter-box', 'aria-hidden': 'true' }, on ? '✓' : ''),
+                h('span', { class: 'menu-text' }, h('span', { class: 'menu-title' }, name)),
+              )
+            }),
+          ]
+        : [],
+    ),
+  )
+  el('filter-clear').disabled = !filterCount()
+  // (the one just pressed keeps the focus as the menu is drawn again)
+  if (focused) el('filter-list').querySelector(`[data-filter="${CSS.escape(focused)}"]`)?.focus()
+}
+// Opened under the funnel that was pressed: the list's, or the Timeline's
+function filterMenu(open, by) {
+  const menu = el('filter-menu')
+  if (open) {
+    // (its right edge at the funnel's, unless that would put it past the window's left: then as far left as it goes)
+    const r = by.getBoundingClientRect()
+    const wide = Math.min(320, innerWidth - 16)
+    menu.style.setProperty('--filter-top', Math.round(r.bottom + 4) + 'px')
+    menu.style.setProperty('--filter-left', Math.round(Math.min(innerWidth - wide - 8, Math.max(8, r.right + 4 - wide))) + 'px')
+    menu.opener = by
+  }
+  menu.hidden = !open
+  for (const b of document.querySelectorAll('.filter-open')) b.setAttribute('aria-expanded', String(open && b === by))
+  if (open) {
+    drawFilterMenu()
+    menu.querySelector('.menu-row')?.focus()
+  }
+}
+for (const b of document.querySelectorAll('.filter-open')) b.addEventListener('click', () => filterMenu(el('filter-menu').hidden || el('filter-menu').opener !== b, b))
+el('filter-clear').addEventListener('click', () => setFilter(noFilter()))
+document.addEventListener('pointerdown', (ev) => !el('filter-menu').hidden && !ev.target.closest?.('#filter-menu, .filter-open') && filterMenu(false))
+document.addEventListener('keydown', (ev) => ev.key === 'Escape' && !el('filter-menu').hidden && (filterMenu(false), el('filter-menu').opener?.focus()))
+// Over the list and the Timeline while anything is pressed: what they are narrowed to, and the way back to everything
+function filterLine(key) {
+  if (!filterCount()) return null
+  const choices = filterChoices()
+  const said = Object.keys(FILTERS)
+    .filter((kind) => app.filter[kind].length)
+    .map((kind) => app.filter[kind].map((v) => choices[kind].find(([value]) => value === v)?.[1] ?? v).join(' or '))
+  return h('div', { class: 'filter-line', 'data-key': key }, h('span', { class: 'filter-says' }, 'Only ', said.join(' · ')), h('button', { type: 'button', class: 'filter-off', onclick: () => setFilter(noFilter()) }, 'Show everything'))
+}
+
 // Some rows of a session's chat, as they were read here: the last its user typed is kept. Says whether there was one.
 function typedHere(sid, rows) {
   const person = rows.findLast(personRow)
@@ -4960,9 +5161,11 @@ function machineNodes(m) {
   ]
   if (shut) return nodes
   if (app.pastBy === 'project' && m.online) return [...nodes, ...projectNodes(m)]
-  // Every session on the machine, the ones running now among them
+  // Every session on the machine, the ones running now among them, as far as the filter lets them
   const all = catalog?.sessions ?? []
-  for (const s of all) nodes.push(pastRow(s))
+  const shown = all.filter(passesPast)
+  for (const s of shown) nodes.push(pastRow(s))
+  if (all.length && !shown.length) nodes.push(h('div', { class: 'list-empty', 'data-key': 'none:' + m.id }, 'None of the sessions read so far match the filter.'))
   if (catalog?.more) nodes.push(h('button', { type: 'button', class: 'more-link', 'data-key': 'more:' + m.id, onclick: () => loadCatalog(m.id, true) }, 'Earlier sessions…'))
   if (m.online && catalog && !all.length) nodes.push(h('div', { class: 'list-empty', 'data-key': 'none:' + m.id }, catalog.locked ? 'Its sessions are end-to-end encrypted, and this device does not have your key: approve it from one of your devices that has it (Account) to read them.' : catalog.failed ? (typeof catalog.failed === 'string' ? catalog.failed : "The machine didn't answer.") : catalog.loaded ? 'No sessions yet.' : 'Reading the sessions…'))
   return nodes
@@ -5037,9 +5240,12 @@ function toggleProject(mid, cwd) {
 }
 
 function projectNodes(m) {
-  const projects = app.projects.get(m.id)
-  if (!projects) return [h('div', { class: 'list-empty', 'data-key': 'none:' + m.id }, 'Reading the projects…')]
-  if (!projects.length) return [h('div', { class: 'list-empty', 'data-key': 'none:' + m.id }, 'No past sessions.')]
+  const all = app.projects.get(m.id)
+  if (!all) return [h('div', { class: 'list-empty', 'data-key': 'none:' + m.id }, 'Reading the projects…')]
+  if (!all.length) return [h('div', { class: 'list-empty', 'data-key': 'none:' + m.id }, 'No past sessions.')]
+  // (the projects the filter names, where it names any; and in each, the sessions it lets through)
+  const projects = all.filter((p) => !app.filter.projects.length || app.filter.projects.includes(folderName(p.cwd)))
+  if (!projects.length) return [h('div', { class: 'list-empty', 'data-key': 'none:' + m.id }, 'None of its projects match the filter.')]
   const nodes = []
   // Two folders can share a name: then where each is tells them apart at a glance
   const names = new Map()
@@ -5059,7 +5265,7 @@ function projectNodes(m) {
       ),
     )
     if (!open) continue
-    for (const s of open.sessions) nodes.push(pastRow(s, { inProject: true }))
+    for (const s of open.sessions) if (passes({ id: s.id, mid: m.id, project: folderName(p.cwd), at: s.lastActivity })) nodes.push(pastRow(s, { inProject: true }))
     if (open.more) nodes.push(h('button', { type: 'button', class: 'more-link in-project', 'data-key': 'more:' + key, onclick: () => loadProject(m.id, p.cwd, true) }, 'Earlier sessions…'))
   }
   return nodes
@@ -9056,7 +9262,7 @@ function upkeepNode(c, n) {
       { 'data-need': 'update' },
       lead,
       hosted ? hostedSays(c) : null,
-      h('div', { class: 'needs-do' }, ...(hosted ? [button('update-when-done', whenDone(hosted), () => upgradeComputer(c, { now: false }), { primary: false }), ' ', button('update-now', 'Update now', () => upgradeComputer(c, { now: true }))] : [button('update-go', `Update ${name}`, () => upgradeComputer(c, { now: false }))])),
+      h('div', { class: 'needs-do' }, ...(hosted ? [button('update-when-done', whenDone(hosted), () => upgradeComputer(c, { now: false }), { primary: false }), ' ', button('update-now', 'Update now', () => upgradeComputer(c, { now: true })), ' ', button('update-poke', 'Update and poke', () => upgradeComputer(c, { now: true, poke: true }), { primary: false })] : [button('update-go', `Update ${name}`, () => upgradeComputer(c, { now: false }))])),
       ...told,
     )
   }
@@ -9065,7 +9271,7 @@ function upkeepNode(c, n) {
       'div',
       { 'data-need': 'upgrade-waiting' },
       h('p', null, h('b', null, `An update of ${name} to release ${n.release} is waiting.`), n.sessions ? ` Updating now ends the ${n.sessions === 1 ? 'session' : count(n.sessions, 'session')} started from this page; a reply resumes ${n.sessions === 1 ? 'it' : 'them'}.` : ' It is done in a moment.'),
-      n.sessions ? h('div', { class: 'needs-do' }, button('update-now', 'Update now', () => upgradeComputer(c, { now: true, release: n.release }))) : null,
+      n.sessions ? h('div', { class: 'needs-do' }, button('update-now', 'Update now', () => upgradeComputer(c, { now: true, release: n.release })), ' ', button('update-poke', 'Update and poke', () => upgradeComputer(c, { now: true, release: n.release, poke: true }), { primary: false })) : null,
       ...told,
     )
   if (n.kind === 'agent-setup') {
@@ -9099,7 +9305,7 @@ function hostedSays(c) {
     { 'data-part': 'update-hosted' },
     `The agent there is running ${one ? 'a session' : count(runs.length, 'session')} started from this page: `,
     ...named.flatMap((n, i) => (i ? [', ', n] : [n])),
-    `. Updating starts the agent again, which ends ${one ? 'it' : 'them'}, and a reply here resumes ${one ? 'it' : 'each'}. Update now ends ${one ? 'it' : 'them'} now. ${whenDone(runs.length)} waits until ${one ? 'it has' : 'each has'} sat idle for 30 minutes, or ended when you pressed Exit over its chat.`,
+    `. Updating starts the agent again, which ends ${one ? 'it' : 'them'}, and a reply here resumes ${one ? 'it' : 'each'}. Update now ends ${one ? 'it' : 'them'} now. ${whenDone(runs.length)} waits until ${one ? 'it has' : 'each has'} sat idle for 30 minutes, or ended when you pressed Exit over its chat. Update and poke ends ${one ? 'it' : 'them'} now, and once the agent is back starts ${one ? 'it' : 'each'} again and tells ${one ? 'it' : 'each'} to carry on where it was.`,
   )
 }
 
@@ -9125,16 +9331,18 @@ async function allowPlugin(c, n) {
 // A computer brought up to the newest release, on an order for it: its agent has Claude Code fetch the plugin, holds
 // it to that release, and replaces itself, at once (`now`) or once its sessions are done. Where it has no agent, a
 // session's own plugin there does the plugin, and holds what was fetched to its list.
-async function upgradeComputer(c, { now, release }) {
+async function upgradeComputer(c, { now, release, poke = false }) {
   const newest = app.release
   if (!newest?.digest) return
   const name = c.name
   const hosted = c.m?.hosted?.length ?? 0
+  // (the sessions as they run now, for Update and poke: what each is called here, and its mode, model and effort)
+  const runs = (c.m?.hosted ?? []).map((x) => ({ sid: x.sid, cwd: x.cwd ?? '', mode: x.mode ?? '', model: x.model ?? '', effort: x.effort ?? '', label: (app.sessions.get(x.sid) && nameOf(app.sessions.get(x.sid))) || folderOf(x.cwd) || x.sid.slice(0, 8) }))
   const via = c.m ? null : c.live.find((s) => s.attended && s.online)
   const says = c.m
-    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions you started there in a terminal, VS Code or the desktop app keep running, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The session' : count(hosted, 'session')} started from this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : `, once ${hosted === 1 ? 'it is' : 'they are'} done`}; a reply resumes ${hosted === 1 ? 'it' : 'them'}.` : ''}`
+    ? `Updates the ManyClaws plugin and agent on ${name}. Sessions you started there in a terminal, VS Code or the desktop app keep running, and use the new plugin when next started.${hosted ? ` ${hosted === 1 ? 'The session' : count(hosted, 'session')} started from this page end${hosted === 1 ? 's' : ''} when the agent restarts${now ? ', now' : `, once ${hosted === 1 ? 'it is' : 'they are'} done`}; ${poke ? `once it is back, ${hosted === 1 ? 'it is' : 'each is'} started again and told: “${POKE_SAYS}” Keep this page open until then.` : `a reply resumes ${hosted === 1 ? 'it' : 'them'}.`}` : ''}`
     : `Updates the ManyClaws plugin on ${name}, through the Claude Code session in ${via?.project ?? 'its folder'}. Nothing running ends: each session uses the new plugin when it is next started.`
-  if (!(await ask(`Update ${name}?`, { says, yes: now ? 'Update now' : hosted ? whenDone(hosted) : `Update ${name}` }))) return
+  if (!(await ask(`Update ${name}?`, { says, yes: poke ? 'Update and poke' : now ? 'Update now' : hosted ? whenDone(hosted) : `Update ${name}` }))) return
   stateOf(c).upkeep = { kind: release ? 'upgrade-waiting' : 'update', busy: true, done: 'Updating…' }
   renderComputer()
   const order = c.m ? await orderFor(c.id, 'upgrade', { release: release ?? newest.release, digest: newest.digest, now }) : await orderFor(via.id, 'call', { method: 'manyclaws.update', args: {} })
@@ -9146,10 +9354,73 @@ async function upgradeComputer(c, { now, release }) {
     ? { kind: stateOf(c).upkeep.kind, error: sentence(failed) }
     : {
         kind: stateOf(c).upkeep.kind,
-        done: !c.m ? `Updated: new sessions on ${name} use release ${v?.release ?? newest.release}.` : v?.agent === 'now' ? `Updating: the agent on ${name} starts again in a moment, on release ${v.release}.` : v?.agent === 'unchanged' ? `Updated: new sessions on ${name} use release ${v.release}.` : `The plugin on ${name} is release ${v?.release ?? newest.release}; its agent follows once its sessions are done.`,
+        done: !c.m ? `Updated: new sessions on ${name} use release ${v?.release ?? newest.release}.` : v?.agent === 'now' ? `Updating: the agent on ${name} starts again in a moment, on release ${v.release}.` : v?.agent === 'unchanged' ? `Updated: new sessions on ${name} use release ${v.release}.${poke ? ' Its agent did not change, so its sessions run on: there was nothing to poke.' : ''}` : `The plugin on ${name} is release ${v?.release ?? newest.release}; its agent follows once its sessions are done.`,
       }
+  // (the agent starts again only where it changed: then what it ran is started again once it is back, and told so)
+  if (!failed && poke && runs.length && v?.agent === 'now') pokeAfter(c, v.release, runs)
   renderComputer()
   renderList()
+}
+
+// ---- Update and poke: the sessions an update ended, started again once the computer's agent is back on the new release
+// (deon, 2026-10-29: "after it updated it restarts all those sessions and sends a prompt to them"). Each is resumed as a
+// reply to it would resume it, in the mode, model and effort it ran in, and told why it ended. This page does it, so it
+// is done while the page is open: the agent that is replaced does not know of it, and the one that replaces it has no
+// sessions of its own to go by.
+const POKE_SAYS = 'Your session just ended: ManyClaws updated this computer, which started its agent again. If you were busy doing something, continue where you left off, and check on any work and agents you had open. If you were not waiting on anything, reply with just: Nothing to see'
+const POKE_WAIT_MS = 5 * 60_000 // how long the agent has to be back on the new release before the sessions are left as they are
+let pokeTimer = 0
+
+function pokeAfter(c, release, runs) {
+  const one = runs.length === 1
+  app.pokes.set(c.id, { name: c.name, release, runs, until: Date.now() + POKE_WAIT_MS, state: 'waiting', said: `Once the agent on ${c.name} is back on release ${release}, ${one ? 'the session it ran is' : `the ${runs.length} sessions it ran are`} started again and told to carry on.` })
+  clearInterval(pokeTimer)
+  pokeTimer = setInterval(pokeTick, 2000)
+}
+
+async function pokeTick() {
+  const waiting = [...app.pokes].filter(([, p]) => p.state === 'waiting')
+  if (!waiting.length) return void clearInterval(pokeTimer)
+  for (const [mid, p] of waiting) {
+    const m = app.machines.get(mid)
+    const gone = new Set(p.runs.map((x) => x.sid))
+    // (back: heard from on the new release, and no longer running any of them)
+    const back = m?.online && (m.release?.release ?? 0) >= p.release && !(m.hosted ?? []).some((x) => gone.has(x.sid))
+    if (!back) {
+      if (Date.now() < p.until) continue
+      p.state = 'failed'
+      p.said = `The agent on ${p.name} was not back on release ${p.release} within ${POKE_WAIT_MS / 60_000} minutes, so its sessions were not started again: a reply to each resumes it.`
+      pokeChanged(mid)
+      continue
+    }
+    p.state = 'starting'
+    p.said = `Starting ${p.runs.length === 1 ? 'its session' : `its ${p.runs.length} sessions`} again on ${p.name}…`
+    pokeChanged(mid)
+    const allowed = m.spawn?.modes?.length ? m.spawn.modes : ['default']
+    const started = []
+    const not = []
+    for (const x of p.runs) {
+      const mode = allowed.includes(x.mode) ? x.mode : allowed.includes('default') ? 'default' : allowed[0]
+      const order = await orderFor(mid, 'open', { sid: x.sid, prompt: POKE_SAYS, mode, ...(x.model ? { model: x.model } : {}), ...(x.effort ? { effort: x.effort } : {}) })
+      const r = order ? await sendJson(`/api/machines/${mid}/sessions/${encodeURIComponent(x.sid)}/resume`, { order }) : { ok: false, error: NO_KEY_MACHINE }
+      if (r.ok) started.push(x.label)
+      else not.push(`${x.label} (${sentence(r.error).replace(/\.$/, '')})`)
+    }
+    p.state = not.length ? 'failed' : 'done'
+    p.said = [started.length && `Started again and told to carry on: ${started.join(', ')}.`, not.length && `Not started again: ${not.join('; ')}. A reply to ${not.length === 1 ? 'it' : 'each'} resumes it.`].filter(Boolean).join(' ')
+    pokeChanged(mid)
+  }
+}
+
+function pokeChanged(mid) {
+  if (app.computer?.mid === mid) renderComputer()
+}
+
+// On the computer's page: how Update and poke is going there
+function pokePart(c) {
+  const p = c && app.pokes.get(c.id)
+  if (!p) return null
+  return accountPart('Update and poke', { id: 'computer-poke', 'data-key': 'poke' }, h('p', { class: p.state === 'failed' ? 'form-note error' : p.state === 'done' ? 'guide-status connected' : 'muted', 'data-part': 'poke-' + p.state }, p.said))
 }
 
 // The agent set up on a computer that has none, by the plugin of a session there, from the plugin's own folder
@@ -9278,7 +9549,7 @@ function renderComputer() {
     h('p', { class: 'muted' }, 'Wherever a session says which computer it is on, ', m.color ? whereLabel(name, m.id) : name, m.color ? ' is a label in this color: in the list, over a chat, and in what a search finds.' : ' is said plainly. Give it a color and it is a label in that color: in the list, over a chat, and in what a search finds.'),
     c.colorError && h('p', { class: 'form-note error', role: 'alert' }, c.colorError),
   )
-  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), colors, newPart(c, m), foldersPart(c, m, at), versionsPart(at), cswapPart(m), removePart(c, m)].filter(Boolean))
+  redraw(body, [accountHead('Computer', name, computerSays(m) + '.'), needsPart(at), pokePart(at), colors, newPart(c, m), foldersPart(c, m, at), versionsPart(at), cswapPart(m), removePart(c, m)].filter(Boolean))
   // (what is chosen is this page's to say: a drawing leaves what a hand has changed as it is)
   const set = (id, value) => el(id) && el(id).value !== value && (el(id).value = value)
   set('computer-project', c.cwd)
