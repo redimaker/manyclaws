@@ -1401,6 +1401,16 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .filter-count { position: absolute; top: 0; right: -2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--accent, #d97757); color: #fff; font-size: 10px; font-weight: 600; line-height: 14px; text-align: center; }
 .filter-count[hidden] { display: none; }
 .lanes .chat-head .filter-open { margin-left: auto; align-self: center; }
+/* The Timeline's zoom, before its filter */
+.lanes-zoom { display: inline-flex; align-self: center; gap: 2px; margin-left: auto; }
+.lanes .chat-head .lanes-zoom + .filter-open { margin-left: 4px; }
+.lanes-zoom .head-link { margin-right: 0; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; }
+.lanes-zoom .head-link:hover:not(:disabled) { color: var(--text); }
+.lanes-zoom .head-link:disabled { opacity: .35; cursor: default; }
+/* What Claude Haiku does for the Timeline, in Settings and in the box over the Timeline as it opens */
+.lanes-haiku .lanes-say { margin: 6px 0; }
+.lanes-haiku .lanes-do { color: var(--link, var(--accent)); text-decoration-color: currentColor; }
+.lanes-intro-where { color: var(--muted); }
 .filter-menu { position: fixed; z-index: 30; top: var(--filter-top, 48px); left: var(--filter-left, 8px); right: auto; bottom: auto; width: min(320px, calc(100vw - 16px)); max-height: min(70dvh, 560px); }
 .filter-menu .menu-head { padding-top: 10px; font-size: .85em; text-transform: uppercase; letter-spacing: .04em; }
 .filter-menu .menu-head:first-child { padding-top: 4px; }
@@ -2200,7 +2210,7 @@ body.lanes-open #chat-pane { grid-column: 1 / -1; }
 .lanes-do:hover { color: var(--ln-accent); }
 /* The lanes, which scroll both ways, with the clock and the heads held where they are */
 .lanes-view { position: relative; flex: 1; min-height: 0; display: flex; }
-.lanes-body { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; outline: 0; }
+.lanes-body { flex: 1; min-width: 0; overflow: auto; overscroll-behavior: contain; outline: 0; touch-action: pan-x pan-y; }
 .lanes-body.dragging { cursor: grabbing; user-select: none; }
 /* (scroll bars that are there to be seen, so that it is plain there is more to the side: thin, in the page's colors) */
 .lanes-body::-webkit-scrollbar { width: 10px; height: 10px; }
