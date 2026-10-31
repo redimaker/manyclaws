@@ -6240,26 +6240,37 @@ new MutationObserver((changes) => {
   markTimer = setTimeout(markChat, 120)
 }).observe(el('messages'), { childList: true, subtree: true, characterData: true })
 
-// ---- The rows after the page it was opened at: read a page at a time as they are scrolled to, and all of them at a
-// press of the arrow to the latest, which goes to the end (and is offered while they are not all read)
+// ---- The rows after the page it was opened at: read a page at a time as they are scrolled to; the rest of them at a
+// press at the foot of what is drawn, which says they are not read yet (deon, 2026-10-31: "the bottom line of the page
+// just needs to have an indication that the rest hasn't been loaded yet"); and all of them at a press of the arrow to
+// the latest, which goes to the end
 const laterWatch = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && loadLater(), { root: el('messages'), rootMargin: '0px 0px 600px 0px' })
 function laterNodes() {
   const p = app.past
   if (!p || !(p.to < p.total)) return []
-  return [h('button', { type: 'button', class: 'later', onclick: () => loadLater() }, 'Later messages…')]
+  return [h('div', { class: 'later' }, h('span', { class: 'later-says' }, 'The rest of this session isn’t loaded yet.'), h('button', { type: 'button', class: 'later-go', onclick: () => loadLater({ all: true, go: false }) }, 'Load it'))]
 }
 function watchLater() {
   laterWatch.disconnect()
   const button = el('messages').querySelector(':scope > .later')
   if (button) laterWatch.observe(button)
 }
-async function loadLater({ all = false } = {}) {
+async function loadLater({ all = false, go = true } = {}) {
   const p = app.past
-  if (!p?.loaded || !(p.to < p.total)) return all && scrollToEnd()
-  if (app.loadingLater) return all && (app.laterAll = true)
+  if (!p?.loaded || !(p.to < p.total)) return all && go && scrollToEnd()
+  if (app.loadingLater) return all && ((app.laterAll = true), (app.laterGo ||= go))
   app.loadingLater = true
   app.laterAll = all
+  app.laterGo = all && go
   const box = el('messages')
+  // (the foot says it is being read, until it is, or could not be)
+  const reading = (on) => {
+    const foot = box.querySelector(':scope > .later')
+    if (!foot) return
+    foot.classList.toggle('loading', on)
+    foot.querySelector('.later-says').textContent = on ? 'Loading the rest of this session…' : 'The rest of this session isn’t loaded yet.'
+  }
+  reading(true)
   try {
     while (app.past === p && p.to < p.total) {
       const size = app.laterAll ? 1000 : PAST_ROWS
@@ -6269,14 +6280,16 @@ async function loadLater({ all = false } = {}) {
       p.to = Math.max(p.to, page.to)
       box.append(...pastNodes(page, { follow: true }), ...laterNodes())
       if (!app.laterAll) break
+      reading(true)
     }
     if (app.past !== p) return
     watchLater()
     refoldSoon()
-    if (app.laterAll) scrollToEnd()
+    if (app.laterGo) scrollToEnd()
     showLatest()
   } finally {
     app.loadingLater = false
+    if (app.past === p) reading(false)
   }
 }
 
@@ -9189,14 +9202,14 @@ el('input').addEventListener('focus', () => {
   el('more').setAttribute('aria-expanded', 'false')
 })
 
-// Back to the latest, offered once the chat has been scrolled well away from it, or while one opened in the middle has
-// rows after what is read of it (which it reads, to the end)
+// Back to the latest, offered once the chat has been scrolled well away from it; in one opened in the middle with rows
+// after what is read of it, it reads them, to the end
 const laterLeft = () => !!app.past?.loaded && app.past.to < app.past.total
 function showLatest() {
   const box = el('messages')
   const away = box.scrollHeight - box.scrollTop - box.clientHeight
-  el('latest').hidden = away < 600 && !laterLeft()
-  if (away < 120 && !laterLeft()) el('latest').classList.remove('fresh')
+  el('latest').hidden = away < 600
+  if (away < 120) el('latest').classList.remove('fresh')
 }
 el('messages').addEventListener(
   'scroll',

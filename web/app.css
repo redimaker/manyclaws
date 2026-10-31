@@ -964,7 +964,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
   .swap-bar .swap-reset { grid-column: 1 / -1; padding-left: calc(5ch + 10px); font-size: .9em; white-space: normal; }
   .swap-note { padding-left: 0; }
 }
-.more-link, .earlier, .later { display: block; width: 100%; background: none; border: 0; padding: 6px 12px; color: var(--link); text-align: left; }
+.more-link, .earlier { display: block; width: 100%; background: none; border: 0; padding: 6px 12px; color: var(--link); text-align: left; }
 /* Past sessions by project */
 .project { display: flex; align-items: baseline; gap: 6px; width: 100%; background: none; border: 0; padding: 5px 12px; text-align: left; }
 @media (hover: hover) {
@@ -976,7 +976,10 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .row.in-project, .more-link.in-project, .list-empty.in-project { padding-left: 30px; }
 .list-empty.in-project { padding-top: 4px; padding-bottom: 8px; }
 .earlier { text-align: center; padding: 0 0 12px; flex-shrink: 0; }
-.later { text-align: center; padding: 12px 0 0; flex-shrink: 0; }
+/* At the foot of one opened in the middle: that the rest of it is not read yet, and the way to have it */
+.later { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 10px; margin-top: 16px; padding: 12px 0 4px; border-top: 1px dashed var(--border); color: var(--muted); font-size: 13px; text-align: center; }
+.later-go { padding: 0; border: 0; background: none; color: var(--link); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.later.loading .later-go { display: none; }
 .row.past .row-title { font-weight: 400; }
 .dot.live { background: var(--idle); }
 .dot.past { background: none; border: 1px solid var(--offline); }
@@ -1919,7 +1922,8 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .row:active, .project:active, .hit:active, .more-link:active { background: var(--active); }
   .dot { width: 10px; height: 10px; }
   .project { padding: 12px 14px; min-height: var(--tap); align-items: center; }
-  .more-link, .earlier, .later { padding: 12px 14px; min-height: var(--tap); }
+  .more-link, .earlier { padding: 12px 14px; min-height: var(--tap); }
+  .later-go { min-height: var(--tap); }
   .hit { padding: 8px 10px; }
   .set-row { min-height: var(--tap); }
 
@@ -2219,9 +2223,7 @@ body.lanes-open #chat-pane { grid-column: 1 / -1; }
 #lanes .chat-sub { color: var(--ln-muted); }
 .lanes .back { display: inline-flex; align-items: center; gap: 4px; font-size: 22px; color: var(--ln-text); }
 .lanes .back-word { display: inline; font-size: 13px; }
-[data-site] .lanes .back { order: 2; margin-left: auto; padding: 8px 16px; border-radius: 8px; background: var(--s-btn); color: var(--s-btn-text); font-size: 15px; font-weight: 500; line-height: 1; }
-[data-site] .lanes .back > [aria-hidden] { display: none; }
-[data-site] .lanes .back-word { font-size: 15px; }
+[data-site] .lanes .back-word { font-size: 15px; font-weight: 500; }
 .lanes-says { padding: 0 20px; font-size: 12.5px; color: var(--ln-text); }
 .lanes-say { margin: 8px 0; }
 .lanes-say.muted { color: var(--ln-muted); }
@@ -2256,8 +2258,8 @@ body.lanes-open #chat-pane { grid-column: 1 / -1; }
 .lane-head[data-color]::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--lane); }
 .lane-head[data-color], .lane[data-color], .lane-peek[data-color] { --lane: var(--mk); }
 .lane-head:hover { background: var(--ln-surface); }
-.lane-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-family: var(--ln-serif); font-size: 15px; font-weight: 500; letter-spacing: -.005em; }
-:root:not([data-site]) .lane-name { font-size: 13px; font-weight: 600; }
+.lane-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-family: var(--ln-serif); font-size: 13px; font-weight: 500; letter-spacing: -.005em; }
+:root:not([data-site]) .lane-name { font-weight: 600; }
 .lane-name .dot { flex: none; }
 .lane-title, .lane-where, .lane-fork { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lane-where, .lane-fork { font-size: 11.5px; color: var(--ln-muted); }
