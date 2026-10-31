@@ -25,14 +25,14 @@
        from: a preload that fails its check is otherwise fetched again by the import, unchecked (the server names
        the map by its own hash in the page's policy, since it is inline). -->
   <script type="importmap">{"integrity":{"/seal.js":"sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6","/keys.js":"sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s","/qr.js":"sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG"}}</script>
-  <link rel="stylesheet" href="app.css" integrity="sha384-0rKiuxXh/z3or6Cmlfl6emIdiCUiyLhjdT7XLHCZHtu3XRfRR0YNZV7J39ERlJqk">
+  <link rel="stylesheet" href="app.css" integrity="sha384-73bIp3gW1RJmVB3a+8CclSTcNERLupBDR6E6Mq32NrhH6nzZ2PTedzqixMiWXYs9">
   <link rel="stylesheet" href="/site/fonts.css" integrity="sha384-wcj+qc6YT5OD8iL02K1NUDa02xvoq590VGWe9AycsZ3UhLhD3hozKNZVeebmwG/+">
   <link rel="stylesheet" href="/site/join.css" integrity="sha384-xzQqHrn67yv+GLFM7UCr2GfU4hqwjw99ATZ2YfPoQ/85YknnhQiBfNpr460eyEwo">
   <link rel="stylesheet" href="/site/account.css" integrity="sha384-fKphWYXWRIRO1hP9lSN23UU0spg2yD9VcsROZ8Eih5y3ouQQ7SFln++JMeEhqtz6">
   <link rel="modulepreload" href="/seal.js" integrity="sha384-bDEbfl0FHIaGXuyvU8qTNmDVg/1gIpB2RDkmPxcuxKulx8nJ2MwOCl+ewpD7vfy6">
   <link rel="modulepreload" href="/keys.js" integrity="sha384-MoTicIzSYrjN3g+TvvYT/VQoFVh8K5cHpxwH7lcCjxD9cvTCwB5ggKe/FXo+Nk8s">
   <link rel="modulepreload" href="/qr.js" integrity="sha384-aKdJQJGtl8l7/mwJFpDCAXj+nvYOTEtbDPVgGPBKc9jYGCJ52S5uxRYhXoI15HCG">
-  <script src="app.js" defer integrity="sha384-vnXm15UG3I0nYu2ecF/aOJeVTw+0yA8MxqLoohJ7Xg6f9CBDng1tWvvefQDHFSeN"></script>
+  <script src="app.js" defer integrity="sha384-ZifzoPHsFboRG88tE3ER3aDc9RfZtDFlaFZJEgIVYCuihKGMrxKQrdsy81gjncht"></script>
 </head>
 <body>
   <!-- Signed out: sign in with an email and a password, or with the server's web token; make an account (with an invite
@@ -432,6 +432,13 @@
                 <label class="guide-check"><input type="checkbox" id="set-haiku-warn"> Warn before each Haiku search</label>
               </div>
             </section>
+            <section class="acct-part" id="set-lanes">
+              <h2>Timeline</h2>
+              <div class="acct-body">
+                <p class="muted">Claude Haiku can sum up each session in the Timeline in blocks of a few words. It runs on each of your computers, and is turned on or off there, for every device.</p>
+                <div id="set-lanes-says" class="lanes-haiku"></div>
+              </div>
+            </section>
             <section class="acct-part" id="set-alerts">
               <h2>Notifications</h2>
               <div class="acct-body">
@@ -452,6 +459,10 @@
             <div class="chat-name">Timeline</div>
             <div class="chat-sub">The last week of your sessions, the latest on the left. Press a block to open it there.</div>
           </div>
+          <span class="lanes-zoom" role="group" aria-label="Zoom">
+            <button id="lanes-zoom-out" type="button" class="head-link" title="Zoom out (−)" aria-label="Zoom out"><svg class="head-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M6 8.5h5M12.5 12.5 17 17"/></svg></button>
+            <button id="lanes-zoom-in" type="button" class="head-link" title="Zoom in (+)" aria-label="Zoom in"><svg class="head-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M6 8.5h5M8.5 6v5M12.5 12.5 17 17"/></svg></button>
+          </span>
           <button id="lanes-filter" type="button" class="head-link filter-open" aria-haspopup="menu" aria-expanded="false" aria-controls="filter-menu" title="Filter" aria-label="Filter the sessions"><svg class="head-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M3.5 4.5h13l-5 6v5l-3 1.5v-6.5z"/></svg><span class="filter-count" hidden></span></button>
         </header>
         <div id="lanes-says" class="lanes-says"></div>
@@ -590,6 +601,19 @@
       <div class="ask-foot">
         <button id="ask-no" type="button" class="ask-no">Cancel</button>
         <button id="ask-yes" type="submit" class="ask-yes">OK</button>
+      </div>
+    </form>
+  </dialog>
+  <!-- Over the Timeline as it opens, until this device is told not to show it: what Claude Haiku does for it on each
+       computer, which is in Settings, under Timeline (app.js, lanesIntro) -->
+  <dialog id="lanes-intro" class="ns-box ask-box lanes-intro" aria-labelledby="lanes-intro-title" aria-describedby="lanes-intro-says">
+    <form method="dialog" novalidate>
+      <h2 id="lanes-intro-title" class="ask-title">Summaries by Claude Haiku</h2>
+      <div id="lanes-intro-says" class="ask-says lanes-haiku"></div>
+      <p class="ask-says lanes-intro-where">This is in <a id="lanes-intro-settings" href="#/settings">Settings, under Timeline</a>, from now on.</p>
+      <div class="ask-foot">
+        <button id="lanes-intro-never" type="button" class="ask-no">Don’t show this again</button>
+        <button id="lanes-intro-close" type="submit" class="ask-yes" autofocus>Close</button>
       </div>
     </form>
   </dialog>
