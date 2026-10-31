@@ -8266,6 +8266,15 @@ const FILE_MOST = 16 * 1024 * 1024 // and the largest a computer takes, which is
 const fileBox = { seq: 0, urls: [], shown: null, editing: null } // which asking the box shows the answer to, the addresses made here for what it shows, what that is, and what is being changed of it
 
 const lastPart = (p) => String(p).replace(/[#?].*$/, '').split(/[\\/]/).filter(Boolean).pop() || String(p)
+// The name of the file a link names, as the link writes it: with its spaces, where it has them written %20
+const linkName = (target) => {
+  const name = lastPart(target)
+  try {
+    return decodeURIComponent(name)
+  } catch {
+    return name
+  }
+}
 const fileSize = (n) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(n < 10_240 ? 1 : 0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`)
 const sentence = (text) => (text ? text[0].toUpperCase() + text.slice(1) + (/[.?!]$/.test(text) ? '' : '.') : '')
 
@@ -8359,7 +8368,7 @@ async function openFile(target, { from } = {}) {
   const seq = ++fileBox.seq
   const home = fileHome()
   clearFile()
-  el('file-name').textContent = lastPart(target)
+  el('file-name').textContent = linkName(target)
   if (!el('file-box').open) el('file-box').showModal()
   const no = (text, more) => fileNote(text, { error: true, more })
   if (!home) return no('The session this link is in is no longer open.')

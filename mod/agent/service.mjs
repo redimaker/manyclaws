@@ -18,8 +18,11 @@ import { Cswap } from './cswap.mjs'
 import { seal, open, openAll, isSealed, keysFromText, contentKey, sealBytes, openBytes, isSealedBytes, UNOPENED, readOrder, takeOrder, orderMemory, devicesMemory, OrderRefused, WIRE, mayStart, allowedOn, pluginDigest } from './seal.mjs'
 import { pluginRelease, pluginFiles, installedPlugins } from './verify.mjs'
 import { historyRows } from './rows.mjs'
-import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, tempRoots, FILE_MAX } from './files.mjs'
+import { find as findFile, read as readFile, place as placeFile, write as writeFile, digest, FileError, fileRoots, tempRoots, sessionRoot, FILE_MAX } from './files.mjs'
 import { takeFromPlugin } from './agent.mjs'
+
+// How recently a session has to have been active for a file to be opened from its folder, or taken into it, as its own
+const SESSION_FOLDER_DAYS = 90
 
 export const VERSION = '6.2.10'
 
@@ -191,6 +194,15 @@ export async function run(config, flags = {}) {
     takesFiles = !!takesInto?.length
   }
   refreshFileRoots()
+  // And the folder of the session a file is asked for by, as this machine's index has it, beside those: a device of the
+  // account's may ask that session to do anything in it already, so what is in it is opened, and a file sent to that
+  // session or changed from there is taken into it. So a session run from an app this machine does not count as a
+  // person's still has its project's files opened: Claude Code driven by its SDK, as T3 Code does, whose folders are not
+  // ones sessions may be started in (deon, 2026-10-31: "This is in the active project I'm working in"). Not where
+  // agent.json names the folders for this ("files": [...]) or turns them off; not the home folder or above it, a
+  // temporary folder or one inside a folder whose name starts with a dot (host.usedFolder); and only for a session that
+  // was active here in the last 90 days.
+  const sessionFolder = (sid) => (Array.isArray(config.files) || config.files === false || typeof sid !== 'string' || !sid ? [] : sessionRoot(store.session(sid), { usedFolder: host.usedFolder, days: SESSION_FOLDER_DAYS }))
   // And files are taken from the account's own devices: one sent to a session's folder, or one that was opened from here
   // and is written back changed. Into the folders sessions may be started in, where those devices can have anything
   // done already by asking a session; and into the folders named only for opening files (`"files": [...]`) where the
@@ -584,7 +596,7 @@ export async function run(config, flags = {}) {
     'file.read': async ({ path: target, cwd, sid, near } = {}) => {
       if (!servesFiles) throw new HostError(config.files === false ? 'opening files is turned off on this machine (agent.json, "files")' : 'this machine opens files only from the folders its owner named, and none are named: the ones sessions may be started in (the installer\'s --spawn), or others for this (--files)')
       try {
-        const found = await findFile(target, { cwd: typeof cwd === 'string' && cwd ? cwd : (store.session(String(sid ?? ''))?.cwd ?? ''), near, within: filesFrom })
+        const found = await findFile(target, { cwd: typeof cwd === 'string' && cwd ? cwd : (store.session(String(sid ?? ''))?.cwd ?? ''), near, within: [...filesFrom, ...sessionFolder(sid)] })
         const { bytes, ...listing } = await readFile(found)
         const { real, ...where } = found
         const file = seal({ ...where, name: path.basename(found.path), sep: path.sep }, sealKey)
@@ -625,7 +637,8 @@ export async function run(config, flags = {}) {
     // is held. Its first piece comes with the order, and one of more pieces hands the rest
     // over after, as it is asked for them.
     'file.write': async ({ path: target, name, into, cwd, sid, size, sha, was, parts, ask, data } = {}) => {
-      if (!takesFiles) throw new HostError(config.upload === false ? 'taking files is turned off on this machine (agent.json, "upload")' : 'this machine takes files only into the folders sessions may be started in (the installer\'s --spawn), and none are named; its agent.json can have them taken into the folders it opens files from as well ("upload": true)')
+      const intoSession = config.upload === false ? [] : sessionFolder(sid)
+      if (!takesFiles && !intoSession.length) throw new HostError(config.upload === false ? 'taking files is turned off on this machine (agent.json, "upload")' : 'this machine takes files only into the folders sessions may be started in (the installer\'s --spawn), and none are named; its agent.json can have them taken into the folders it opens files from as well ("upload": true)')
       if (!Number.isInteger(size) || size < 0 || typeof sha !== 'string' || sha.length > 64 || !Number.isInteger(parts)) throw new HostError('what that file is was not said')
       // (a file that was opened is written back over what was read, and over nothing else: which that was has to be said)
       if (target && (typeof was !== 'string' || !was)) throw new HostError('which file that takes the place of was not said')
@@ -635,7 +648,7 @@ export async function run(config, flags = {}) {
       // (`ask`: what the device that asked will know the answer to this by, said back sealed with what was written)
       const want = { size, sha, was: typeof was === 'string' ? was : undefined, parts, ask: typeof ask === 'string' && ask.length <= 64 ? ask : undefined }
       try {
-        want.where = await placeFile(target ? { path: target } : { name, into }, { cwd: typeof cwd === 'string' && cwd ? cwd : (store.session(String(sid ?? ''))?.cwd ?? ''), within: takesInto, own: ownHome })
+        want.where = await placeFile(target ? { path: target } : { name, into }, { cwd: typeof cwd === 'string' && cwd ? cwd : (store.session(String(sid ?? ''))?.cwd ?? ''), within: [...(takesInto ?? []), ...intoSession], own: ownHome })
         const piece = pieceOf(data, parts)
         if (parts <= 1) return await written(want, piece ? [piece] : [])
         const waiting = [...held(arriving)]
