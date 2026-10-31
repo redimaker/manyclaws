@@ -11,7 +11,8 @@
 //
 // A file is found, and read, only inside the folders this machine opens files from
 // (`within`): the ones its owner lets sessions be started in, or the ones named for this
-// in its agent.json, and the temporary ones (`tempRoots`). Where it really is decides,
+// in its agent.json, the folder of the session it is asked for by (service.mjs), and the
+// temporary ones (`tempRoots`). Where it really is decides,
 // links followed: a link inside those folders to a file outside them opens nothing. So a
 // phone or a browser of the account's reads the projects it works in, and what its
 // sessions left in the temporary folders, and not the rest of the machine.
@@ -61,7 +62,16 @@ async function inside(p, within) {
   const real = await fs.promises.realpath(p).catch(() => null)
   return real && within.some((root) => sameCase(real) === sameCase(root) || sameCase(real).startsWith(sameCase(root.endsWith(path.sep) ? root : root + path.sep))) ? real : null
 }
-export const OUTSIDE = 'that file is outside the folders this machine opens files from: the ones sessions may be started in or its agent.json names ("files"), and the temporary ones'
+// The folder of a session (as this machine's index has it: `{ cwd, last_ts }`) as one files are opened from for it,
+// and taken into: where it really is, where the session was active in the last `days`, and the folder is one a person
+// may have used (`usedFolder`: not the home folder or above it, a temporary folder or one inside a folder whose name
+// starts with a dot). Empty otherwise.
+export function sessionRoot(session, { usedFolder, days = 90, now = Date.now() }) {
+  if (!session?.cwd || !(session.last_ts >= now - days * 86400_000)) return []
+  const real = fileRoots([session.cwd])?.[0]
+  return real && usedFolder(real) ? [real] : []
+}
+export const OUTSIDE = 'that file is outside the folders this machine opens files from: the folder of the session it is asked for by, the ones sessions may be started in or its agent.json names ("files"), and the temporary ones'
 
 // The ways a link's target may be read: the path in it, and the line it points at. Most
 // likely first: a line written after the path is taken as one before the whole is tried
