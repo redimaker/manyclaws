@@ -1937,7 +1937,7 @@ function route() {
   if (live) return openSession(decodeURIComponent(live[1]))
   if (past) {
     const q = new URLSearchParams(query)
-    return openPast(past[1], decodeURIComponent(past[2]), { at: q.get('at') ?? '', sub: q.get('sub') ?? '' })
+    return openPast(past[1], decodeURIComponent(past[2]), { at: q.get('at') ?? '', sub: q.get('sub') ?? '', to: q.get('to') ?? '', upto: q.get('upto') ?? '', words: q.get('q') ?? '' })
   }
   if (fresh) return openNew(fresh[1])
   closeSession()
@@ -2687,7 +2687,8 @@ function renderLanes() {
         return h(
           'div',
           { class: 'lane-block' + (b.rough ? ' rough' : '') + (b.cont ? ' cont' : '') + (tall < 40 ? ' short' : '') + (app.lanesPeek?.key === key ? ' peeking' : ''), 'data-key': key, style: { top: top + 'px', height: tall + 'px', '--lines': String(when ? lines - 1 : lines) } },
-          h('a', { class: 'lane-open', href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}?at=${encodeURIComponent(b.uuid)}`, title: about }, h('span', { class: 'lane-says' }, b.says || 'No prompt'), when && h('span', { class: 'lane-span' }, span, b.n > 1 ? ` · ${b.n} turns` : '')),
+          // (opened at it, with a line beside it in the chat to where the next block begins, or to the end)
+          h('a', { class: 'lane-open', href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}?at=${encodeURIComponent(b.uuid)}&upto=${encodeURIComponent(x.blocks[i + 1]?.uuid ?? 'end')}`, title: about }, h('span', { class: 'lane-says' }, b.says || 'No prompt'), when && h('span', { class: 'lane-span' }, span, b.n > 1 ? ` · ${b.n} turns` : '')),
           h('button', { type: 'button', class: 'lane-eye', title: 'What was said in it', 'aria-label': 'What was said in it', 'aria-expanded': String(app.lanesPeek?.key === key), onclick: () => lanePeek(x, b, x.blocks[i + 1] ?? null, key) }, eyeIcon()),
         )
       }),
@@ -5720,14 +5721,18 @@ function foundNodes(found, { empty, notes = [] } = {}) {
       const row = f.live ? renderRow(f.s) : pastRow(f.s)
       for (const said of row.querySelectorAll('.row-prompt, .row-preview, .row-remind')) said.remove()
       if (f.why) row.querySelector('.row-main').append(h('div', { class: 'row-why' }, f.why))
+      // (what Claude Haiku found opens at the stretch of it it named, with the line beside it)
+      if (f.at && row.matches('a[href]')) row.setAttribute('href', `#/m/${mid}/${encodeURIComponent(f.s.id)}?at=${encodeURIComponent(f.at)}&to=${encodeURIComponent(f.to || f.at)}`)
       nodes.push(row)
-      for (const hit of f.hits ?? []) nodes.push(h('a', { class: 'hit', 'data-depth': 1, href: `#/m/${mid}/${encodeURIComponent(f.s.id)}?at=${encodeURIComponent(hit.uuid)}` }, h('span', { class: 'hit-role' }, HIT_ROLES[hit.role] ?? hit.role), ...marked(hit.snippet)))
+      for (const hit of f.hits ?? []) nodes.push(h('a', { class: 'hit', 'data-depth': 1, href: `#/m/${mid}/${encodeURIComponent(f.s.id)}?at=${encodeURIComponent(hit.uuid)}` + searchedWords() }, h('span', { class: 'hit-role' }, HIT_ROLES[hit.role] ?? hit.role), ...marked(hit.snippet)))
     }
   }
   if (!found.length && empty) nodes.push(h('div', { class: 'list-empty' }, empty))
   for (const n of notes) nodes.push(h('div', { class: 'list-empty' }, n))
   return nodes
 }
+// (what was searched for, for the chat a hit opens to mark)
+const searchedWords = () => (app.search.q ? '&q=' + encodeURIComponent(app.search.q) : '')
 const searchNotes = (data) => [data.unreachable?.length && 'Not searched (offline): ' + data.unreachable.join(', '), data.indexing && `Still indexing ${data.indexing} files; more may turn up.`, !app.machines.size && 'Search covers machines running the ManyClaws agent; none is connected.'].filter(Boolean)
 
 // Machines with matches, then a machine's projects, a project's sessions, a session's matches
@@ -5770,7 +5775,7 @@ function textNodes() {
         if (!hits) nodes.push(note(3, 'Reading the results…'))
         else if (hits.failed) nodes.push(note(3, "The machine didn't answer."))
         for (const hit of hits?.hits ?? []) {
-          const to = `#/m/${mid}/${encodeURIComponent(s.id)}?at=${encodeURIComponent(hit.uuid)}` + (hit.subagent ? '&sub=' + hit.subagent : '')
+          const to = `#/m/${mid}/${encodeURIComponent(s.id)}?at=${encodeURIComponent(hit.uuid)}` + (hit.subagent ? '&sub=' + hit.subagent : '') + searchedWords()
           nodes.push(h('a', { class: 'hit', 'data-depth': 3, href: to }, h('span', { class: 'hit-role' }, HIT_ROLES[hit.role] ?? hit.role, hit.subagent ? ' (subagent)' : ''), ...marked(hit.snippet)))
         }
         if (hits && hits.total > hits.hits.length) nodes.push(h('button', { type: 'button', class: 'more-link', 'data-depth': 3, onclick: () => loadSearchHits(mid, s.id, true) }, `${hits.total - hits.hits.length} more…`))
@@ -5814,7 +5819,8 @@ const haikuAsk = (q, folders) =>
     `${HAIKU_SAYS} ${q}`,
     `They are JSON Lines files under ${folders.join(' and ')}: a folder for each project, in which a session's transcript is <session id>.jsonl, and its subagents' are under <session id>/subagents/. Search them with Bash, and with nothing but ${Object.keys(HAIKU_SHELL).join(', ')}, joined by | where you need to, on paths under that folder written out in full (no ~, no ..), with no redirection but 2>/dev/null, and none of ; && $( ) or backticks. Read a part of one with the Read tool. Nothing else will be allowed. Search for the words and for words that mean the same, and read around what you find to judge it. Leave out any session whose first message begins "${HAIKU_SAYS}": those are searches like this one.`,
     `The transcripts are large: most are far more than Read takes at once (25,000 tokens), and one line of one, a whole message, can be thousands of characters long. Never Read one whole, nor without offset and limit, and never print whole lines of one: first list the files that match (grep -l -r -i 'word' ${folders[0]} --include='*.jsonl'), then print only the few characters around each match (grep -o -i -E '.{0,120}word.{0,120}' <file> | head -20).`,
-    'Reply with the sessions that match best, at most ten, the best first, one to a line, as: <session id> — <what in it matches, in a few words>. Reply with that list and nothing else. If none matches, reply: none',
+    'Each line of a transcript is a JSON object with a "uuid" of its own. For each session you name, find the "uuid" of the first line and of the last line of the part of it that matches: grep -n -i \'word\' <file> | grep -o -E \'"uuid":"[0-9a-f-]{36}"\' prints those of the lines with the word, in order.',
+    'Reply with the sessions that match best, at most ten, the best first, one to a line, as: <session id> <uuid of the first line that matches> <uuid of the last line that matches> — <what in it matches, in a few words>. Reply with that list and nothing else. If none matches, reply: none',
   ].join('\n\n')
 const haikuSaid = new Set() // the prompts of its that were answered here
 // What this device asks Haiku with, and whether it says first what that spends: low effort, and said, to begin with
@@ -6011,11 +6017,13 @@ async function haikuRead(run) {
   haikuStop(run)
   const seen = new Set([run.sid, ...(app.haiku?.runs ?? []).map((x) => x.sid)])
   run.found = []
+  // (each line: the session, then the first and the last line of what matches in it where it said them, then why)
   for (const line of said.split('\n')) {
-    const m = /\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b(?:\.jsonl)?\W*(.*)$/i.exec(line)
-    if (!m || seen.has(m[1].toLowerCase())) continue
-    seen.add(m[1].toLowerCase())
-    run.found.push({ mid: run.mid, sid: m[1].toLowerCase(), why: m[2].replace(/^[\s—–:|*_-]+|[*_\s]+$/g, '') })
+    const ids = [...line.matchAll(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi)].map((m) => [m[0].toLowerCase(), m.index + m[0].length])
+    if (!ids.length || seen.has(ids[0][0])) continue
+    seen.add(ids[0][0])
+    const why = line.slice(ids.at(-1)[1]).replace(/^(\.jsonl)?[\s—–:|*_"-]+|[*_\s]+$/g, '')
+    run.found.push({ mid: run.mid, sid: ids[0][0], at: ids[1]?.[0] ?? '', to: ids[2]?.[0] ?? '', why })
   }
   run.found = run.found.slice(0, 10)
   // (each as its computer has it: one it does not have is not a session there, whatever Haiku said)
@@ -6083,7 +6091,11 @@ function marked(snippet) {
 const PAST_ROWS = 200
 const FOLLOW_ROWS = 60 // lines read again to see what a running session has written since
 
-async function openPast(mid, sid, { at = '', sub = '' } = {}) {
+// Opened at a place in it (`at`, a line's uuid): a search hit, a prompt, or the first line of a stretch of it, a
+// Timeline block (`upto`: the first line of the next block, which is not its, or `end`) or what Claude Haiku found
+// (`to`: its last line); `words`, what was searched for. The rest of it is there too, read a page at a time as it is
+// scrolled to, and the end of it at a press
+async function openPast(mid, sid, { at = '', sub = '', to = '', upto = '', words = '' } = {}) {
   clearInterval(pastTimer)
   findOpened(sid)
   leaveView()
@@ -6098,20 +6110,21 @@ async function openPast(mid, sid, { at = '', sub = '' } = {}) {
   const kept = app.views.get(key)
   if (kept && (!at || kept.nodes.some((n) => isAt(n, at)))) {
     app.past = kept.past
-    app.past.at = at
+    Object.assign(app.past, { at, span: { to, upto }, words })
     applyChatLook()
     const left = enterView(key)
     renderChips()
     showDraft()
     renderList()
     renderPastHeader()
+    markChat()
     if (!showFound(at)) el('messages').scrollTop = el('messages').scrollHeight - left
     pastTimer = setInterval(followPast, 5000)
     // What's been written since it was put away
     return followPast({ sure: true })
   }
   app.views.delete(key)
-  const p = (app.past = { mid, sid, at, sub, from: 0, to: 0, session: null, loaded: false })
+  const p = (app.past = { mid, sid, at, sub, from: 0, to: 0, session: null, loaded: false, span: { to, upto }, words })
   applyChatLook()
   el('messages').replaceChildren(h('div', { class: 'msg notice' }, 'Reading the transcript…'))
   renderChips()
@@ -6120,9 +6133,11 @@ async function openPast(mid, sid, { at = '', sub = '' } = {}) {
   renderPastHeader()
   const page = await pastPage({ around: at })
   if (!page) return
-  el('messages').replaceChildren(...pastNodes(page))
+  el('messages').replaceChildren(...pastNodes(page), ...laterNodes())
   p.loaded = true
   watchEarlier()
+  watchLater()
+  markChat()
   // The place a search hit pointed at, or the end
   if (!showFound(at)) scrollToEnd()
   refoldSoon()
@@ -6138,9 +6153,129 @@ function showFound(at) {
   for (const node of box.querySelectorAll('.msg.found')) node.classList.remove('found')
   const hit = at && [...box.querySelectorAll('.msg')].find((n) => isAt(n, at))
   if (!hit) return false
-  hit.classList.add('found')
-  hit.scrollIntoView({ block: 'center' })
+  // (a stretch from its start, with the line beside it; a hit in the middle of what is in sight)
+  const span = app.past && app.past.at === at && (app.past.span?.to || app.past.span?.upto)
+  if (!span) hit.classList.add('found')
+  hit.scrollIntoView({ block: span ? 'start' : 'center' })
   return true
+}
+
+// ---- What the chat was opened at, marked in it, and kept so as rows come and go: a stretch of it (a Timeline block, or
+// what Claude Haiku found) has a line down its right from its first row to its last, and the words searched for (in
+// the list, or in Search this session) are marked wherever they are (deon, 2026-10-31: "it should run a line on the
+// right of the session indicating where the block start and end", "It should highlight the words you're searching
+// for")
+function markSpan() {
+  const box = el('messages')
+  const rows = [...box.querySelectorAll(':scope > .msg')]
+  for (const row of rows) row.classList.remove('in-span', 'span-first', 'span-last')
+  const p = app.past
+  const span = p?.span
+  if (!p?.at || !(span?.to || span?.upto)) return []
+  const first = rows.findIndex((n) => isAt(n, p.at))
+  if (first < 0) return []
+  const marked = []
+  for (let i = first; i < rows.length; i++) {
+    const row = rows[i]
+    // (up to the first line of the next block, which is not this one's; or up to and with its last line, every row of it)
+    if (span.upto && span.upto !== 'end' && i > first && isAt(row, span.upto)) break
+    if (span.to && marked.length && !isAt(row, span.to) && isAt(marked.at(-1), span.to)) break
+    row.classList.add('in-span')
+    marked.push(row)
+  }
+  marked[0]?.classList.add('span-first')
+  // (where its end is not here yet, the line goes on to the last row there is)
+  const ends = span.upto === 'end' || (span.upto ? rows.some((n, i) => i > first && isAt(n, span.upto)) : isAt(marked.at(-1), span.to))
+  if (ends) marked.at(-1)?.classList.add('span-last')
+  return marked
+}
+// The line: one, down the chat's right edge, beside its first row to its last
+const spanWatch = new ResizeObserver(() => placeSpan())
+function placeSpan() {
+  const box = el('messages')
+  const rows = [...box.querySelectorAll(':scope > .msg.in-span')]
+  let line = box.querySelector(':scope > .span-line')
+  if (!rows.length) return void line?.remove()
+  if (!line) box.append((line = h('div', { class: 'span-line', 'aria-hidden': 'true' })))
+  const top = rows[0].offsetTop
+  line.classList.toggle('open', !rows.at(-1).classList.contains('span-last'))
+  line.style.top = top + 'px'
+  line.style.height = rows.at(-1).offsetTop + rows.at(-1).offsetHeight - top + 'px'
+}
+const FOUND_WORDS = 'found-words'
+function markWords() {
+  if (!globalThis.CSS?.highlights || typeof Highlight === 'undefined') return
+  const q = app.find?.q || app.past?.words || ''
+  const words = [...new Set(q.toLowerCase().split(/[^\p{L}\p{N}_]+/u).filter((w) => w.length > 1))]
+  if (!words.length) return void CSS.highlights.delete(FOUND_WORDS)
+  const ranges = []
+  const walk = document.createTreeWalker(el('messages'), NodeFilter.SHOW_TEXT)
+  for (let node = walk.nextNode(); node && ranges.length < 5000; node = walk.nextNode()) {
+    if (!node.parentElement?.closest('.msg')) continue
+    const text = node.data.toLowerCase()
+    for (const w of words)
+      for (let i = text.indexOf(w); i >= 0; i = text.indexOf(w, i + w.length)) {
+        const range = new Range()
+        range.setStart(node, i)
+        range.setEnd(node, i + w.length)
+        ranges.push(range)
+      }
+  }
+  CSS.highlights.set(FOUND_WORDS, new Highlight(...ranges))
+}
+function markChat() {
+  spanWatch.disconnect()
+  const rows = markSpan()
+  for (const row of rows) spanWatch.observe(row)
+  placeSpan()
+  markWords()
+}
+// (and again as rows are added, drawn again or folded, a moment after)
+let markTimer = 0
+new MutationObserver((changes) => {
+  // (not for the line itself, put in or taken out)
+  if (changes.every((c) => c.type === 'childList' && [...c.addedNodes, ...c.removedNodes].every((n) => n.classList?.contains('span-line')))) return
+  clearTimeout(markTimer)
+  markTimer = setTimeout(markChat, 120)
+}).observe(el('messages'), { childList: true, subtree: true, characterData: true })
+
+// ---- The rows after the page it was opened at: read a page at a time as they are scrolled to, and all of them at a
+// press, at the foot of what is in sight, which goes to the end
+const laterWatch = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && loadLater(), { root: el('messages'), rootMargin: '0px 0px 600px 0px' })
+function laterNodes() {
+  const p = app.past
+  if (!p || !(p.to < p.total)) return []
+  return [h('button', { type: 'button', class: 'later', onclick: () => loadLater() }, 'Later messages…'), h('button', { type: 'button', class: 'to-end', title: 'The latest messages', onclick: () => loadLater({ all: true }) }, 'Latest ↓')]
+}
+function watchLater() {
+  laterWatch.disconnect()
+  const button = el('messages').querySelector(':scope > .later')
+  if (button) laterWatch.observe(button)
+}
+async function loadLater({ all = false } = {}) {
+  const p = app.past
+  if (!p?.loaded || !(p.to < p.total)) return all && scrollToEnd()
+  if (app.loadingLater) return all && (app.laterAll = true)
+  app.loadingLater = true
+  app.laterAll = all
+  const box = el('messages')
+  try {
+    while (app.past === p && p.to < p.total) {
+      const size = app.laterAll ? 1000 : PAST_ROWS
+      const page = await pastPage({ before: p.to + size, limit: size, keep: true })
+      if (!page || app.past !== p) return
+      for (const old of box.querySelectorAll(':scope > .later, :scope > .to-end')) old.remove()
+      p.to = Math.max(p.to, page.to)
+      box.append(...pastNodes(page, { follow: true }), ...laterNodes())
+      if (!app.laterAll) break
+    }
+    if (app.past !== p) return
+    watchLater()
+    refoldSoon()
+    if (app.laterAll) scrollToEnd()
+  } finally {
+    app.loadingLater = false
+  }
 }
 
 // ---- Search in the open session (the bar over its chat): the whole of its transcript as its computer's agent finds it
@@ -6168,6 +6303,8 @@ async function runFind() {
   const q = el('find-q').value.trim()
   const t = findTarget()
   const asking = (app.find = { sid: t?.sid ?? null, q, hits: [], open: true })
+  // (emptied, nothing is marked: not what it was opened at from a search either)
+  if (!q && app.past) app.past.words = ''
   if (!q || !t) return showFind()
   if (t.ask && app.key) {
     el('find-says').textContent = 'Searching…'
@@ -6197,6 +6334,7 @@ async function runFind() {
 function showFind() {
   const f = app.find ?? { q: '', hits: [] }
   const box = el('find-hits')
+  markWords()
   if (!f.q) {
     el('find-says').textContent = ''
     box.hidden = true
@@ -6224,7 +6362,7 @@ function goFind(hit) {
   }
   // (where the page has that row already, it is gone to; otherwise the chat is opened there, from its computer)
   if (!hit.subagent && !(app.past?.sub) && showFound(hit.uuid)) return
-  location.hash = `#/m/${f.t.mid}/${encodeURIComponent(f.t.sid)}?at=${encodeURIComponent(hit.uuid)}` + (hit.subagent ? '&sub=' + hit.subagent : '')
+  location.hash = `#/m/${f.t.mid}/${encodeURIComponent(f.t.sid)}?at=${encodeURIComponent(hit.uuid)}` + (hit.subagent ? '&sub=' + hit.subagent : '') + (f.q ? '&q=' + encodeURIComponent(f.q) : '')
 }
 el('find-q').addEventListener('input', () => {
   clearTimeout(findTimer)
@@ -6244,7 +6382,7 @@ for (const ev of ['focus', 'click']) el('find-q').addEventListener(ev, () => app
 // (a press anywhere else puts the hits away; what was searched for stays in the box)
 document.addEventListener('pointerdown', (ev) => app.find?.open && !ev.target.closest?.('#find') && ((app.find.open = false), showFind()))
 
-async function pastPage({ around = '', before } = {}) {
+async function pastPage({ around = '', before, limit = PAST_ROWS, keep = false } = {}) {
   const p = app.past
   // (which session, and where in it, are in the one thing sealed for the machine: it reads nothing beside that.
   // Where this device has no key there is nothing to ask with, and that is said.)
@@ -6252,11 +6390,13 @@ async function pastPage({ around = '', before } = {}) {
     el('messages').replaceChildren(h('div', { class: 'msg notice' }, NO_KEY_MACHINE))
     return null
   }
-  const r = await fetch(`/api/machines/${p.mid}/sessions/${encodeURIComponent(p.sid)}/messages?` + (await askOf({ sid: p.sid, limit: PAST_ROWS, around: around || undefined, before, subagent: p.sub ? Number(p.sub) : undefined }))).catch(() => null)
+  const r = await fetch(`/api/machines/${p.mid}/sessions/${encodeURIComponent(p.sid)}/messages?` + (await askOf({ sid: p.sid, limit, around: around || undefined, before, subagent: p.sub ? Number(p.sub) : undefined }))).catch(() => null)
   if (r?.status === 401) return showLogin()
   if (app.past !== p) return null
   if (!r?.ok) {
     const { error } = (await r?.json().catch(() => ({}))) ?? {}
+    // (a page more of one that is drawn leaves what is drawn as it is)
+    if (keep) return null
     el('messages').replaceChildren(h('div', { class: 'msg notice' }, 'This session could not be read: ' + (error ?? 'the server did not answer') + '.'))
     return null
   }
@@ -6289,6 +6429,7 @@ function pastNodes(page, { follow = false } = {}) {
     }
     const node = renderMessage(m)
     if (m.uuid) node.dataset.uuid = m.uuid
+    if (m.ts) node.dataset.ts = m.ts
     if (m.role === 'user') node._prompt = m.text
     nodes.push(node)
   }
@@ -6300,7 +6441,7 @@ async function loadEarlier() {
   if (!p || app.loadingEarlier) return
   app.loadingEarlier = true
   try {
-    const page = await pastPage({ before: p.from })
+    const page = await pastPage({ before: p.from, keep: true })
     if (!page) return
     const box = el('messages')
     const fromEnd = box.scrollHeight - box.scrollTop
@@ -6323,6 +6464,11 @@ async function followPast({ sure = false } = {}) {
   if (!r?.ok || app.past !== p) return
   const page = await r.json()
   p.session = page.session ?? p.session
+  // (where what is drawn does not reach its end, what is written since is read with the rest of it, as it is scrolled to)
+  if (p.to < p.total && page.total >= p.to) {
+    p.total = page.total
+    return renderPastHeader()
+  }
   if (page.to === p.to && page.total === p.total) return renderPastHeader()
   // Rewound or rewritten under this page, or more was written than this look back covers: it's read afresh
   if (page.to < p.to || page.from > p.to) {
