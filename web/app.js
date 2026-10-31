@@ -100,6 +100,7 @@ const app = {
   haiku: null, // the last search Haiku was asked for, on each computer that could start one: { q, runs: [{ mid, sid, state, folders, found, why }] }
   lanes: null, // the Timeline, as the computers last said it: { items, computers, asked, loaded, unreachable, missed, loading, locked, failed }
   lanesTimer: 0,
+  lanesPeek: null, // the block whose eye is open on the Timeline, and what was read of it: { key, x, b, got, error }
   drafts: {}, // what's typed and not sent, by session: { text, at }
   expect: null, // a session just started or resumed, not reporting yet: { sid, mid, until }
   computer: null, // the computer whose own page is showing: { mid, known, cwd, mode, read, reading, starting, error, colorError }
@@ -472,7 +473,7 @@ function h(tag, attrs, ...children) {
     if (v === undefined || v === null || v === false) continue
     if (k === 'class') node.className = v
     // (a style is set by the script, property by property: the page's policy runs no style written into an attribute)
-    else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v)
+    else if (k === 'style' && typeof v === 'object') for (const [name, value] of Object.entries(v)) name.startsWith('--') ? node.style.setProperty(name, value) : (node.style[name] = value)
     else if (k.startsWith('on')) listen(node, k.slice(2), v)
     else node.setAttribute(k, v === true ? '' : v)
   }
@@ -2374,18 +2375,22 @@ function promptRow(x) {
 // at the top, every lane on the same clock, which is given at the left; a stretch where nothing was said anywhere is
 // drawn short, as a faint break that says how long it was. The lane with the latest in it is at the left, so that the
 // lanes' tops step down from left to right, and the order is worked out again once in half an hour, not as each goes
-// on (deon, 2026-10-30: "at least after 30 minutes it will form a church organ"). Lines join a session to the one it was forked from,
-// and a block to one in another session that carries on with the same thing soon after. A press on a block opens its
-// session there, as a search hit does. For a large screen: it takes the whole window, and the way to it is not shown on a
-// phone.
+// on (deon, 2026-10-30: "at least after 30 minutes it will form a church organ"). Lines join a session to the one it
+// was forked from, and a block to one in another session that carries on with the same thing soon after. A press on a
+// block opens its session there, as a search hit does. It takes the whole window; on a phone, two lanes at a time, which
+// fill its width and are swiped sideways a lane at a time (deon, 2026-10-30: "Support this on the phone as well with 2
+// lanes and left-right scrolling").
 const LANES_DAYS = 7
 const LANES_ORDER_MS = 30 * 60_000 // how long the lanes keep their order (deon: "only update this sort order once every 30 mins")
 const LANES_AGAIN_MS = 60_000 // how often what the computers have is read again while the Timeline is open
 const LANE_W = [176, 280] // how wide a lane is, at the least and the most
 const LANES_AXIS = 84 // the clock at the left
+const LANES_AXIS_PHONE = 58 // (on a phone, where its days are said shorter)
+const LANES_PHONE = 2 // how many lanes a phone shows side by side
+const lanesAxis = () => (phoneLayout() ? LANES_AXIS_PHONE : LANES_AXIS)
 const LANE_MIN = 24 // the least a block is drawn tall, to say anything in
 const LANES_BREAK_MS = 45 * 60_000 // a stretch with nothing said anywhere that is drawn as a break
-const LANES_BREAK_PX = 36 // (room in it for how long it was, over the day the clock says under it)
+const LANES_BREAK_PX = 42 // (room in it for how long it was, over the day the clock says under it)
 const LANES_LINK_MS = 3 * 3600_000 // a block carries on with one in another session that ended at most this long before it
 
 async function loadLanes() {
@@ -2410,8 +2415,12 @@ async function loadLanes() {
     computers.push({ mid, name: x.machine?.name ?? '', on: got.on === true, pending: Number(got.pending) || 0, working: got.working ?? null, why: typeof got.why === 'string' ? got.why : '', indexing: got.indexing ?? 0 })
     for (const s of got.sessions) {
       if (typeof s?.sid !== 'string' || !Array.isArray(s.blocks)) continue
-      // (a block is a minute long at the least, so that it has a place on the clock)
-      const blocks = s.blocks.filter((b) => typeof b?.uuid === 'string' && Number.isFinite(b.ts)).map((b) => ({ ...b, end: Math.max(b.ts + 60_000, Number(b.end) || 0), n: Number(b.n) || 1, says: String(b.says ?? ''), tags: Array.isArray(b.tags) ? b.tags.map(String) : [] }))
+      // (a block is a minute long at the least, so that it has a place on the clock; none goes on past now, nor past the
+      // start of the next in its lane, which it would be drawn over)
+      const blocks = s.blocks
+        .filter((b) => typeof b?.uuid === 'string' && Number.isFinite(b.ts))
+        .sort((a, b) => a.ts - b.ts)
+        .map((b, i, all) => ({ ...b, end: Math.max(b.ts, Math.min(asked, all[i + 1]?.ts ?? Infinity, Math.max(b.ts + 60_000, Number(b.end) || 0))), n: Number(b.n) || 1, says: String(b.says ?? ''), tags: Array.isArray(b.tags) ? b.tags.map(String) : [] }))
       if (blocks.length) items.push({ ...s, key: `${mid}/${s.sid}`, mid, machine: x.machine?.name ?? '', blocks })
     }
   }
@@ -2577,6 +2586,23 @@ function svgOf(tag, attrs = {}) {
   return node
 }
 
+// A lane's color: its project's, so that a project is the same color in every lane it is in, and the eye follows it from
+// one session to the next. Only ever a thin edge and a short bar, whole, on the site's plain grey surfaces: mixed into
+// the dark as a fill, a yellow or a green is mud (deon, 2026-10-29, of the Timeline in a computer's yellow: "This is
+// still an ugly color"). Warm, as the site's own colors are, and none of them blue or purple
+const LANE_HUES = ['#e2664a', '#e3b04b', '#86c08f', '#e483a6', '#cdb48e', '#a9a69b']
+function laneHue(cwd) {
+  let n = 7
+  for (const c of folderOf(cwd) || String(cwd ?? '')) n = (n * 31 + c.charCodeAt(0)) >>> 0
+  return LANE_HUES[n % LANE_HUES.length]
+}
+// (an eye, drawn as the page's other icons are)
+function eyeIcon() {
+  const svg = svgOf('svg', { viewBox: '0 0 20 20', width: 14, height: 14, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })
+  svg.append(svgOf('path', { d: 'M1.75 10S4.75 4.25 10 4.25 18.25 10 18.25 10 15.25 15.75 10 15.75 1.75 10 1.75 10Z' }), svgOf('circle', { cx: 10, cy: 10, r: 2.75 }))
+  return svg
+}
+
 function renderLanes() {
   const box = el('lanes-body')
   if (!box || el('lanes').hidden) return
@@ -2590,12 +2616,17 @@ function renderLanes() {
   const now = Date.now()
   const lanes = lanesInOrder(got.items, now - (got.loaded || 0) < 2 * LANES_AGAIN_MS).filter((x) => shown.has(x.key))
   const clock = lanesClock(lanes, now)
-  const wide = Math.min(LANE_W[1], Math.max(LANE_W[0], Math.floor((box.clientWidth - LANES_AXIS - 2) / lanes.length)))
+  const phone = phoneLayout()
+  const clockWide = lanesAxis()
+  el('lanes').style.setProperty('--lanes-axis', clockWide + 'px')
+  // (on a phone, two at a time, which fill its width)
+  const wide = phone ? Math.floor((box.clientWidth - clockWide) / Math.min(LANES_PHONE, lanes.length)) : Math.min(LANE_W[1], Math.max(LANE_W[0], Math.floor((box.clientWidth - LANES_AXIS - 2) / lanes.length)))
   const place = new Map(lanes.map((x, i) => [x.key, i]))
   const middle = (x) => place.get(x.key) * wide + wide / 2
   const timeOf = (ts) => new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  const dayOf = (ts) => new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
-  // The heads: what each session is called, where it is, and what it was forked from
+  // (on a phone, the weekday and the day of the month: Fri 30)
+  const dayOf = (ts) => (phone ? `${new Date(ts).toLocaleDateString(undefined, { weekday: 'short' })} ${new Date(ts).getDate()}` : new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }))
+  // The heads: what each session is called, where it is, and what it was forked from, over a bar in its project's color
   const nameOf = (x) => markOf(x.sid)?.name || app.sessions.get(x.sid)?.title || x.title || (x.first_prompt ?? '').slice(0, 80) || folderOf(x.cwd) || x.sid.slice(0, 8)
   const heads = lanes.map((x) => {
     const live = app.sessions.get(x.sid)
@@ -2606,26 +2637,33 @@ function renderLanes() {
     const state = live && !live.ended && live.online ? live.state : 'past'
     return h(
       'a',
-      { class: 'lane-head', 'data-key': x.key, 'data-color': m?.color || null, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}`, title: name, style: { width: wide + 'px' } },
+      { class: 'lane-head', 'data-key': x.key, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}`, title: name, style: { width: wide + 'px', '--lane': laneHue(x.cwd) } },
       h('span', { class: 'lane-name' }, h('span', { class: 'dot ' + state, title: STATE_LABEL[state] ?? 'Not running' }), h('span', { class: 'lane-title' }, name)),
       h('span', { class: 'lane-where' }, dotted(folderOf(x.cwd), whereLabel(m ? machineName(m) : x.machine, x.mid))),
-      x.fork && h('span', { class: 'lane-fork', title: 'Forked from ' + (from || 'another session') }, '↳ from ', from || 'another session'),
+      x.fork && h('span', { class: 'lane-fork', title: 'Forked from ' + (from || 'another session') }, '↳ ', from || 'another session'),
     )
   })
-  // The blocks
+  // The blocks: what each was about, and under it, where there is room, when and how long; an eye at the top of each,
+  // which opens what was said in it
   const cols = lanes.map((x) =>
     h(
       'div',
-      { class: 'lane', 'data-key': x.key, style: { left: place.get(x.key) * wide + 'px', width: wide + 'px' } },
-      x.blocks.map((b) => {
+      { class: 'lane', 'data-key': x.key, style: { left: place.get(x.key) * wide + 'px', width: wide + 'px', '--lane': laneHue(x.cwd) } },
+      x.blocks.map((b, i) => {
         const top = clock.y(b.end)
         const tall = Math.max(LANE_MIN - 2, clock.y(b.ts) - top - 2)
-        const when = `${dayOf(b.ts)}, ${timeOf(b.ts)}${b.end - b.ts >= 60_000 ? ' – ' + timeOf(b.end) : ''}`
-        const about = [b.rough ? `${b.says || 'No prompt'} (not read by Claude Haiku yet: named by its first prompt)` : b.says, when, `${b.n} turn${b.n === 1 ? '' : 's'}`, b.tags.join(', ')].filter(Boolean).join('\n')
+        const span = `${timeOf(b.ts)}${b.end - b.ts >= 2 * 60_000 ? ' – ' + timeOf(b.end) : ''}`
+        const about = [b.rough ? `${b.says || 'No prompt'} (not read by Claude Haiku yet: named by its first prompt)` : b.says, `${dayOf(b.ts)}, ${span}`, `${b.n} turn${b.n === 1 ? '' : 's'}`, b.tags.join(', ')].filter(Boolean).join('\n')
+        const key = `${x.key}/${b.uuid}`
+        // (as many lines of what it was about as it has room for, whole; and the line of when under them where there is
+        // room for that as well)
+        const lines = Math.max(1, Math.floor((tall - 8) / 16.25))
+        const when = tall >= 44 && lines >= 2
         return h(
-          'a',
-          { class: 'lane-block' + (b.rough ? ' rough' : '') + (b.cont ? ' cont' : '') + (tall < 40 ? ' short' : ''), 'data-color': app.machines.get(x.mid)?.color || null, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}?at=${encodeURIComponent(b.uuid)}`, title: about, style: { top: top + 'px', height: tall + 'px' } },
-          h('span', { class: 'lane-says' }, b.says || 'No prompt'),
+          'div',
+          { class: 'lane-block' + (b.rough ? ' rough' : '') + (b.cont ? ' cont' : '') + (tall < 40 ? ' short' : '') + (app.lanesPeek?.key === key ? ' peeking' : ''), 'data-key': key, style: { top: top + 'px', height: tall + 'px', '--lines': String(when ? lines - 1 : lines) } },
+          h('a', { class: 'lane-open', href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}?at=${encodeURIComponent(b.uuid)}`, title: about }, h('span', { class: 'lane-says' }, b.says || 'No prompt'), when && h('span', { class: 'lane-span' }, span, b.n > 1 ? ` · ${b.n} turns` : '')),
+          h('button', { type: 'button', class: 'lane-eye', title: 'What was said in it', 'aria-label': 'What was said in it', 'aria-expanded': String(app.lanesPeek?.key === key), onclick: () => lanePeek(x, b, x.blocks[i + 1] ?? null, key) }, eyeIcon()),
         )
       }),
     ),
@@ -2636,7 +2674,8 @@ function renderLanes() {
   const curve = (x1, y1, x2, y2, kind) => {
     const bend = Math.max(18, Math.abs(y1 - y2) / 2)
     svg.append(svgOf('path', { class: 'lane-link ' + kind, d: `M ${x1} ${y1} C ${x1} ${y1 - bend}, ${x2} ${y2 + bend}, ${x2} ${y2}` }))
-    svg.append(svgOf('circle', { class: 'lane-link-end ' + kind, cx: x1, cy: y1, r: 2.5 }))
+    svg.append(svgOf('circle', { class: 'lane-link-end ' + kind, cx: x1, cy: y1, r: 3 }))
+    svg.append(svgOf('circle', { class: 'lane-link-end ' + kind, cx: x2, cy: y2, r: 2 }))
   }
   const oldest = Math.min(...lanes.map((x) => x.blocks[0].ts))
   for (const x of lanes) {
@@ -2647,27 +2686,232 @@ function renderLanes() {
     curve(middle(parent), clock.y(x.fork.at), middle(x), clock.y(first.ts), 'fork')
   }
   for (const { from, to } of lanesLinks(lanes)) curve(middle(from.x), clock.y(from.b.end), middle(to.x), clock.y(to.b.ts), 'same')
-  // The clock, and the breaks across every lane
+  // The clock: the day in the serif where it begins, the hours under it, each hour a faint line across every lane; and
+  // the breaks, across every lane, with how long each was
   const axis = h(
     'div',
     { class: 'lanes-axis', style: { height: clock.height + 'px' } },
-    clock.ticks.map((t) => h('span', { class: 'lanes-tick' + (t.day ? ' day' : ''), style: { top: t.y + 'px' } }, t.day && h('b', null, dayOf(t.t)), timeOf(t.t))),
+    // (the latest is now, said as that)
+    clock.ticks.map((t) => h('span', { class: 'lanes-tick' + (t.day ? ' day' : '') + (t.t === now ? ' now' : ''), style: { top: t.y + 'px' } }, t.day && h('b', null, dayOf(t.t)), t.t === now ? h('span', { class: 'lanes-now-word' }, 'now') : timeOf(t.t))),
     clock.breaks.map((b) => h('span', { class: 'lanes-gap', style: { top: b.y + 3 + 'px' }, title: `Nothing was said in any of these sessions from ${dayOf(b.from)}, ${timeOf(b.from)} to ${timeOf(b.to)}` }, lanesGap(b.to - b.from))),
   )
   const area = h(
     'div',
     { class: 'lanes-area', style: { width: width + 'px', height: clock.height + 'px' } },
-    h('div', { class: 'lanes-now', style: { top: clock.y(now) + 'px' } }),
+    clock.ticks.filter((t) => t.t !== now).map((t) => h('div', { class: 'lanes-hour' + (t.day ? ' day' : ''), style: { top: t.y + 'px' } })),
     clock.breaks.map((b) => h('div', { class: 'lanes-break', style: { top: b.y + 'px', height: b.h + 'px' } })),
-    cols,
+    h('div', { class: 'lanes-now', style: { top: clock.y(now) + 'px' } }),
     svg,
+    cols,
   )
   const left = box.scrollLeft
   const down = box.scrollTop
-  fill(box, h('div', { class: 'lanes-grid', style: { gridTemplateColumns: `${LANES_AXIS}px ${width}px` } }, h('div', { class: 'lanes-corner' }, 'Now'), h('div', { class: 'lanes-heads' }, heads), axis, area))
+  fill(box, h('div', { class: 'lanes-grid', style: { gridTemplateColumns: `${clockWide}px ${width}px` } }, h('div', { class: 'lanes-corner' }), h('div', { class: 'lanes-heads' }, heads), axis, area))
   box.scrollLeft = left
   box.scrollTop = down
+  showPeek()
+  lanesEdges()
 }
+
+// ---- Left and right: the lanes are wider than the window as soon as there are more than a few. Over the heads, the
+// wheel goes sideways; the arrow keys do; the background is dragged with the mouse; and at each side where there are
+// more lanes, a button that goes a window's width that way (deon, 2026-10-29: "you need to add left to right scrolling
+// in the timeline")
+function lanesEdges() {
+  const box = el('lanes-body')
+  const more = box.scrollWidth - box.clientWidth
+  el('lanes-left').hidden = !(box.scrollLeft > 4)
+  el('lanes-right').hidden = !(more - box.scrollLeft > 4)
+}
+function lanesSideways(by) {
+  const box = el('lanes-body')
+  box.scrollBy({ left: by, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+}
+// (a window's width, less a little so that a lane in sight before is in sight after; on a phone, where the lanes come to
+// rest each at the clock, the lanes in sight)
+const lanesPage = () => {
+  const box = el('lanes-body')
+  const lane = document.querySelector('#lanes .lane')?.offsetWidth || LANE_W[0]
+  return phoneLayout() ? Math.max(1, Math.round((box.clientWidth - lanesAxis()) / lane)) * lane : Math.max(160, box.clientWidth - LANES_AXIS - 80)
+}
+el('lanes-left').addEventListener('click', () => lanesSideways(-lanesPage()))
+el('lanes-right').addEventListener('click', () => lanesSideways(lanesPage()))
+el('lanes-body').addEventListener('scroll', () => lanesEdges(), { passive: true })
+window.addEventListener('resize', () => !el('lanes').hidden && renderLanes())
+el('lanes-body').addEventListener(
+  'wheel',
+  (ev) => {
+    if (ev.shiftKey || Math.abs(ev.deltaX) >= Math.abs(ev.deltaY) || !ev.target.closest?.('.lanes-heads')) return
+    ev.preventDefault()
+    el('lanes-body').scrollLeft += ev.deltaY
+  },
+  { passive: false },
+)
+document.addEventListener('keydown', (ev) => {
+  if (el('lanes').hidden || ev.altKey || ev.ctrlKey || ev.metaKey || ev.target.closest?.('input, textarea, select, [contenteditable], dialog')) return
+  if (ev.key === 'Escape' && app.lanesPeek) return void (ev.preventDefault(), closePeek())
+  const lane = document.querySelector('#lanes .lane')?.offsetWidth || LANE_W[0]
+  if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') {
+    ev.preventDefault()
+    lanesSideways((ev.key === 'ArrowRight' ? 1 : -1) * (ev.shiftKey ? lanesPage() : lane))
+  }
+})
+// (dragged by its background with the mouse, both ways at once, as a map is)
+let lanesDrag = null
+el('lanes-body').addEventListener('pointerdown', (ev) => {
+  if (ev.pointerType !== 'mouse' || ev.button !== 0 || !ev.target.closest?.('.lanes-area') || ev.target.closest('.lane-block, .lane-peek')) return
+  const box = el('lanes-body')
+  lanesDrag = { x: ev.clientX, y: ev.clientY, left: box.scrollLeft, top: box.scrollTop, id: ev.pointerId }
+  box.setPointerCapture(ev.pointerId)
+  box.classList.add('dragging')
+})
+el('lanes-body').addEventListener('pointermove', (ev) => {
+  if (!lanesDrag || ev.pointerId !== lanesDrag.id) return
+  const box = el('lanes-body')
+  box.scrollLeft = lanesDrag.left - (ev.clientX - lanesDrag.x)
+  box.scrollTop = lanesDrag.top - (ev.clientY - lanesDrag.y)
+})
+for (const type of ['pointerup', 'pointercancel'])
+  el('lanes-body').addEventListener(type, (ev) => {
+    if (!lanesDrag || ev.pointerId !== lanesDrag.id) return
+    lanesDrag = null
+    el('lanes-body').classList.remove('dragging')
+  })
+
+// ---- What was said in a block, from the eye at its top: its first prompt and the first answer to it, and its last
+// prompt and the last answer, each with when; between them, how many turns there were besides. No headings: a prompt
+// is drawn as the chat draws what you typed, an answer as it draws Claude's. Read from the session's transcript on its
+// computer, as the chat reads it: around where the block begins, and around where the next one does (or at the end of
+// the session, for its last). A press on a prompt opens the chat there.
+const PEEK_ROWS = 120
+const PEEK_CHARS = 1500
+const PEEK_KEPT = new Map() // block -> what was read of it
+// (a prompt is one a person typed, as the page judges that elsewhere: NOT_TYPED)
+const peekPrompt = (r) => r?.role === 'user' && !(r.origin && NOT_TYPED.test(r.origin)) && !/^(<|\[Request interrupted)/.test(String(r.text ?? '').trim()) && !!String(r.text ?? '').trim()
+const peekAnswer = (r) => r?.role === 'assistant' && !!String(r.text ?? '').trim()
+const sameRow = (a, b) => !!a && !!b && a.uuid === b.uuid && a.role === b.role && a.text === b.text
+
+async function peekRead(x, asked) {
+  const r = await fetch(`/api/machines/${x.mid}/sessions/${encodeURIComponent(x.sid)}/messages?` + (await askOf({ sid: x.sid, limit: PEEK_ROWS, max: PEEK_CHARS, ...asked }))).catch(() => null)
+  const page = await r?.json().catch(() => null)
+  if (!r?.ok || !page || page.error || !Array.isArray(page.messages)) throw new Error(page?.error ?? 'its computer did not answer')
+  return page
+}
+
+async function peekOf(x, b, next) {
+  const within = (r) => Number.isFinite(r.ts) && r.ts >= b.ts - 1000 && r.ts <= b.end + 1000 && !(next && r.ts >= next.ts)
+  // Where it begins, and on to the first answer in it: a page further where the turn is long
+  let page = await peekRead(x, { around: b.uuid })
+  let rows = page.messages
+  let start = rows.findIndex((r) => r.uuid === b.uuid)
+  if (start < 0) start = rows.findIndex(within)
+  const firstYou = rows.slice(Math.max(0, start)).find((r) => within(r) && peekPrompt(r)) ?? null
+  const from = firstYou ? rows.indexOf(firstYou) : Math.max(0, start)
+  let firstClaude = rows.slice(from).find((r) => within(r) && peekAnswer(r)) ?? null
+  for (let more = 0; !firstClaude && more < 3 && page.to < page.total && (rows.at(-1)?.ts ?? 0) <= b.end; more++) {
+    page = await peekRead(x, { before: page.to + PEEK_ROWS })
+    rows = page.messages
+    firstClaude = rows.find((r) => within(r) && peekAnswer(r)) ?? null
+  }
+  // Where it ends: the last prompt in it and the last answer after that, a page further back where the turn is long
+  let end = await peekRead(x, next ? { around: next.uuid } : {})
+  let tail = end.messages.filter(within)
+  for (let more = 0; !tail.some(peekPrompt) && more < 3 && end.from > 0 && !(end.messages[0]?.ts < b.ts); more++) {
+    end = await peekRead(x, { before: end.from })
+    tail = end.messages.filter(within).concat(tail)
+  }
+  const lastYou = tail.findLast(peekPrompt) ?? null
+  const lastClaude = tail.slice(lastYou ? tail.indexOf(lastYou) : 0).findLast(peekAnswer) ?? null
+  const first = [firstYou && { you: true, row: firstYou }, firstClaude && { row: firstClaude }].filter(Boolean)
+  const last = [lastYou && !sameRow(lastYou, firstYou) && { you: true, row: lastYou }, lastClaude && !sameRow(lastClaude, firstClaude) && { row: lastClaude }].filter(Boolean)
+  // (the turns between the first and the last, which are not drawn)
+  const between = Math.max(0, b.n - (last.some((p) => p.you) ? 2 : 1))
+  return { first, last, between }
+}
+
+async function lanePeek(x, b, next, key) {
+  if (app.lanesPeek?.key === key) return closePeek()
+  const peek = (app.lanesPeek = { key, x, b, got: PEEK_KEPT.get(key + ':' + b.end) ?? null, error: '' })
+  showPeek()
+  if (peek.got) return
+  try {
+    peek.got = await peekOf(x, b, next)
+    PEEK_KEPT.set(key + ':' + b.end, peek.got)
+    while (PEEK_KEPT.size > 50) PEEK_KEPT.delete(PEEK_KEPT.keys().next().value)
+  } catch (err) {
+    peek.error = err.message
+  }
+  if (app.lanesPeek === peek) showPeek()
+}
+function closePeek() {
+  app.lanesPeek = null
+  showPeek()
+}
+
+// The card, beside its block: to its right where there is room in the window, else to its left; as high as the block,
+// or as high as keeps it in the window
+function showPeek() {
+  for (const old of document.querySelectorAll('#lanes .lane-peek')) old.remove()
+  for (const b of document.querySelectorAll('#lanes .lane-block.peeking')) b.classList.remove('peeking')
+  for (const e of document.querySelectorAll('#lanes .lane-eye[aria-expanded="true"]')) e.setAttribute('aria-expanded', 'false')
+  const peek = app.lanesPeek
+  const block = peek && document.querySelector(`#lanes .lane-block[data-key="${CSS.escape(peek.key)}"]`)
+  if (!block) return
+  block.classList.add('peeking')
+  block.querySelector('.lane-eye').setAttribute('aria-expanded', 'true')
+  const { x, b, got } = peek
+  const when = (ts) => {
+    const t = new Date(ts)
+    const time = t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    return t.toDateString() === new Date(b.ts).toDateString() ? time : t.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + ', ' + time
+  }
+  const said = (text) => {
+    const t = String(text ?? '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim()
+    return t.length > 700 ? t.slice(0, 700).trimEnd() + '…' : t
+  }
+  const part = ({ you, row }) =>
+    you
+      ? h('a', { class: 'peek-you', href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}?at=${encodeURIComponent(row.uuid)}`, title: 'Open the chat here' }, h('time', { datetime: new Date(row.ts).toISOString() }, when(row.ts)), h('p', null, said(row.text)))
+      : h('div', { class: 'peek-claude' }, h('time', { datetime: new Date(row.ts).toISOString() }, when(row.ts)), h('p', null, said(row.text)))
+  const card = h(
+    'div',
+    { class: 'lane-peek' + (peek.shown ? '' : ' opening'), role: 'dialog', 'aria-label': 'What was said in ' + (b.says || 'this block'), style: { '--lane': laneHue(x.cwd) } },
+    peek.error
+      ? h('p', { class: 'peek-note' }, 'It could not be read: ' + peek.error + '.')
+      : !got
+        ? h('p', { class: 'peek-note' }, 'Reading it from its computer…')
+        : !got.first.length && !got.last.length
+          ? h('p', { class: 'peek-note' }, 'Nothing was typed or answered in it.')
+          : [
+              ...got.first.map(part),
+              got.last.length ? h('div', { class: 'peek-gap', 'aria-hidden': got.between ? null : 'true' }, got.between ? `${got.between} more turn${got.between === 1 ? '' : 's'}` : '') : null,
+              ...got.last.map(part),
+            ],
+  )
+  // (it comes up once, as it is opened: drawn again as the Timeline is, it stays as it was)
+  peek.shown = true
+  const area = block.closest('.lanes-area')
+  const lane = block.parentElement
+  const box = el('lanes-body')
+  area.append(card)
+  if (phoneLayout()) {
+    // (on a phone, across the screen, over the clock too)
+    card.style.width = box.clientWidth - 16 + 'px'
+    card.style.left = box.getBoundingClientRect().left + 8 - area.getBoundingClientRect().left + 'px'
+  } else {
+    const wideCard = card.offsetWidth
+    const right = lane.offsetLeft + lane.offsetWidth + 6
+    const seenRight = box.scrollLeft + box.clientWidth - LANES_AXIS
+    card.style.left = (right + wideCard <= seenRight || lane.offsetLeft - wideCard - 6 < box.scrollLeft ? right : lane.offsetLeft - wideCard - 6) + 'px'
+  }
+  const headsTall = document.querySelector('#lanes .lanes-heads')?.offsetHeight ?? 0
+  const seenTop = box.scrollTop
+  const seenBottom = box.scrollTop + box.clientHeight - headsTall - 8
+  card.style.top = Math.max(seenTop + 6, Math.min(block.offsetTop, seenBottom - card.offsetHeight)) + 'px'
+}
+// (a press anywhere else puts it away, and so does going elsewhere)
+document.addEventListener('pointerdown', (ev) => app.lanesPeek && !ev.target.closest?.('.lane-peek, .lane-eye') && closePeek())
+window.addEventListener('hashchange', () => app.lanesPeek && closePeek())
 
 // What the Timeline has to say over its lanes: on which computers Claude Haiku makes the blocks, and how far it has got;
 // where it does not, the way to have it; and what is not in it, and why
