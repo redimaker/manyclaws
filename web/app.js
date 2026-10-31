@@ -2389,6 +2389,22 @@ const LANES_AXIS = 84 // the clock at the left
 const LANES_AXIS_PHONE = 58 // (on a phone, where its days are said shorter)
 const LANES_PHONE = 2 // how many lanes a phone shows side by side
 const lanesAxis = () => (phoneLayout() ? LANES_AXIS_PHONE : LANES_AXIS)
+// How near the lanes are drawn, their width and the clock's hours together, a step at a time from a third to three times
+// as near: pinched on a phone; on a desktop the buttons in the head, + and -, and Ctrl with the wheel or a trackpad's
+// pinch (deon, 2026-10-31: "allow the timeline to be zoomed in and out, mostly for phone but for desktop as well"). Kept
+// on the device. A phone shows as many lanes as fill its width at the step: two to begin with, four at a half, one at
+// twice
+const LANES_ZOOMS = [1 / 3, 1 / 2, 2 / 3, 1, 3 / 2, 2, 3]
+const LANES_ZOOM_AT = LANES_ZOOMS.indexOf(1)
+const LANE_W_LEAST = 64 // (the narrowest a lane is drawn, however far it is zoomed out)
+function lanesZoomAt() {
+  let at = LANES_ZOOM_AT
+  try {
+    at = Number(localStorage.getItem('mc.lanesZoom') ?? LANES_ZOOM_AT)
+  } catch {}
+  return Number.isInteger(at) && at >= 0 && at < LANES_ZOOMS.length ? at : LANES_ZOOM_AT
+}
+const lanesOnPhone = (zoom) => Math.max(1, Math.min(6, Math.round(LANES_PHONE / zoom)))
 const LANE_MIN = 24 // the least a block is drawn tall, to say anything in
 const LANES_BREAK_MS = 45 * 60_000 // a stretch with nothing said anywhere that is drawn as a break
 const LANES_BREAK_PX = 42 // (room in it for how long it was, over the day the clock says under it)
@@ -2398,10 +2414,10 @@ async function loadLanes() {
   const asked = Date.now()
   app.lanes = { ...(app.lanes ?? { items: [] }), asked, loading: true }
   const sealed = await sealFor({ since: asked - LANES_DAYS * 86400_000 })
-  if (!sealed) return void ((app.lanes = { ...app.lanes, items: [], locked: true, loading: false }), renderLanes())
+  if (!sealed) return void ((app.lanes = { ...app.lanes, items: [], locked: true, loading: false }), renderLanes(), renderLanesHaiku())
   const r = await fetch('/api/lanes?c=' + encodeURIComponent(sealed)).catch(() => null)
   if (app.lanes?.asked !== asked) return
-  if (!r?.ok) return void ((app.lanes = { ...app.lanes, loading: false, failed: true }), renderLanes())
+  if (!r?.ok) return void ((app.lanes = { ...app.lanes, loading: false, failed: true }), renderLanes(), renderLanesHaiku())
   const data = await r.json()
   const items = []
   const computers = []
@@ -2427,11 +2443,13 @@ async function loadLanes() {
   }
   app.lanes = { items, computers, asked, loaded: Date.now(), unreachable: data.unreachable ?? [], missed }
   renderLanes()
+  renderLanesHaiku()
 }
 
 async function openLanes() {
   leaveChat()
   document.body.classList.add('lanes-open')
+  app.lanesIntroShown = false
   renderLanes()
   clearInterval(app.lanesTimer)
   app.lanesTimer = setInterval(() => !document.hidden && loadLanes(), LANES_AGAIN_MS)
@@ -2477,7 +2495,7 @@ function lanesInOrder(items, fresh) {
 // as tall as it was long, less so the longer it was (a busy hour has room for all that went on in it), and one where
 // nothing was said anywhere for long is a break. Then every block is made tall enough to say something in. `y(t)` is
 // where a time is drawn; `breaks` and `ticks` are what the clock at the left says
-function lanesClock(items, now) {
+function lanesClock(items, now, zoom = 1) {
   const all = items.flatMap((x) => x.blocks)
   const times = [...new Set([now, ...all.flatMap((b) => [b.ts, b.end])])].sort((a, b) => b - a)
   // (each stretch, newest first: [times[i], times[i + 1]], and whether any block is on then)
@@ -2488,7 +2506,7 @@ function lanesClock(items, now) {
     const on = all.some((b) => b.ts <= bottom && b.end >= top)
     const minutes = (top - bottom) / 60_000
     busy.push(on)
-    heights.push(on ? Math.max(4, 9 * Math.sqrt(minutes)) : top - bottom >= LANES_BREAK_MS ? LANES_BREAK_PX : Math.max(2, 3 * Math.sqrt(minutes)))
+    heights.push(on ? Math.max(4, 9 * Math.sqrt(minutes)) * zoom : top - bottom >= LANES_BREAK_MS ? LANES_BREAK_PX : Math.max(2, 3 * Math.sqrt(minutes)) * zoom)
   }
   const index = new Map(times.map((t, i) => [t, i]))
   // (a block too short to say anything in has the stretches it spans made taller)
@@ -2538,7 +2556,15 @@ function lanesClock(items, now) {
     hour.setMinutes(0, 0, 0)
     for (let t = hour.getTime(); t > times[i + 1]; t -= 3600_000) if (t < times[i]) add(t, y(t), false)
   }
-  return { y, height: ys.at(-1) + 20, breaks, ticks }
+  // (and the other way: the time drawn at a height)
+  const at = (yy) => {
+    if (yy <= ys[0]) return times[0]
+    if (yy >= ys.at(-1)) return times.at(-1)
+    let i = 0
+    while (ys[i + 1] < yy) i++
+    return times[i] - ((yy - ys[i]) / (ys[i + 1] - ys[i] || 1)) * (times[i] - times[i + 1])
+  }
+  return { y, at, height: ys.at(-1) + 20, breaks, ticks }
 }
 
 // How long a break was, said short
@@ -2606,12 +2632,19 @@ function renderLanes() {
   if (!shown.size) return fill(box, h('div', { class: 'list-empty' }, 'None of the last week’s sessions match the filter.'))
   const now = Date.now()
   const lanes = lanesInOrder(got.items, now - (got.loaded || 0) < 2 * LANES_AGAIN_MS).filter((x) => shown.has(x.key))
-  const clock = lanesClock(lanes, now)
+  const zoomAt = lanesZoomAt()
+  const zoom = LANES_ZOOMS[zoomAt]
+  const clock = lanesClock(lanes, now, zoom)
   const phone = phoneLayout()
   const clockWide = lanesAxis()
   el('lanes').style.setProperty('--lanes-axis', clockWide + 'px')
-  // (on a phone, two at a time, which fill its width)
-  const wide = phone ? Math.floor((box.clientWidth - clockWide) / Math.min(LANES_PHONE, lanes.length)) : Math.min(LANE_W[1], Math.max(LANE_W[0], Math.floor((box.clientWidth - LANES_AXIS - 2) / lanes.length)))
+  el('lanes-zoom-in').disabled = zoomAt === LANES_ZOOMS.length - 1
+  el('lanes-zoom-out').disabled = zoomAt === 0
+  // (on a phone, as many as fill its width at this zoom: two at first)
+  const wide = phone
+    ? Math.floor((box.clientWidth - clockWide) / Math.min(lanesOnPhone(zoom), lanes.length))
+    : Math.max(LANE_W_LEAST, Math.round(zoom * Math.min(LANE_W[1], Math.max(LANE_W[0], Math.floor((box.clientWidth - LANES_AXIS - 2) / lanes.length)))))
+  app.lanesView = { clock, wide, clockWide }
   const place = new Map(lanes.map((x, i) => [x.key, i]))
   const middle = (x) => place.get(x.key) * wide + wide / 2
   const timeOf = (ts) => new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -2733,6 +2766,17 @@ window.addEventListener('resize', () => !el('lanes').hidden && renderLanes())
 el('lanes-body').addEventListener(
   'wheel',
   (ev) => {
+    // (Ctrl with the wheel, or a trackpad's pinch, which comes as that: nearer or further, a step for so much of it)
+    if (ev.ctrlKey) {
+      ev.preventDefault()
+      if (Math.sign(ev.deltaY) !== Math.sign(lanesWheel)) lanesWheel = 0
+      lanesWheel += ev.deltaY
+      if (Math.abs(lanesWheel) >= 40) {
+        lanesZoomBy(lanesWheel < 0 ? 1 : -1, ev.clientX, ev.clientY)
+        lanesWheel = 0
+      }
+      return
+    }
     if (ev.shiftKey || Math.abs(ev.deltaX) >= Math.abs(ev.deltaY) || !ev.target.closest?.('.lanes-heads')) return
     ev.preventDefault()
     el('lanes-body').scrollLeft += ev.deltaY
@@ -2743,11 +2787,73 @@ document.addEventListener('keydown', (ev) => {
   if (el('lanes').hidden || ev.altKey || ev.ctrlKey || ev.metaKey || ev.target.closest?.('input, textarea, select, [contenteditable], dialog')) return
   if (ev.key === 'Escape' && app.lanesPeek) return void (ev.preventDefault(), closePeek())
   const lane = document.querySelector('#lanes .lane')?.offsetWidth || LANE_W[0]
+  if (ev.key === '+' || ev.key === '=' || ev.key === '-' || ev.key === '_') return void (ev.preventDefault(), lanesZoomBy(ev.key === '+' || ev.key === '=' ? 1 : -1))
   if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') {
     ev.preventDefault()
     lanesSideways((ev.key === 'ArrowRight' ? 1 : -1) * (ev.shiftKey ? lanesPage() : lane))
   }
 })
+// Nearer or further by `by` steps, about a point on the screen (where the fingers or the pointer are; else the middle of
+// the lanes): what was drawn there is drawn there still
+let lanesWheel = 0
+function lanesZoomBy(by, fx, fy) {
+  const from = lanesZoomAt()
+  const to = Math.max(0, Math.min(LANES_ZOOMS.length - 1, from + by))
+  if (to === from || el('lanes').hidden) return
+  const box = el('lanes-body')
+  const r = box.getBoundingClientRect()
+  const x = (fx ?? r.left + r.width / 2) - r.left
+  const y = (fy ?? r.top + r.height / 2) - r.top
+  const was = app.lanesView
+  const headsTall = () => document.querySelector('#lanes .lanes-heads')?.offsetHeight ?? 0
+  const lane = was && (box.scrollLeft + x - was.clockWide) / was.wide
+  const t = was?.clock.at(box.scrollTop + y - headsTall())
+  try {
+    localStorage.setItem('mc.lanesZoom', String(to))
+  } catch {}
+  renderLanes()
+  const now = app.lanesView
+  if (!was || !now || now === was) return
+  box.scrollLeft = lane * now.wide + now.clockWide - x
+  box.scrollTop = now.clock.y(t) + headsTall() - y
+}
+el('lanes-zoom-in').addEventListener('click', () => lanesZoomBy(1))
+el('lanes-zoom-out').addEventListener('click', () => lanesZoomBy(-1))
+// (pinched: drawn larger or smaller as the fingers go, about the point between them, and once they are lifted drawn again
+// at the step nearest that; not drawn again on the way, which would take away what the fingers are on, and the page
+// itself is not zoomed by it, as a browser otherwise does)
+let lanesPinch = null
+const lanesFingers = ({ touches: [a, b] }) => ({ d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 })
+el('lanes-body').addEventListener('touchstart', (ev) => ev.touches.length === 2 && (lanesPinch = { ...lanesFingers(ev), at: lanesZoomAt(), k: 1 }), { passive: true })
+el('lanes-body').addEventListener(
+  'touchmove',
+  (ev) => {
+    if (!lanesPinch || ev.touches.length !== 2) return
+    ev.preventDefault()
+    const zoom = LANES_ZOOMS[lanesPinch.at]
+    lanesPinch.k = Math.max(LANES_ZOOMS[0] / zoom, Math.min(LANES_ZOOMS.at(-1) / zoom, lanesFingers(ev).d / lanesPinch.d))
+    const box = el('lanes-body')
+    const grid = box.querySelector('.lanes-grid')
+    if (!grid) return
+    const r = box.getBoundingClientRect()
+    grid.style.transformOrigin = `${box.scrollLeft + lanesPinch.x - r.left}px ${box.scrollTop + lanesPinch.y - r.top}px`
+    grid.style.transform = `scale(${lanesPinch.k})`
+  },
+  { passive: false },
+)
+for (const type of ['touchend', 'touchcancel'])
+  el('lanes-body').addEventListener(type, (ev) => {
+    if (!lanesPinch || ev.touches.length >= 2) return
+    const { at, k, x, y } = lanesPinch
+    lanesPinch = null
+    const grid = el('lanes-body').querySelector('.lanes-grid')
+    if (grid) grid.style.transform = grid.style.transformOrigin = ''
+    const want = LANES_ZOOMS[at] * k
+    const to = LANES_ZOOMS.reduce((best, z, i) => (Math.abs(Math.log(z / want)) < Math.abs(Math.log(LANES_ZOOMS[best] / want)) ? i : best), at)
+    if (to !== at) lanesZoomBy(to - at, x, y)
+  })
+el('lanes-body').addEventListener('gesturestart', (ev) => ev.preventDefault())
+
 // (dragged by its background with the mouse, both ways at once, as a map is)
 let lanesDrag = null
 el('lanes-body').addEventListener('pointerdown', (ev) => {
@@ -2910,31 +3016,6 @@ window.addEventListener('hashchange', () => app.lanesPeek && closePeek())
 function renderLanesSays(got) {
   const says = []
   const computers = got.computers ?? []
-  const off = computers.filter((c) => !c.on && app.machines.get(c.mid)?.online)
-  const on = computers.filter((c) => c.on)
-  for (const c of on) {
-    const name = whereLabel(c.name, c.mid)
-    says.push(
-      h(
-        'p',
-        { class: 'lanes-say', 'data-key': 'on:' + c.mid },
-        c.why ? ['Claude Haiku could not summarize a session on ', name, `: ${c.why}. It tries again in a while.`] : c.pending ? ['Claude Haiku is summarizing ', name, `'s sessions: ${c.pending} to go. Until then they are named by their first prompts.`] : ['Claude Haiku summarizes ', name, "'s sessions as they go on."],
-        ' ',
-        h('button', { type: 'button', class: 'lanes-do', 'data-part': 'lanes-off', onclick: () => lanesHaiku([c], false) }, 'Turn off'),
-      ),
-    )
-  }
-  if (off.length)
-    says.push(
-      h(
-        'p',
-        { class: 'lanes-say', 'data-key': 'off' },
-        'The blocks on ',
-        off.flatMap((c, i) => [i ? (i === off.length - 1 ? ' and ' : ', ') : '', whereLabel(c.name, c.mid)]),
-        ' are named by their first prompts. ',
-        h('button', { type: 'button', class: 'lanes-do', 'data-part': 'lanes-on', onclick: () => lanesHaiku(off, true) }, 'Have Claude Haiku summarize them'),
-      ),
-    )
   const machines = [...app.machines.values()]
   const older = machines.filter((m) => m.online && !(m.capabilities ?? []).includes('lanes')).map(machineName)
   const offline = machines.filter((m) => !m.online).map(machineName)
@@ -2951,13 +3032,75 @@ function renderLanesSays(got) {
   redraw(el('lanes-says'), says)
 }
 
+// ---- Claude Haiku on each computer, for the Timeline: on or off, how far it has got, and the way to turn it on or off.
+// In Settings, under Timeline; and over the Timeline as it opens, until this device is told not to show it there
+// (deon, 2026-10-31: "move this to a setting page (except the first time pop it up with a don't show this again button,
+// showing that it is in settings after)")
+function lanesHaikuSays() {
+  const got = app.lanes
+  const muted = (key, text) => h('p', { class: 'lanes-say muted', 'data-key': key }, text)
+  if (got?.locked) return [muted('locked', NO_KEY_MACHINE)]
+  if (!got?.computers) return [muted('reading', got?.failed ? 'Your computers could not be asked: the server did not answer.' : 'Asking your computers…')]
+  const computers = got.computers
+  const off = computers.filter((c) => !c.on && app.machines.get(c.mid)?.online)
+  const says = computers
+    .filter((c) => c.on)
+    .map((c) => {
+      const name = whereLabel(c.name, c.mid)
+      return h(
+        'p',
+        { class: 'lanes-say', 'data-key': 'on:' + c.mid },
+        c.why ? ['Claude Haiku could not summarize a session on ', name, `: ${c.why}. It tries again in a while.`] : c.pending ? ['Claude Haiku is summarizing ', name, `'s sessions: ${c.pending} to go. Until then they are named by their first prompts.`] : ['Claude Haiku summarizes ', name, "'s sessions as they go on."],
+        ' ',
+        h('button', { type: 'button', class: 'lanes-do', 'data-part': 'lanes-off', onclick: () => lanesHaiku([c], false) }, 'Turn off'),
+      )
+    })
+  if (off.length)
+    says.push(
+      h(
+        'p',
+        { class: 'lanes-say', 'data-key': 'off' },
+        'The blocks on ',
+        off.flatMap((c, i) => [i ? (i === off.length - 1 ? ' and ' : ', ') : '', whereLabel(c.name, c.mid)]),
+        ' are named by their first prompts. ',
+        h('button', { type: 'button', class: 'lanes-do', 'data-part': 'lanes-on', onclick: () => lanesHaiku(off, true) }, 'Have Claude Haiku summarize them'),
+      ),
+    )
+  return says.length ? says : [muted('none', 'None of your computers that are online can make the Timeline’s blocks: it takes the ManyClaws agent, from the Timeline’s release on.')]
+}
+function renderLanesHaiku() {
+  for (const id of ['set-lanes-says', 'lanes-intro-says']) redraw(el(id), lanesHaikuSays())
+  lanesIntro()
+}
+// (over the Timeline once in each time it is opened, once its computers have said, unless this device was told not to)
+function lanesIntro() {
+  if (!document.body.classList.contains('lanes-open') || app.lanesIntroShown || !app.lanes?.computers?.length) return
+  try {
+    if (localStorage.getItem('mc.lanesIntro') === 'off') return
+  } catch {}
+  app.lanesIntroShown = true
+  if (!el('lanes-intro').open) el('lanes-intro').showModal()
+}
+el('lanes-intro-never').addEventListener('click', () => {
+  try {
+    localStorage.setItem('mc.lanesIntro', 'off')
+  } catch {}
+  el('lanes-intro').close()
+})
+el('lanes-intro-settings').addEventListener('click', (ev) => {
+  ev.preventDefault()
+  el('lanes-intro').close()
+  app.settingsPart = 'set-lanes'
+  location.hash = '#/settings'
+})
+
 // Claude Haiku making the blocks on these computers, or not: asked of each, signed. It spends Claude tokens there, which
 // is said first
 async function lanesHaiku(computers, on) {
   if (on) {
     const where = computers.map((c) => c.name).join(', ')
     const go = await ask('Summarize with Claude Haiku?', {
-      says: [`On ${where}, Claude Haiku, at high effort, reads what was said in each session of the last week, and then in each as it goes on, and breaks it into blocks of a few words. That spends Claude tokens there, on the Claude account Claude Code is signed in to: a little for each session, more for long ones.`, 'What it makes is kept on that computer. You can turn it off here.'],
+      says: [`On ${where}, Claude Haiku, at high effort, reads what was said in each session of the last week, and then in each as it goes on, and breaks it into blocks of a few words. That spends Claude tokens there, on the Claude account Claude Code is signed in to: a little for each session, more for long ones.`, 'What it makes is kept on that computer. You can turn it off in Settings, under Timeline.'],
       yes: 'Summarize',
     })
     if (!go) return
@@ -4621,6 +4764,10 @@ function openSettings() {
   markHaiku()
   renderAlertsButton()
   drawSettingsNav()
+  // (what Claude Haiku does for the Timeline on each computer, as they last said it, and asked again where that was a
+  // while ago; once the page knows which computers there are)
+  renderLanesHaiku()
+  if (!(Date.now() - (app.lanes?.loaded ?? 0) < LANES_AGAIN_MS)) snapshotSeen.then(() => location.hash.split('?')[0] === '#/settings' && loadLanes())
 }
 
 // ---- Settings is in two groups: what is this device's own (#/settings) and what is the account's (#/account), each on a
