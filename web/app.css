@@ -964,7 +964,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
   .swap-bar .swap-reset { grid-column: 1 / -1; padding-left: calc(5ch + 10px); font-size: .9em; white-space: normal; }
   .swap-note { padding-left: 0; }
 }
-.more-link, .earlier { display: block; width: 100%; background: none; border: 0; padding: 6px 12px; color: var(--link); text-align: left; }
+.more-link, .earlier, .later { display: block; width: 100%; background: none; border: 0; padding: 6px 12px; color: var(--link); text-align: left; }
 /* Past sessions by project */
 .project { display: flex; align-items: baseline; gap: 6px; width: 100%; background: none; border: 0; padding: 5px 12px; text-align: left; }
 @media (hover: hover) {
@@ -976,6 +976,7 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
 .row.in-project, .more-link.in-project, .list-empty.in-project { padding-left: 30px; }
 .list-empty.in-project { padding-top: 4px; padding-bottom: 8px; }
 .earlier { text-align: center; padding: 0 0 12px; flex-shrink: 0; }
+.later { text-align: center; padding: 12px 0 0; flex-shrink: 0; }
 .row.past .row-title { font-weight: 400; }
 .dot.live { background: var(--idle); }
 .dot.past { background: none; border: 1px solid var(--offline); }
@@ -1045,6 +1046,22 @@ body.resizing { cursor: col-resize; -webkit-user-select: none; user-select: none
   overscroll-behavior: contain;
 }
 .messages > * { flex-shrink: 0; }
+/* (the line beside a stretch it was opened at is placed in it, and goes where its rows go) */
+.messages { position: relative; }
+/* What the chat was opened at: a stretch of it (a Timeline block, or what Claude Haiku found), a line down its right from
+   its first row to its last, fading where its end is not drawn yet; and the words searched for, wherever they are */
+.span-line { position: absolute; right: 12px; width: 3px; background: var(--accent); pointer-events: none; }
+.span-line::before, .span-line::after { content: ""; position: absolute; left: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+.span-line::before { top: -4px; }
+.span-line::after { bottom: -4px; }
+.span-line.open { background: linear-gradient(var(--accent) calc(100% - 48px), transparent); }
+.span-line.open::after { display: none; }
+@media (max-width: 760px) { .span-line { right: 4px; } }
+.msg.span-first { scroll-margin-top: 16px; }
+::highlight(found-words) { background-color: color-mix(in srgb, var(--star) 45%, transparent); }
+/* The way to the latest rows of one opened in the middle, kept at the foot of what is in sight */
+.to-end { position: sticky; bottom: 12px; z-index: 2; align-self: flex-end; margin-top: 8px; padding: 6px 14px; border: 1px solid var(--border); border-radius: 99px; background: var(--panel, var(--bg)); color: var(--text); font: inherit; font-size: 13px; box-shadow: 0 4px 14px rgba(0, 0, 0, .25); cursor: pointer; }
+.to-end:hover { background: var(--hover); }
 .msg { position: relative; padding: 8px 0; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 
 /* Your prompts: a bordered box, as in the extension */
@@ -1890,7 +1907,7 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   .row:active, .project:active, .hit:active, .more-link:active { background: var(--active); }
   .dot { width: 10px; height: 10px; }
   .project { padding: 12px 14px; min-height: var(--tap); align-items: center; }
-  .more-link, .earlier { padding: 12px 14px; min-height: var(--tap); }
+  .more-link, .earlier, .later { padding: 12px 14px; min-height: var(--tap); }
   .hit { padding: 8px 10px; }
   .set-row { min-height: var(--tap); }
 
