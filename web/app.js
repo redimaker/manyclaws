@@ -2587,16 +2587,6 @@ function svgOf(tag, attrs = {}) {
   return node
 }
 
-// A lane's color: its project's, so that a project is the same color in every lane it is in, and the eye follows it from
-// one session to the next. Only ever a thin edge and a short bar, whole, on the site's plain grey surfaces: mixed into
-// the dark as a fill, a yellow or a green is mud (deon, 2026-10-29, of the Timeline in a computer's yellow: "This is
-// still an ugly color"). Warm, as the site's own colors are, and none of them blue or purple
-const LANE_HUES = ['#e2664a', '#e3b04b', '#86c08f', '#e483a6', '#cdb48e', '#a9a69b']
-function laneHue(cwd) {
-  let n = 7
-  for (const c of folderOf(cwd) || String(cwd ?? '')) n = (n * 31 + c.charCodeAt(0)) >>> 0
-  return LANE_HUES[n % LANE_HUES.length]
-}
 // (an eye, drawn as the page's other icons are)
 function eyeIcon() {
   const svg = svgOf('svg', { viewBox: '0 0 20 20', width: 14, height: 14, fill: 'none', stroke: 'currentColor', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })
@@ -2627,7 +2617,8 @@ function renderLanes() {
   const timeOf = (ts) => new Date(ts).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
   // (on a phone, the weekday and the day of the month: Fri 30)
   const dayOf = (ts) => (phone ? `${new Date(ts).toLocaleDateString(undefined, { weekday: 'short' })} ${new Date(ts).getDate()}` : new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }))
-  // The heads: what each session is called, where it is, and what it was forked from, over a bar in its project's color
+  // The heads: what each session is called, where it is, and what it was forked from, under a line in its computer's
+  // color, as are its lane and its blocks (deon, 2026-10-30: "It used to show in the colors of my machines")
   const nameOf = (x) => markOf(x.sid)?.name || app.sessions.get(x.sid)?.title || x.title || (x.first_prompt ?? '').slice(0, 80) || folderOf(x.cwd) || x.sid.slice(0, 8)
   const heads = lanes.map((x) => {
     const live = app.sessions.get(x.sid)
@@ -2638,7 +2629,7 @@ function renderLanes() {
     const state = live && !live.ended && live.online ? live.state : 'past'
     return h(
       'a',
-      { class: 'lane-head', 'data-key': x.key, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}`, title: name, style: { width: wide + 'px', '--lane': laneHue(x.cwd) } },
+      { class: 'lane-head', 'data-key': x.key, 'data-color': m?.color || null, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}`, title: name, style: { width: wide + 'px' } },
       h('span', { class: 'lane-name' }, h('span', { class: 'dot ' + state, title: STATE_LABEL[state] ?? 'Not running' }), h('span', { class: 'lane-title' }, name)),
       h('span', { class: 'lane-where' }, dotted(folderOf(x.cwd), whereLabel(m ? machineName(m) : x.machine, x.mid))),
       x.fork && h('span', { class: 'lane-fork', title: 'Forked from ' + (from || 'another session') }, '↳ ', from || 'another session'),
@@ -2649,7 +2640,7 @@ function renderLanes() {
   const cols = lanes.map((x) =>
     h(
       'div',
-      { class: 'lane', 'data-key': x.key, style: { left: place.get(x.key) * wide + 'px', width: wide + 'px', '--lane': laneHue(x.cwd) } },
+      { class: 'lane', 'data-key': x.key, 'data-color': app.machines.get(x.mid)?.color || null, style: { left: place.get(x.key) * wide + 'px', width: wide + 'px' } },
       x.blocks.map((b, i) => {
         const top = clock.y(b.end)
         const tall = Math.max(LANE_MIN - 2, clock.y(b.ts) - top - 2)
@@ -2876,7 +2867,7 @@ function showPeek() {
       : h('div', { class: 'peek-claude' }, h('time', { datetime: new Date(row.ts).toISOString() }, when(row.ts)), h('p', null, said(row.text)))
   const card = h(
     'div',
-    { class: 'lane-peek' + (peek.shown ? '' : ' opening'), role: 'dialog', 'aria-label': 'What was said in ' + (b.says || 'this block'), style: { '--lane': laneHue(x.cwd) } },
+    { class: 'lane-peek' + (peek.shown ? '' : ' opening'), role: 'dialog', 'aria-label': 'What was said in ' + (b.says || 'this block'), 'data-color': app.machines.get(x.mid)?.color || null },
     peek.error
       ? h('p', { class: 'peek-note' }, 'It could not be read: ' + peek.error + '.')
       : !got

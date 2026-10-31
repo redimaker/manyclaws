@@ -2184,7 +2184,8 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
 /* ---- The Timeline (#/lanes): a lane for each session of the last week, side by side on one clock, the latest at the
    top. The whole window; on a phone, in the chat's place, two lanes at a time. In the app's own colors, and on a
    server with a front door in the site's (fonts.css): its dark, its serif for what each lane is and for the days, and
-   the crab's red for now and for a block carried on in another session. A lane is in its project's color (laneHue). */
+   the crab's red for now and for a block carried on in another session. A lane is in its computer's color, as the
+   list's rows are (deon, 2026-10-30: "It used to show in the colors of my machines"), and grey where it has none. */
 body.lanes-open #list-pane { display: none; }
 body.lanes-open #chat-pane { grid-column: 1 / -1; }
 #lanes { --ln-bg: var(--bg); --ln-text: var(--text); --ln-muted: var(--muted); --ln-faint: color-mix(in srgb, var(--muted) 70%, transparent); --ln-line: var(--border); --ln-surface: color-mix(in srgb, var(--text) 5%, var(--bg)); --ln-raised: color-mix(in srgb, var(--text) 9%, var(--bg)); --ln-accent: var(--accent); --ln-serif: var(--font); --ln-sans: var(--font); background: var(--ln-bg); color: var(--ln-text); }
@@ -2225,10 +2226,11 @@ body.lanes-open #chat-pane { grid-column: 1 / -1; }
 .lanes-corner { grid-row: 1; grid-column: 1; position: sticky; top: 0; left: 0; z-index: 4; background: var(--ln-bg); }
 .lanes-heads { grid-row: 1; grid-column: 2; position: sticky; top: 0; z-index: 3; display: flex; background: var(--ln-bg); box-shadow: 0 10px 14px -12px rgba(0, 0, 0, .55); }
 .lanes-corner { box-shadow: 0 10px 14px -12px rgba(0, 0, 0, .55); }
-/* A lane's head: what it is called, in the serif where the site's are; where it is; what it came from. Over a short bar in
-   its project's color */
+/* A lane's head: what it is called, in the serif where the site's are; where it is; what it came from. Under a line in
+   its computer's color */
 .lane-head { --lane: var(--ln-accent); position: relative; flex: none; display: flex; flex-direction: column; gap: 2px; min-width: 0; box-sizing: border-box; padding: 14px 12px 10px; color: var(--ln-text); text-decoration: none; }
-.lane-head::before { content: ""; position: absolute; top: 6px; left: 12px; width: 22px; height: 3px; border-radius: 2px; background: var(--lane); }
+.lane-head[data-color]::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--lane); }
+.lane-head[data-color], .lane[data-color], .lane-peek[data-color] { --lane: var(--mk); }
 .lane-head:hover { background: var(--ln-surface); }
 .lane-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-family: var(--ln-serif); font-size: 15px; font-weight: 500; letter-spacing: -.005em; }
 :root:not([data-site]) .lane-name { font-size: 13px; font-weight: 600; }
@@ -2251,25 +2253,26 @@ body.lanes-open #chat-pane { grid-column: 1 / -1; }
 .lanes-now::before { content: ""; position: absolute; left: -4px; top: -4px; width: 7px; height: 7px; border-radius: 50%; background: var(--ln-accent); }
 /* (a stretch where nothing was said in any of them: drawn short, darker, between two faint dashes) */
 .lanes-break { position: absolute; left: 0; right: 0; background: linear-gradient(color-mix(in srgb, #000 22%, transparent), color-mix(in srgb, #000 22%, transparent)); border-block: 1px dashed color-mix(in srgb, var(--ln-text) 10%, transparent); box-sizing: border-box; }
-.lane { --lane: var(--ln-accent); position: absolute; top: 0; bottom: 0; }
+.lane { --lane: var(--ln-muted); position: absolute; top: 0; bottom: 0; }
 .lane:nth-child(even of .lane) { background: color-mix(in srgb, var(--ln-text) 1.8%, transparent); }
 .lane-links { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 .lane-link { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke: color-mix(in srgb, var(--ln-text) 34%, transparent); }
 .lane-link.same { stroke-dasharray: 2 5; stroke-width: 2; stroke: color-mix(in srgb, var(--ln-accent) 75%, transparent); }
 .lane-link-end { fill: color-mix(in srgb, var(--ln-text) 45%, transparent); }
 .lane-link-end.same { fill: var(--ln-accent); }
-/* A block: what a stretch of its session was about, on a lifted surface with its project's color down its edge, and
+/* A block: what a stretch of its session was about, on a lifted surface tinted with its computer's color and with that
+   color down its edge, and
    under it, where there is room, when and how many turns. One Claude Haiku has not read yet is open, in italics, named
    by its first prompt; one carried on after a long pause begins with an ellipsis. An eye at its top, faint until the
    block is pointed at */
-.lane-block { position: absolute; z-index: 1; left: 6px; right: 6px; box-sizing: border-box; border-radius: 7px; background: var(--ln-surface); box-shadow: inset 3px 0 0 var(--lane), 0 1px 2px rgba(0, 0, 0, .25); transition: background-color .12s ease, box-shadow .12s ease; }
-.lane-block:hover, .lane-block:focus-within, .lane-block.peeking { z-index: 3; background: var(--ln-raised); box-shadow: inset 3px 0 0 var(--lane), 0 6px 18px rgba(0, 0, 0, .35); }
+.lane-block { position: absolute; z-index: 1; left: 6px; right: 6px; box-sizing: border-box; border-radius: 7px; background: color-mix(in srgb, var(--lane) 16%, var(--ln-surface)); box-shadow: inset 3px 0 0 var(--lane), 0 1px 2px rgba(0, 0, 0, .25); transition: background-color .12s ease, box-shadow .12s ease; }
+.lane-block:hover, .lane-block:focus-within, .lane-block.peeking { z-index: 3; background: color-mix(in srgb, var(--lane) 28%, var(--ln-raised)); box-shadow: inset 3px 0 0 var(--lane), 0 6px 18px rgba(0, 0, 0, .35); }
 .lane-open { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 2px; padding: 4px 24px 4px 11px; overflow: hidden; color: var(--ln-text); font-size: 12.5px; font-weight: 500; line-height: 1.3; text-decoration: none; outline: 0; }
 .lane-says { flex: none; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--lines, 6); overflow: hidden; overflow-wrap: anywhere; }
 .lane-span { flex: none; font-size: 10.5px; font-weight: 400; color: var(--ln-muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lane-block.short .lane-open { justify-content: center; padding-block: 0; }
 .lane-block.short .lane-says { display: block; white-space: nowrap; text-overflow: ellipsis; }
-.lane-block.rough { background: color-mix(in srgb, var(--ln-surface) 45%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--lane) 55%, transparent); }
+.lane-block.rough { background: color-mix(in srgb, var(--lane) 7%, transparent); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--lane) 55%, transparent); }
 .lane-block.rough .lane-open { color: var(--ln-muted); font-style: italic; font-weight: 400; }
 .lane-block.cont .lane-says::before { content: "… "; color: var(--ln-muted); }
 .lane-open:focus-visible { border-radius: 7px; box-shadow: inset 0 0 0 2px var(--lane); }
