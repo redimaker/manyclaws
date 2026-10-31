@@ -6140,6 +6140,7 @@ async function openPast(mid, sid, { at = '', sub = '', to = '', upto = '', words
   markChat()
   // The place a search hit pointed at, or the end
   if (!showFound(at)) scrollToEnd()
+  showLatest()
   refoldSoon()
   // One that's open in a Claude Code on the machine is still being written: follow it
   pastTimer = setInterval(followPast, 5000)
@@ -6240,12 +6241,12 @@ new MutationObserver((changes) => {
 }).observe(el('messages'), { childList: true, subtree: true, characterData: true })
 
 // ---- The rows after the page it was opened at: read a page at a time as they are scrolled to, and all of them at a
-// press, at the foot of what is in sight, which goes to the end
+// press of the arrow to the latest, which goes to the end (and is offered while they are not all read)
 const laterWatch = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && loadLater(), { root: el('messages'), rootMargin: '0px 0px 600px 0px' })
 function laterNodes() {
   const p = app.past
   if (!p || !(p.to < p.total)) return []
-  return [h('button', { type: 'button', class: 'later', onclick: () => loadLater() }, 'Later messages…'), h('button', { type: 'button', class: 'to-end', title: 'The latest messages', onclick: () => loadLater({ all: true }) }, 'Latest ↓')]
+  return [h('button', { type: 'button', class: 'later', onclick: () => loadLater() }, 'Later messages…')]
 }
 function watchLater() {
   laterWatch.disconnect()
@@ -6264,7 +6265,7 @@ async function loadLater({ all = false } = {}) {
       const size = app.laterAll ? 1000 : PAST_ROWS
       const page = await pastPage({ before: p.to + size, limit: size, keep: true })
       if (!page || app.past !== p) return
-      for (const old of box.querySelectorAll(':scope > .later, :scope > .to-end')) old.remove()
+      box.querySelector(':scope > .later')?.remove()
       p.to = Math.max(p.to, page.to)
       box.append(...pastNodes(page, { follow: true }), ...laterNodes())
       if (!app.laterAll) break
@@ -6273,6 +6274,7 @@ async function loadLater({ all = false } = {}) {
     watchLater()
     refoldSoon()
     if (app.laterAll) scrollToEnd()
+    showLatest()
   } finally {
     app.loadingLater = false
   }
@@ -9187,14 +9189,19 @@ el('input').addEventListener('focus', () => {
   el('more').setAttribute('aria-expanded', 'false')
 })
 
-// Back to the latest, offered once the chat has been scrolled well away from it
+// Back to the latest, offered once the chat has been scrolled well away from it, or while one opened in the middle has
+// rows after what is read of it (which it reads, to the end)
+const laterLeft = () => !!app.past?.loaded && app.past.to < app.past.total
+function showLatest() {
+  const box = el('messages')
+  const away = box.scrollHeight - box.scrollTop - box.clientHeight
+  el('latest').hidden = away < 600 && !laterLeft()
+  if (away < 120 && !laterLeft()) el('latest').classList.remove('fresh')
+}
 el('messages').addEventListener(
   'scroll',
   () => {
-    const box = el('messages')
-    const away = box.scrollHeight - box.scrollTop - box.clientHeight
-    el('latest').hidden = away < 600
-    if (away < 120) el('latest').classList.remove('fresh')
+    showLatest()
     pinSoon()
   },
   { passive: true },
@@ -9242,6 +9249,7 @@ window.addEventListener('resize', pinSoon)
 setInterval(() => !document.hidden && (app.current || app.past) && pinSoon(), 600)
 el('latest').addEventListener('click', () => {
   el('latest').classList.remove('fresh')
+  if (laterLeft()) return void loadLater({ all: true })
   el('messages').scrollTo({ top: el('messages').scrollHeight, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 })
 
