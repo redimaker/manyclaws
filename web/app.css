@@ -1874,7 +1874,11 @@ button.menu-row:hover:not(:disabled), button.menu-row:focus-visible { background
   box-shadow: 0 2px 8px #0000002e;
 }
 .latest.fresh { border-color: var(--accent); color: var(--accent); }
-.chat-body { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* (it keeps room for the prompt kept in sight, as tall as that is drawn, so that a question or the reply box under it is
+   not drawn under that; while a reply is typed with a phone's keyboard up, what is left of the screen is the reply's,
+   and the prompt is no more of the chat than there is room for) */
+.chat-body { position: relative; flex: 1; min-height: var(--pin-room, 0px); display: flex; flex-direction: column; }
+.keyboard-up .chat-body { min-height: 0; overflow: hidden; }
 
 /* Pulled down from its top, the list is read again */
 .pull { display: none; height: 0; overflow: hidden; align-items: flex-end; justify-content: center; gap: 8px; color: var(--muted); font-size: .9em; }

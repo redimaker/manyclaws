@@ -9133,6 +9133,7 @@ if (window.visualViewport) {
     const nearEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 120
     if (covered) document.documentElement.style.setProperty('--app-height', visualViewport.height + 'px')
     else document.documentElement.style.removeProperty('--app-height')
+    document.documentElement.classList.toggle('keyboard-up', covered)
     // The browser scrolls the page up to show what's being typed in; the app has already made room
     if (covered) scrollTo(0, 0)
     if (nearEnd) scrollToEnd()
@@ -9205,6 +9206,10 @@ function pinSoon() {
   })
 }
 el('pinned').addEventListener('click', () => el('pinned').classList.toggle('open'))
+// (and the chat keeps room for it, as tall as it is drawn, so that what is under the chat, a question or the reply box,
+// is never drawn under it where there is little room: deon, 2026-11-01, of a long question on a phone, "the scroll
+// limit isn't accounting for the header ... don't remove the header")
+new ResizeObserver(() => el('pinned').parentElement.style.setProperty('--pin-room', el('pinned').hidden ? '0px' : el('pinned').offsetHeight + 'px')).observe(el('pinned'))
 // Rows come and go (a session opened, one put back, earlier ones read, a reply arriving), and the room for them changes
 new MutationObserver(pinSoon).observe(el('messages'), { childList: true })
 window.addEventListener('resize', pinSoon)
