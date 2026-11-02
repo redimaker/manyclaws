@@ -39,7 +39,7 @@ const polled = (sent: Sent[]) => sent.filter((s) => s.url.includes('/api/agent/p
 // `refused`: the server refuses the mod's token (taken back), whatever it asks with it.
 // `tools: false`: nothing answers tool.register, or the test answers it itself.
 // `run`: what answers any other command the mod runs (its argv and how it was run), where it answers anything
-function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, refused = false, surfaces = ['terminal'], swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>), page = null as null | Page } = {}) {
+function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, refused = false, surfaces = ['terminal'], swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>), page = null as null | Page , sid = null as null | (() => string) } = {}) {
   const clock = mock.clock(on)
   // (The test says what the key is first, `await made()`: where it has not, what the environment holds is as it is.)
   const known = env.MANYCLAWS_KEY ? makes.get('u_test|' + env.MANYCLAWS_KEY) : null
@@ -60,7 +60,8 @@ function setup(on: any, { run = null as null | ((argv: string[], init: any) => a
   const lists: string[] = [] // each time it asked for the list of the account's devices: what it was handed
   const polls = [...poll]
   on('session.start', () => ({ cwd: '/work' }))
-  on('session.id', () => ({ value: 'sess-1' }))
+  // (`sid`: the id the engine answers with, where a test changes it as a panel that goes on to another conversation does)
+  on('session.id', () => ({ value: sid ? sid() : 'sess-1' }))
   on('session.repo', () => ({ value: null }))
   on('session.root', () => ({ value: '/work' }))
   on('session.model', () => ({ value: 'claude-test' }))
@@ -2020,6 +2021,34 @@ test('a session that has ended is not asked for again, and it goes with its card
   expect(last.map((e) => Object.keys(e).sort())).toEqual([['card', 'sealed', 'sid', 'ts', 'type'], ['sealed', 'sid', 'ts', 'type']])
   expect(last.map((e) => e.type)).toEqual(['card', 'session.end'])
   expect((open(last[0].card, contentKey(m.key)) as any).endReason).toBe('other')
+})
+
+test("where nothing says the process went on to another conversation (the settings hook events pass the plugin over, and VS Code's panel changes conversation without ending the one it had), the one it is now is taken up as anything happens in it, and the one it was ends", async ($, on) => {
+  engine(on)
+  const m = await made(WORDS)
+  // (the id the engine answers with, which the test changes as the panel does)
+  let id = HERE
+  const s = session(on, m, { poll: Array.from({ length: 400 }, () => ({ commands: [] })), sid: () => id })
+  await start($)
+  await ($ as any).session.append(said('u1', 'prompt', 'user', [{ type: 'text', text: 'In the first' }]))
+  await s.clock.advance(2000)
+  id = 'sess-2'
+  await ($ as any).turn.start({ turnId: 't2', text: 'In the other' })
+  await ($ as any).session.append(said('u2', 'prompt', 'user', [{ type: 'text', text: 'In the other' }]))
+  await s.clock.advance(2000)
+  const events = s.events()
+  // The first ends, with its card first, as one ended by /clear does; the other says hello, and what it says is its own
+  const ended = events.findIndex((e) => e.sid === HERE && e.type === 'session.end')
+  const hello = events.findIndex((e) => e.sid === 'sess-2' && e.type === 'hello')
+  expect(ended).toBeGreaterThan(-1)
+  expect(hello).toBeGreaterThan(ended)
+  expect((open(events.findLast((e, i) => i < ended && e.sid === HERE && e.type === 'card').card, contentKey(m.key)) as any).endReason).toBe('other')
+  const rowsOf = (sid: string) => events.filter((e) => e.sid === sid && e.type === 'rows').flatMap((e) => e.rows.map((r: any) => (open(r.row, contentKey(m.key)) as any).text))
+  expect(rowsOf(HERE)).toContain('In the first')
+  expect(rowsOf(HERE)).not.toContain('In the other')
+  expect(rowsOf('sess-2')).toContain('In the other')
+  // (and nothing more is said of the first after it ended)
+  expect(events.slice(ended + 1).some((e) => e.sid === HERE)).toBe(false)
 })
 
 test('a tool of its own that could not be put before Claude is said in the session\'s chat, in a row sealed as any other', async ($, on) => {
