@@ -397,17 +397,7 @@ export function register(on, options) {
 
   on('session.end', async ($, e, next) => {
     if (config) {
-      sendDeltas()
-      // (why it ended goes on its card, which goes before it does)
-      put(e.sessionId, 'card', { ...cardNow(), state: 'idle', endReason: e.reason })
-      put(e.sessionId, 'session.end')
-      endedIds.add(e.sessionId)
-      // After /clear or a resume the process goes on under a new session id
-      sessionId = null
-      runningTurn = null
-      state = 'idle'
-      cursor = 0
-      forgetSession()
+      endedHere(e.sessionId, e.reason)
       // Sent now, whether or not a flush is under way: the process may be exiting. (As the server hears that a
       // session has ended it lets go of the poll it holds for it, and an ended session is not asked for again: see
       // poll. So a process on its way out has nothing left open.)
@@ -594,10 +584,36 @@ function keysHere($, { key }) {
   return null
 }
 
+// A session of this process has ended, or gone: its card says why, and it is said to have ended. After /clear or a
+// resume the process goes on under a new session id, which is taken up as anything next happens in it.
+function endedHere(sid, reason) {
+  sendDeltas()
+  // (why it ended goes on its card, which goes before it does)
+  put(sid, 'card', { ...cardNow(), state: 'idle', endReason: reason })
+  put(sid, 'session.end')
+  endedIds.add(sid)
+  sessionId = null
+  runningTurn = null
+  state = 'idle'
+  cursor = 0
+  forgetSession()
+}
+
 // Which session this is. After /clear or a resume the process goes on under another: it
 // is taken up, and said hello for, the first time anything happens in it. Every hook
 // asks before it does anything else, so what it goes on to say is said of that session.
 async function currentSessionId($) {
+  // Where nothing said it went on to another: the settings hook events' SessionStart is not heard where they pass this
+  // plugin over, and VS Code's panel goes on to another conversation in the same process without ending the one it
+  // had. Asked each time, the one it is now is taken up, and the one it was ends, as one ended by /clear does: else
+  // the other conversation is told of under the first's name, which takes up nothing sent to it (deon, 2026-11-02:
+  // Bill's session in VS Code, in none of its history, that showed what his other conversations said)
+  if (sessionId) {
+    const now = await Promise.resolve($.session.id()).catch(() => null)
+    if (!now || now === sessionId) return sessionId
+    endedHere(sessionId, 'other')
+    endedIds.delete(now)
+  }
   if (!sessionId) {
     const id = await $.session.id()
     // The process on its way out still answers with the session that just ended
