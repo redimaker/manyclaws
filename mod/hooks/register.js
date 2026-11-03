@@ -171,6 +171,7 @@ export function register(on, options) {
   // is noted, for a history to be read while none is (settledMessages).
   on('session.append', async ($, e, next) => {
     if (!config) return next(e)
+    if (!e.agentId && e.door === 'prompt') await followConversation($)
     if (e.agentId) {
       await recordRow($, e)
       return next(e)
@@ -191,6 +192,7 @@ export function register(on, options) {
   on('turn.start', async ($, e, next) => {
     if (!config && !e.agentId) turnBefore = e.turnId
     if (config) {
+      if (!e.agentId) await followConversation($)
       await currentSessionId($)
       runningTurn = e.turnId
       stepsDone.clear()
@@ -603,17 +605,6 @@ function endedHere(sid, reason) {
 // is taken up, and said hello for, the first time anything happens in it. Every hook
 // asks before it does anything else, so what it goes on to say is said of that session.
 async function currentSessionId($) {
-  // Where nothing said it went on to another: the settings hook events' SessionStart is not heard where they pass this
-  // plugin over, and VS Code's panel goes on to another conversation in the same process without ending the one it
-  // had. Asked each time, the one it is now is taken up, and the one it was ends, as one ended by /clear does: else
-  // the other conversation is told of under the first's name, which takes up nothing sent to it (deon, 2026-11-02:
-  // Bill's session in VS Code, in none of its history, that showed what his other conversations said)
-  if (sessionId) {
-    const now = await Promise.resolve($.session.id()).catch(() => null)
-    if (!now || now === sessionId) return sessionId
-    endedHere(sessionId, 'other')
-    endedIds.delete(now)
-  }
   if (!sessionId) {
     const id = await $.session.id()
     // The process on its way out still answers with the session that just ended
@@ -623,6 +614,22 @@ async function currentSessionId($) {
     put(sessionId, 'hello')
   }
   return sessionId
+}
+
+// Where nothing said the process went on to another conversation: the settings hook events' SessionStart is not heard
+// where they pass this plugin over, and VS Code's panel goes on to another conversation in the same process without
+// ending the one it had. Asked as something new starts in it (a prompt typed, a turn), the one it is now is taken up,
+// and the one it was ends, as one ended by /clear does: else the other conversation is told of under the first's name,
+// which takes up nothing sent to it (deon, 2026-11-02: Bill's session in VS Code, in none of its history, that showed
+// what his other conversations said). Not as anything else happens: a session on its way out has the engine's
+// answers to wait for, and asked then, it ended before it said so
+async function followConversation($) {
+  if (!sessionId) return
+  const now = await Promise.resolve($.session.id()).catch(() => null)
+  if (!now || now === sessionId) return
+  endedHere(sessionId, 'other')
+  // (one gone back to, that this process ended before, is taken up again)
+  endedIds.delete(now)
 }
 
 // What was kept of the session that has ended is not the next one's

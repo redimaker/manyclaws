@@ -24,7 +24,7 @@ import { takeFromPlugin } from './agent.mjs'
 // How recently a session has to have been active for a file to be opened from its folder, or taken into it, as its own
 const SESSION_FOLDER_DAYS = 90
 
-export const VERSION = '6.2.10'
+export const VERSION = '6.2.11'
 
 // Something that is waited for no longer than it is given. `start` is handed a signal, which says stop at `ms`; and
 // whoever waits stops waiting `stuckMs` after that, whether or not it has ended. The second is what holds: a request
