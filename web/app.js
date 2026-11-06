@@ -1323,7 +1323,7 @@ const TOUR = [
   {
     title: 'Then let it tap you.',
     says: [
-      'In Settings, the gear at the top of the list, Notifications turns alerts on: a session that stops to ask sends one to your phone, and so does Claude when you have asked it to tell you something.',
+      'In Settings, the gear at the top of the list, Notifications turns alerts on: a session that stops to ask sends one to your phone, and so does one that has finished everything it was doing, and Claude when you have asked it to tell you something.',
       'On an iPhone, add the page to your Home Screen first, from Safari’s Share menu, and open ManyClaws from there. On Android, the browser asks once.',
     ],
     shot: ['shot-approve', 'A session on a phone, stopped at a permission prompt: Claude wants to use Bash to run a migration on staging, with Allow and Deny'],
@@ -1632,8 +1632,8 @@ function connect() {
   })
   on('notification', (ev) => {
     const n = JSON.parse(ev.data)
-    // (a session says to the account's phones that it needs someone. A page that is open hears of that from the session
-    // itself; this is for what Claude wanted said.)
+    // (a session says to the account's phones that it needs someone, and that it has finished everything it was doing. A
+    // page that is open hears of those from the session itself; this is for what Claude wanted said.)
     if (n.kind && n.kind !== 'notify') return
     const s = app.sessions.get(n.sid)
     alertUser((n.title || (s && nameOf(s)) || 'Claude') + (s?.host ? ' · ' + s.host : ''), n.message, n.sid)
@@ -1837,9 +1837,9 @@ function renderAlertsButton() {
     {
       home: 'On an iPhone or iPad, notifications come to ManyClaws on the Home Screen: tap Share, then Add to Home Screen, open ManyClaws from the Home Screen, and turn them on there.',
       blocked: "Blocked: notifications are turned off for this site in the browser's settings. Allow them there, and they can be turned on here.",
-      on: 'On: this device is told when a session needs you, and when Claude was asked to tell you something.',
+      on: 'On: this device is told when a session needs you, when it has finished everything it was doing, and when Claude was asked to tell you something.',
       open: 'On while this page is open. They could not be set up to arrive when it is closed.',
-      off: 'Off: this device is not told when a session needs you, or when a long turn is done.',
+      off: 'Off: this device is not told when a session needs you, or when it has finished everything it was doing.',
     }[state] ?? ''
   const go = el('set-alerts-go')
   go.hidden = state === 'home' || state === 'blocked' || state === 'none'
