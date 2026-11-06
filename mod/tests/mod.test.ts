@@ -560,15 +560,17 @@ test('told once on this computer that the settings hook events pass the plugin o
 // it is answering one, and its answer) is in `wrote`, by name.
 function relay(on: any, { mode = 'auto' as string | null, asks = {} as Record<string, any> } = {}) {
   const dir = '/.claude/manyclaws/relay/sess-1'
-  const state = { mode, asks }
+  const state = { mode, asks, stop: null as any, stopAt: 0 }
   const wrote = new Map<string, string>()
   const name = (path: string) => (path.startsWith(dir + '/') ? path.slice(dir.length + 1) : null)
   on('fs.read', ($: any, e: any) => {
     const n = name(e.path)
     if (n === 'mode' && state.mode !== null) return { value: state.mode }
+    if (n === 'stop' && state.stop) return { value: JSON.stringify(state.stop) }
     if (n && state.asks[n]) return { value: JSON.stringify(state.asks[n]) }
     return { deny: 'ENOENT' }
   })
+  on('fs.stat', ($: any, e: any) => (name(e.path) === 'stop' && state.stop ? { value: { kind: 'file', size: JSON.stringify(state.stop).length, mtimeMs: state.stopAt, isLink: false } } : { deny: 'ENOENT' }))
   on('fs.list', ($: any, e: any) => (e.path === dir ? { value: Object.keys(state.asks).map((n) => ({ name: n, kind: 'file', size: 1, mtimeMs: 0, isLink: false })) } : { deny: 'ENOENT' }))
   on('fs.write', ($: any, e: any) => {
     wrote.set(name(e.path) ?? e.path, e.text)
@@ -1675,7 +1677,7 @@ test('the last thing its user typed is on the card, with what Claude has said si
   expect([prompt.length, prompt.startsWith('/Users/maya/git/herons has the counts: xxx'), preview === prompt]).toEqual([200, true, true])
 })
 
-test('a session tells the account\'s phones itself, sealed: when it starts to need someone, and when a turn that took a while is done', async ($, on) => {
+test('a session tells the account\'s phones itself, sealed, when it starts to need someone; and not that a turn is done, however long it took (deon, 2026-11-05: "this should really just be for interaction by the user needed, not notifications")', async ($, on) => {
   on('tool.check', () => ({ decision: 'ask' }))
   engine(on)
   const m = await made(WORDS)
@@ -1688,58 +1690,94 @@ test('a session tells the account\'s phones itself, sealed: when it starts to ne
   await ($ as any).turn.complete({ turnId: 't1', reason: 'answer', isAborted: false, durationMs: 45_000, answer: 'Built, with\n  three warnings.', usage: { input_tokens: 10, output_tokens: 2412, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, model: 'm' } })
   await s.clock.advance(2000)
   const { notes, all } = opened(s, m)
-  expect(notes.map((n) => [n.kind, n.prefix, n.body])).toEqual([['needs', 'Needs you: ', 'Permission: Bash make'], ['done', 'Done: ', 'Built, with three warnings.']])
+  expect(notes.map((n) => [n.kind, n.prefix, n.body])).toEqual([['needs', 'Needs you: ', 'Permission: Bash make']])
   expect(notes.every((n) => n.title === 'work')).toBe(true)
-  // (what goes of each is one sealed thing: not which of the two it is)
-  expect(all.filter((e) => e.type === 'notify').map((e) => Object.keys(e).sort())).toEqual([['n', 'sealed', 'sid', 'ts', 'type'], ['n', 'sealed', 'sid', 'ts', 'type']])
-  // A turn that was stopped is no news to a phone, and says so in the chat
+  // (what goes is one sealed thing: not which kind it is)
+  expect(all.filter((e) => e.type === 'notify').map((e) => Object.keys(e).sort())).toEqual([['n', 'sealed', 'sid', 'ts', 'type']])
+  // A turn that was stopped is no news to a phone either, and says so in the chat
   await ($ as any).turn.start({ turnId: 't2', text: 'Build it again' })
   await ($ as any).turn.complete({ turnId: 't2', reason: 'aborted', isAborted: true, durationMs: 90_000 })
   await s.clock.advance(2000)
-  expect(opened(s, m).notes.length).toBe(2)
+  expect(opened(s, m).notes.length).toBe(1)
   // (each turn says in the chat what it took, as the terminal does: the stopped one counted no tokens)
   expect(opened(s, m).rows.map((r) => [r.role, r.text])).toEqual([['notice', '45s · ↓ 2.4k tokens'], ['notice', 'Interrupted'], ['notice', '1m 30s']])
 })
 
-test("a turn that ends while subagents it started run on (a workflow's, as Ultracode starts on every task) does not tell the phones it is done: the turn that gives Claude their word does, with what it says, timed from the first; where none comes, they are told it has finished a while after (deon, 2026-10-28)", async ($, on) => {
+// What Claude Code's Stop event says of a turn's end: what is still at work, and what is set to wake the session
+const stopped = (more: any = {}) => ({ hook_event_name: 'Stop', session_id: 'sess-1', stop_hook_active: false, background_tasks: [], session_crons: [], ...more })
+const SHELL = { id: 'b1', type: 'shell', status: 'running', description: 'Run the tests', command: 'npm test' }
+const WAKEUP = { id: 'c1', cron: 'in 270s', prompt: 'Check the build again', recurring: false }
+
+test('the phones are told once all a session was set going on is done: not while a shell or a subagent it started is at work, nor while it is set to wake again, and not for a short exchange or one stopped by the person (deon, 2026-11-05: "a message for completely done? So no timer set, not waiting for agent etc.")', async ($, on) => {
   engine(on)
-  on('classic.SubagentStart', () => ({}))
-  on('classic.SubagentStop', () => ({}))
+  on('classic.Stop', () => ({}))
   const m = await made(WORDS)
   const s: any = session(on, m)
   await start($)
   await s.clock.advance(10)
   const done = () => opened(s, m).notes.filter((n: any) => n.kind === 'done').map((n: any) => n.prefix + n.body)
-  const started = (id: string) => ($ as any).classic.SubagentStart({ hook_event_name: 'SubagentStart', agent_id: id, agent_type: 'general-purpose' })
-  const stopped = (id: string) => ($ as any).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: id })
-  // A turn long enough to be news starts a workflow, whose agent runs on after it: nothing yet
-  await ($ as any).turn.start({ turnId: 't1', text: 'Count every bird' })
-  await started('w1')
-  await ($ as any).turn.complete({ turnId: 't1', reason: 'answer', isAborted: false, durationMs: 40_000, answer: 'Started a workflow to count them.' })
-  await s.clock.advance(2000)
+  const stop = (more: any) => ($ as any).classic.Stop(stopped(more))
+  // Set going, and its turn ends with the tests running in the background: nothing yet
+  await ($ as any).turn.start({ turnId: 't1', text: 'Run every test and fix what fails' })
+  await s.clock.advance(40_000)
+  await ($ as any).turn.complete({ turnId: 't1', reason: 'answer', isAborted: false, durationMs: 40_000, answer: 'Started the tests.' })
+  await stop({ background_tasks: [SHELL], last_assistant_message: 'Started the tests.' })
+  await s.clock.advance(1000)
   expect(done()).toEqual([])
-  // Done, Claude Code gives Claude its word in a turn of its own, short as it is: that turn's end tells them, with its answer
-  await stopped('w1')
+  // Their word comes in a turn of its own, which sets a wake-up to look again: nothing yet
+  await ($ as any).turn.start({ turnId: 't2', text: 'The tests finished' })
+  await ($ as any).turn.complete({ turnId: 't2', reason: 'answer', isAborted: false, durationMs: 3_000, answer: 'Two failed; I will look again in a few minutes.' })
+  await stop({ session_crons: [WAKEUP], last_assistant_message: 'Two failed; I will look again in a few minutes.' })
   await s.clock.advance(1000)
-  await ($ as any).turn.start({ turnId: 't2', text: 'The workflow has finished' })
-  await ($ as any).turn.complete({ turnId: 't2', reason: 'answer', isAborted: false, durationMs: 4_000, answer: 'There are 412 birds.' })
+  expect(done()).toEqual([])
+  // Woken, it ends with nothing at work and nothing set: all done, with what it last said
+  await ($ as any).turn.start({ turnId: 't3', text: 'Check the build again' })
+  await ($ as any).turn.complete({ turnId: 't3', reason: 'answer', isAborted: false, durationMs: 9_000, answer: 'All 412 tests pass.' })
+  await stop({ last_assistant_message: 'All 412 tests pass.' })
   await s.clock.advance(1000)
-  expect(done()).toEqual(['Done: There are 412 birds.'])
-  // Where no turn comes once it is done, they are told it has finished, a while after
-  await ($ as any).turn.start({ turnId: 't3', text: 'Count the nests' })
-  await started('w2')
-  await ($ as any).turn.complete({ turnId: 't3', reason: 'answer', isAborted: false, durationMs: 40_000, answer: 'Started another.' })
+  expect(done()).toEqual(['Done: All 412 tests pass.'])
+  // A short exchange after it is no news
+  await ($ as any).turn.start({ turnId: 't4', text: 'Thanks' })
+  await s.clock.advance(4_000)
+  await ($ as any).turn.complete({ turnId: 't4', reason: 'answer', isAborted: false, durationMs: 4_000, answer: 'You are welcome.' })
+  await stop({ last_assistant_message: 'You are welcome.' })
   await s.clock.advance(1000)
-  await stopped('w2')
-  await s.clock.advance(10_000)
-  expect(done()).toEqual(['Done: There are 412 birds.'])
-  await s.clock.advance(12_000)
-  expect(done()).toEqual(['Done: There are 412 birds.', 'Claude has finished.'])
-  // A short turn that leaves nothing running is still no news to a phone
-  await ($ as any).turn.start({ turnId: 't4', text: 'And the eggs' })
-  await ($ as any).turn.complete({ turnId: 't4', reason: 'answer', isAborted: false, durationMs: 5_000, answer: 'None.' })
+  // Nor is what follows a turn the person stopped (Claude Code says no Stop of one), counted from afresh
+  await ($ as any).turn.start({ turnId: 't5', text: 'Refactor the build' })
+  await ($ as any).turn.complete({ turnId: 't5', reason: 'aborted', isAborted: true, durationMs: 60_000 })
+  await ($ as any).turn.start({ turnId: 't6', text: 'Only rename the script' })
+  await s.clock.advance(5_000)
+  await ($ as any).turn.complete({ turnId: 't6', reason: 'answer', isAborted: false, durationMs: 5_000, answer: 'Renamed.' })
+  await stop({ last_assistant_message: 'Renamed.' })
   await s.clock.advance(1000)
-  expect(done()).toEqual(['Done: There are 412 birds.', 'Claude has finished.'])
+  expect(done()).toEqual(['Done: All 412 tests pass.'])
+})
+
+test('where the settings hook events pass the plugin over, its own Stop hook keeps the turn\'s end for it (relay.sh), and that is taken up once: all done, the phones are told', async ($, on) => {
+  engine(on)
+  on('settings.read', ($: any, e: any) => ({ value: e.source === 'policy' ? { channelsEnabled: true } : {} }))
+  const m = await made()
+  const r = relay(on, { mode: 'default' })
+  const s: any = session(on, m)
+  await starting($, s.clock)
+  await s.clock.advance(10)
+  const done = () => opened(s, m).notes.filter((n: any) => n.kind === 'done').map((n: any) => n.prefix + n.body)
+  await ($ as any).turn.start({ turnId: 't1', text: 'Build the release' })
+  await s.clock.advance(40_000)
+  await ($ as any).turn.complete({ turnId: 't1', reason: 'answer', isAborted: false, durationMs: 40_000, answer: 'Started the build.' })
+  r.state.stop = stopped({ background_tasks: [SHELL], last_assistant_message: 'Started the build.' })
+  r.state.stopAt = 1
+  await s.clock.advance(1000)
+  expect(done()).toEqual([])
+  await ($ as any).turn.start({ turnId: 't2', text: 'The build finished' })
+  await ($ as any).turn.complete({ turnId: 't2', reason: 'answer', isAborted: false, durationMs: 2_000, answer: 'The release is built.' })
+  r.state.stop = stopped({ last_assistant_message: 'The release is built.' })
+  r.state.stopAt = 2
+  await s.clock.advance(1000)
+  expect(done()).toEqual(['Done: The release is built.'])
+  // (the same one, read again, is not news again)
+  await s.clock.advance(3000)
+  expect(done()).toEqual(['Done: The release is built.'])
 })
 
 test('the reply as it is written goes in sealed pieces, and word that they are done with when the reply is in the chat', async ($, on) => {

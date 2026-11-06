@@ -10,6 +10,7 @@
 #
 # The folder is <Claude Code's config folder>/manyclaws/relay/<session id>:
 #   mode       the permission mode, as the latest event said it
+#   stop       the turn's last end (the Stop event, whole), with what is still at work and what is set to wake the session
 #   N.ask      a permission prompt, as the PermissionRequest event gave it
 #   N.taken    the module is answering N (until it says so, three seconds on nobody is, and this hook stops)
 #   N.answer   the module's answer, which this hook says to Claude Code: nothing, for none
@@ -40,6 +41,10 @@ event=$(field hook_event_name)
 # (now and then, the folders of sessions a week gone)
 if [ "$event" = UserPromptSubmit ] && [ $((RANDOM % 20)) -eq 0 ]; then
   find "$base" -mindepth 1 -maxdepth 1 -type d -mtime +7 -exec rm -rf {} + 2>/dev/null
+fi
+if [ "$event" = Stop ]; then
+  printf '%s' "$input" > "$dir/stop.$$" && mv -f "$dir/stop.$$" "$dir/stop"
+  exit 0
 fi
 [ "$event" = PermissionRequest ] || exit 0
 
