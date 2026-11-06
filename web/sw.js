@@ -1,5 +1,6 @@
 // ManyClaws's service worker: it shows the notifications the server sends this device
-// (a session needs you, or Claude was asked to tell you something), and opens the session when one is tapped.
+// (a session needs you, has finished everything it was doing, or Claude was asked to tell you something), and opens
+// the session when one is tapped.
 // It keeps no copy of the page: the page is no use without the server.
 
 self.addEventListener('install', () => self.skipWaiting())
