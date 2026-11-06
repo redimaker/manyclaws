@@ -64,7 +64,7 @@ bash "$p/agent/install.sh" --from "$p" --auto-folders
 
 ## 5. Your phone
 
-Open {{origin}}/app on your phone and sign in. If your account has no key yet, make it there; otherwise approve the phone from a browser that has it. Add the page to your Home Screen, open it from there, and under **Settings** press **Turn on alerts** to hear when a session needs you or has finished.
+Open {{origin}}/app on your phone and sign in. If your account has no key yet, make it there; otherwise approve the phone from a browser that has it. Add the page to your Home Screen, open it from there, and under **Settings** press **Turn on alerts** to hear when a session needs you.
 
 ## Keeping it up to date and running
 

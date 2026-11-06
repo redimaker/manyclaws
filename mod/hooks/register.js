@@ -70,8 +70,6 @@ const MAX_BATCH = 300 // things per request
 const MAX_RESULT = 1_000_000 // longest string in a call's result
 const HISTORY_WAIT_MS = 3000 // how long a session's history waits for the first poll to say whether the server asks for it
 const CARD_MS = 1000 // a session's card goes at most this often, but for a change of state, which goes at once
-const DONE_WORTH_MS = 30_000 // a turn this long is worth telling a phone it is done
-const DONE_OWED_MS = 20_000 // once the subagents a turn left running are done, how long a turn of their word is waited for (doneOwedTick)
 const ANSWER_FIELD = 200_000 // how long an answer the server asked for (a handoff) may be
 const AGENT_IDLE_MS = 6 * 3600_000 // a subagent not heard of for this long is taken to be gone
 const DEVICES_MS = 2000 // the list of the account's devices is not asked for again sooner than this after it was
@@ -101,7 +99,6 @@ let lastSent = 0
 let sessionId = null // the current conversation's id; null right after one ends
 let attended = false // a person can be at this session (see isAttended)
 let mainTurnOn = false // the main conversation's turn is running: from its turn.start to its turn.complete
-let doneOwed = null // a turn that ended while subagents it started ran on, whose word to the phones waits for them (turnDone): { since, quiet }
 let runningTurn = null // turnId of the main loop's running turn, for turn.abort
 let turnBefore = null // the turn that started before the session was taken up (while it was being connected), if it is still running
 let state = 'idle'
@@ -641,7 +638,6 @@ function forgetSession() {
   usageNow = { contextPercent: null, costUsd: null }
   subagents.clear()
   spawns = []
-  doneOwed = null
   mainTurnOn = false
   stepsDone.clear()
   for (const id of [...held.keys()]) settleHeld(id)
@@ -891,7 +887,9 @@ function partDone() {
 }
 
 // Something for the account's phones: the server passes it on to the devices that asked
-// for notifications, and reads none of it
+// for notifications, and reads none of it. Only what needs the person: that the session is waiting on them (a
+// permission, a question), and what Claude was asked to tell them (notify_user); not that a turn has finished (deon,
+// 2026-11-05: "this should really just be for interaction by the user needed, not notifications")
 function tellPhones(kind, body, { title, prefix = '' } = {}) {
   if (!sessionId) return
   const folder = String(meta.cwd ?? '').split(/[\\/]/).filter(Boolean).pop() ?? ''
@@ -907,42 +905,12 @@ async function turnDone($, e) {
   else if (e.reason && e.reason !== 'answer') await emitRows($, [{ uuid: e.turnId + ':end', role: 'notice', text: 'Turn ended: ' + e.reason }])
   const spent = took(e)
   if (spent) await emitRows($, [{ uuid: e.turnId + ':took', role: 'notice', text: spent }])
-  // Word to the phones that it is done, where it took a while (from the turn that left subagents running, where one
-  // did) and nobody stopped it. Not while subagents it started run on (a workflow's, as Ultracode starts on every task):
-  // once they are done, Claude Code gives Claude their word in a turn of its own, whose end says it with what came of
-  // them, or, where none comes, doneOwedTick does (deon, 2026-10-28, of the dot: "it gives the impression the session is done")
-  const now = await $.clock.now()
-  if (e.reason === 'aborted' || e.isAborted || !attended) doneOwed = null
-  else {
-    const since = doneOwed?.since ?? now - (Number(e.durationMs) || 0)
-    doneOwed = agentsNow().length ? { since, quiet: 0 } : null
-    if (!doneOwed && now - since >= DONE_WORTH_MS) tellDone(e)
-  }
   if (answerAsked && answerTurn === e.turnId) {
     await emit($, 'answer', { asked: answerAsked, text: cap(e.answer, ANSWER_FIELD), reason: e.reason, aborted: !!e.isAborted })
     answerGiven = answerAsked
     answerAsked = ''
     answerTurn = null
   }
-}
-
-function tellDone(e) {
-  if (e.reason && e.reason !== 'answer') tellPhones('done', 'Stopped: ' + e.reason)
-  else if (typeof e.answer === 'string' && e.answer) tellPhones('done', e.answer, { prefix: 'Done: ' })
-  else tellPhones('done', 'Claude has finished.')
-}
-
-// The word to the phones a turn owes while the subagents it left running are at work (turnDone): once the last of
-// them is done, and no turn has started for a while to give Claude their word, the phones are told it has finished
-async function doneOwedTick($) {
-  if (!doneOwed || mainTurnOn) return
-  if (agentsNow().length) return void (doneOwed.quiet = 0)
-  const now = await $.clock.now()
-  if (!doneOwed.quiet) return void (doneOwed.quiet = now)
-  if (now - doneOwed.quiet < DONE_OWED_MS) return
-  const { since } = doneOwed
-  doneOwed = null
-  if (now - since >= DONE_WORTH_MS) tellPhones('done', 'Claude has finished.')
 }
 
 async function setState($, next, detail = '') {
@@ -1950,7 +1918,6 @@ async function relayTick($) {
   try {
     await relayMode($)
     await ultracodeFlagNow($)
-    await doneOwedTick($)
     if (!held.size && !asking.length) return
     const folder = await relayFolder($)
     const asks = (await $.fs.list(folder)).map((x) => x.name).filter((n) => n.endsWith('.ask') && !relayTaken.has(n))
