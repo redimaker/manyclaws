@@ -91,9 +91,9 @@ export const DEFAULT_POLICY = {
   toolResults: true, // send tool results (capped at maxField)
 }
 
-// The two tools the mod puts before Claude, and the only ones: the server has none to
-// add. Neither is answered in words of the server's (a notification has gone; a photo is
-// one the page sealed, opened here)
+// The tools the mod puts before Claude, and the only ones: the server has none to add.
+// None is answered in words of the server's (a notification has gone; a photo is one the
+// page sealed, opened here; a question's answers are signed by one of the account's devices)
 export const OWN_TOOLS = [
   {
     name: 'notify_user',
@@ -106,6 +106,36 @@ export const OWN_TOOLS = [
         title: { type: 'string', description: 'A short title' },
       },
       required: ['message'],
+    },
+  },
+  {
+    // (only where Claude Code has no AskUserQuestion of its own: a session nobody is at, which a machine's agent runs)
+    name: 'ask_user_question',
+    description:
+      'Asks the user questions on their ManyClaws page (their phone or browser), and waits for the answers. This session has no AskUserQuestion of its own, as nobody is at it in Claude Code: use this wherever you would use AskUserQuestion, with the same input.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        questions: {
+          type: 'array',
+          description: 'The questions to ask, one to four',
+          items: {
+            type: 'object',
+            properties: {
+              question: { type: 'string', description: 'The whole question, ending with a question mark' },
+              header: { type: 'string', description: 'A short label for it, of at most 12 characters' },
+              options: {
+                type: 'array',
+                description: 'Two to four choices; the user may always write an answer of their own instead',
+                items: { type: 'object', properties: { label: { type: 'string' }, description: { type: 'string' } }, required: ['label'] },
+              },
+              multiSelect: { type: 'boolean', description: 'Whether more than one choice may be picked' },
+            },
+            required: ['question', 'options'],
+          },
+        },
+      },
+      required: ['questions'],
     },
   },
   {

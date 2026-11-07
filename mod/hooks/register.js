@@ -270,7 +270,7 @@ export function register(on, options) {
     if (!config) return next(e)
     if (e.tool === 'AskUserQuestion') return askQuestion($, e, next)
     const { tool, tool_use_id: toolUseId, agentId, ...input } = e
-    if (isOwnTool(tool)) return ownTool($, tool.slice(TOOL_PREFIX.length), input)
+    if (isOwnTool(tool)) return ownTool($, tool.slice(TOOL_PREFIX.length), input, e)
     await currentSessionId($)
     lastTool = tool + ' ' + summarizeInput(input)
     agentHeard(agentId)
@@ -313,7 +313,7 @@ export function register(on, options) {
     const decided = await next(e)
     if (!config || !e.tool_use_id) return decided
     if (decided?.decision !== 'ask' || e.tool === 'AskUserQuestion') return decided
-    // Its own two tools are as trusted as the plugin that put them there
+    // Its own tools are as trusted as the plugin that put them there
     if (isOwnTool(e.tool)) return { decision: 'allow', reason: 'A ManyClaws tool' }
     // In auto mode an "ask" is the classifier's to settle first: it lets most calls run, and puts the rest to a person
     // (in the app's own dialog, where someone can be at it). The page is asked only then, by the PermissionRequest
@@ -1445,7 +1445,7 @@ async function poll($, loop = loops) {
     const r = await $.http.fetch(config.url + '/api/agent/poll?' + q, { headers: authHeaders() })
     if (r.ok) {
       const body = JSON.parse(r.text)
-      // (the server has taken this computer's token: its own two tools are put before Claude)
+      // (the server has taken this computer's token: its own tools are put before Claude)
       await addTools($)
       // Where the account has its prompts answered, and how much a session sends: which grant nothing, since an answer
       // still has to be signed
@@ -1498,7 +1498,7 @@ async function poll($, loop = loops) {
   $.clock.after(delay, () => poll($, loop))
 }
 
-// Its own two tools (OWN_TOOLS), put before Claude: these and no others, since a tool's
+// Its own tools (OWN_TOOLS), put before Claude: these and no others, since a tool's
 // name and what it is said to do are words the model reads, and the server has none to
 // add. Once: one that could not be put there is said in the chat, in a row sealed as any
 // other, and is not tried again.
@@ -1507,6 +1507,10 @@ async function addTools($) {
   if (toolsTried) return
   toolsTried = true
   for (const t of OWN_TOOLS) {
+    // (a question tool of its own only where Claude Code has none: claude -p, as a machine's agent runs a session, leaves
+    // AskUserQuestion out of Claude's tools, having nobody to ask (deon, 2026-11-06: "See why my AskUserQuestion tool is
+    // not working"). Where it has one, a terminal's, VS Code's or an app's that hosts it, that one is asked, on the page too)
+    if (t.name === 'ask_user_question' && (await asksItself($))) continue
     try {
       await $.tool.register({ name: t.name, description: t.description, inputSchema: t.inputSchema })
       added.add(t.name)
@@ -1517,6 +1521,12 @@ async function addTools($) {
   }
 }
 const isOwnTool = (tool) => tool.startsWith(TOOL_PREFIX) && added.has(tool.slice(TOOL_PREFIX.length))
+// Whether Claude Code has an AskUserQuestion of its own here: among the tools Claude can call, or, where those are not
+// to be had, where someone can be at the session
+async function asksItself($) {
+  const tools = await Promise.resolve($.tool.list()).catch(() => null)
+  return Array.isArray(tools) ? tools.some((t) => t?.name === 'AskUserQuestion') : attended
+}
 
 // The account's devices, as the server has them now: read before an order is gone by (as
 // a poll brings one, and as an answer to something the session asked comes), so that one
@@ -2048,11 +2058,12 @@ async function approve($, e, decided, hook, route) {
   return decided
 }
 
-async function askQuestion($, e, next) {
+async function askQuestion($, e, next, where = null) {
   const { tool, tool_use_id: toolUseId, agentId, ...input } = e
   const questions = Array.isArray(input.questions) ? input.questions : []
   const rid = requestId()
-  const route = await routeOf($, 'questions')
+  // (`where`: where it is asked, where that is settled already)
+  const route = where ?? (await routeOf($, 'questions'))
   const remote = route === 'remote'
   const request = { rid, kind: 'question', toolUseId, agentId, questions: cap(questions, policy.maxField), route }
   await emit($, 'request', request)
@@ -2113,9 +2124,17 @@ async function askQuestion($, e, next) {
   return result
 }
 
-// Its own two tools, answered here: the server is asked for nothing but to pass a
-// notification on and to hand a photo over, sealed as the page kept it
-async function ownTool($, name, input) {
+// Its own tools, answered here: the server is asked for nothing but to pass a notification
+// on, to hand a photo over, sealed as the page kept it, and to pass a question on and its answer back
+async function ownTool($, name, input, e) {
+  // A question for the page, where Claude Code has no AskUserQuestion: asked as that one is asked from a session nobody
+  // is at (askQuestion), and the answers given Claude in words, as Claude Code gives its own
+  if (name === 'ask_user_question') {
+    const asked = await askQuestion($, { ...input, tool: 'AskUserQuestion', tool_use_id: e?.tool_use_id, agentId: e?.agentId }, () => ({ deny: 'Nobody answered on the ManyClaws page.' }), 'remote')
+    const answers = asked?.result?.answers
+    if (!answers) return asked
+    return { result: `The user answered on their ManyClaws page: ${Object.entries(answers).map(([q, a]) => `"${q}"="${a}"`).join(', ')}. You can now continue with these answers in mind.` }
+  }
   if (name === 'notify_user') {
     await currentSessionId($)
     tellPhones('notify', String(input?.message ?? ''), { title: input?.title ? String(input.title).slice(0, 200) : undefined })
