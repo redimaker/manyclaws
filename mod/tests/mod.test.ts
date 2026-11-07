@@ -424,6 +424,42 @@ test('a question answered on the page returns the answers to Claude', async ($, 
   expect(r).toEqual({ result: { questions: WHICH, answers: { 'Which?': 'B' } } })
 })
 
+// A session nobody is at, which Claude Code gives no AskUserQuestion of its own (claude -p, as a machine's agent runs one)
+const SDK = { env: { ...ENV, CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, surfaces: [] as string[] }
+const own = (on: any, names: string[]) => {
+  const tools: string[] = []
+  on('tool.register', ($: any, e: any) => {
+    tools.push(e.name)
+    return { value: undefined }
+  })
+  on('tool.list', () => ({ value: names.map((name) => ({ name, description: '', mcp: false })) }))
+  return tools
+}
+
+test("where Claude Code gives Claude no AskUserQuestion (a session nobody is at, as a machine's agent runs one), the plugin puts its own question tool before Claude: asked on the page, and the answers given Claude in words (deon, 2026-11-06)", async ($, on) => {
+  const m = await made()
+  const tools = own(on, ['Bash', 'Read'])
+  const s: any = session(on, m, { ...SDK, tools: false, poll: [{ policy: { version: 1, questions: 'local' }, commands: [] }], decision: () => answer() })
+  const answer = answerTo(s, m, pick(m, { 'Which?': ['B'] }))
+  await startHosted($)
+  await s.clock.advance(2000)
+  expect(tools).toEqual(['notify_user', 'ask_user_question', 'view_attachment'])
+  // (on the page, whatever the account says of where questions are answered: there is nowhere else)
+  const r = await $.tool.call({ tool: 'mcp__manyclaws__ask_user_question', questions: WHICH, tool_use_id: 'tq-own' } as any)
+  expect(r).toEqual({ result: 'The user answered on their ManyClaws page: "Which?"="B". You can now continue with these answers in mind.' })
+  await s.clock.advance(300)
+  expect(opened(s, m).requests[0]).toMatchObject({ kind: 'question', route: 'remote', questions: WHICH })
+})
+
+test("where Claude Code has an AskUserQuestion of its own (an app that hosts it and asks for itself, as T3 Code does), the plugin puts no question tool of its own before Claude", async ($, on) => {
+  const m = await made()
+  const tools = own(on, ['Bash', 'AskUserQuestion'])
+  const s: any = session(on, m, { ...SDK, tools: false, poll: [{ commands: [] }] })
+  await startHosted($)
+  await s.clock.advance(2000)
+  expect(tools).toEqual(['notify_user', 'view_attachment'])
+})
+
 test('auto, with someone at a terminal: a question goes to the page, and to the band above the prompt', async ($, on) => {
   on('tool.call', () => ({ result: 'the terminal dialog' }))
   const m = await made()
