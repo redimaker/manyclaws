@@ -139,6 +139,17 @@ export const OWN_TOOLS = [
     },
   },
   {
+    // (what Claude waits for that Claude Code keeps no track of: see register.js, ownTool)
+    name: 'waiting_on',
+    description:
+      "Tells the user's ManyClaws page that this session isn't done. Call it as the last step of a turn you end while waiting for something that will bring this session back by itself and that Claude Code doesn't track: a message or reply you asked another Claude session for, or work another session is doing that you'll carry on from. Without it the page shows the session as finished. Not needed for a background shell, monitor, subagent or workflow, ScheduleWakeup, /loop or CronCreate, or SendMessage with notify_when_idle, which the page knows of already, and not for waiting on the user. It lasts until your next turn starts: call it again at the end of that turn if you're still waiting.",
+    inputSchema: {
+      type: 'object',
+      properties: { what: { type: 'string', description: "What you're waiting for and from whom, in a few words (\"multiclaude-21's word that beta is free\")" } },
+      required: ['what'],
+    },
+  },
+  {
     name: 'view_attachment',
     description: 'Shows a photo the user sent from the ManyClaws page (their phone or browser). Call it with the id from an "[Attachment <id>: …]" note in their message, once for each id, before answering.',
     inputSchema: {

@@ -39,7 +39,9 @@ const STATE_ORDER = { attention: 0, working: 1, idle: 2, offline: 3, ended: 4 }
 // So is one whose turn left anything else at work in the background (a shell, a monitor) or set itself to come back
 // (ScheduleWakeup, /loop, CronCreate), as Claude Code said when the turn ended (the card's `waits`), until a turn
 // ends with none (deon, 2026-11-08: "manyclaws is indicating that it is complete (with the green dot) but clearly the
-// session set a timer that it is going to come back to"). Its Stop is still its turn's: that stops none of it
+// session set a timer that it is going to come back to"); and one whose turn ended waiting for word that will bring it
+// back, from another session, which Claude Code keeps no track of and Claude said (the plugin's tool waiting_on, or
+// SendMessage's notify_when_idle: `peer` among the `waits`). Its Stop is still its turn's: that stops none of it
 const standing = (s) => (s?.state === 'idle' && (s.agents?.length || s.waits?.length) ? 'working' : s?.state)
 
 // The page's two looks: the VS Code extension's, and Claude Code's in the terminal
@@ -7441,8 +7443,8 @@ setInterval(() => {
 }, 130)
 
 // ---- Subagents: the ones the open session has running now, in a strip above the reply box; and, once its turn has
-// ended, what else that left at work in the background, and whether it is set to come back (the card's `waits`, which
-// list a subagent too: that one is among the subagents)
+// ended, what else that left at work in the background, whether it is set to come back, and what word it waits for
+// (the card's `waits`, which list a subagent too: that one is among the subagents)
 
 const AGENTS_SHOWN = 6
 const COMES_BACK = new Set(['wakeup', 'cron'])
@@ -7451,13 +7453,15 @@ function renderAgents(s) {
   const box = el('agents')
   const agents = s?.agents ?? []
   const waits = s?.state === 'idle' ? (s.waits ?? []) : []
-  const tasks = waits.filter((w) => w.kind !== 'subagent' && !COMES_BACK.has(w.kind))
+  const tasks = waits.filter((w) => w.kind !== 'subagent' && w.kind !== 'peer' && !COMES_BACK.has(w.kind))
   const comes = waits.filter((w) => COMES_BACK.has(w.kind))
-  box.hidden = !agents.length && !tasks.length && !comes.length
+  const words = waits.filter((w) => w.kind === 'peer')
+  box.hidden = !agents.length && !tasks.length && !comes.length && !words.length
   if (box.hidden) return box.replaceChildren()
   const items = [
     ...agents.map((a) => h('span', { class: 'agent', title: [a.type, a.background ? 'in the background' : '', 'started ' + time(a.startedAt)].filter(Boolean).join(' · ') }, a.description || a.type || 'subagent', h('span', { class: 'agent-for' }, ' ' + ago(a.startedAt)))),
     ...tasks.map((w) => h('span', { class: 'agent', title: w.kind + ' in the background' }, w.about || w.kind)),
+    ...words.map((w) => h('span', { class: 'agent', title: 'Claude is waiting for this, and comes back to it' }, w.about)),
   ]
   const shown = items.slice(0, AGENTS_SHOWN)
   // (what it comes back with: not a /loop's word for itself)
@@ -7466,7 +7470,7 @@ function renderAgents(s) {
     h(
       'span',
       { class: 'agents-count', ...(prompts.length ? { title: prompts.join('\n') } : {}) },
-      [agents.length && count(agents.length, 'subagent') + ' running', tasks.length && count(tasks.length, 'task') + ' in the background', comes.length && 'set to come back'].filter(Boolean).join(' · '),
+      [agents.length && count(agents.length, 'subagent') + ' running', tasks.length && count(tasks.length, 'task') + ' in the background', comes.length && 'set to come back', words.length && 'waiting for word'].filter(Boolean).join(' · '),
     ),
     ...shown,
     ...(items.length > shown.length ? [h('span', { class: 'agent more' }, `and ${items.length - shown.length} more`)] : []),

@@ -104,6 +104,7 @@ let mainTurnOn = false // the main conversation's turn is running: from its turn
 let workSince = null // when what the session is at was set going: its first turn since it was last all done (allDone)
 let stopSeen = '' // the turn's end the relay last kept that was taken up: its time and size (relayStopped)
 let waits = [] // what the last turn left at work in the background or set to wake the session, as its Stop said (noteWaits)
+let waitsOn = [] // and what this turn says it waits for that Claude Code keeps no track of (waiting_on, SendMessage's notify_when_idle)
 let stopTaken = false // the running turn's Stop has been taken up
 let stopOwed = 0 // flushes the card's idle still waits for the turn's Stop (sendCard)
 let runningTurn = null // turnId of the main loop's running turn, for turn.abort
@@ -207,7 +208,7 @@ export function register(on, options) {
       if (!e.agentId) mainTurnOn = true
       if (!e.agentId) workSince ??= await $.clock.now()
       // (what the last turn left at work is said again by this one's Stop)
-      if (!e.agentId) [waits, stopTaken, stopOwed] = [[], false, 0]
+      if (!e.agentId) [waits, waitsOn, stopTaken, stopOwed] = [[], [], false, 0]
       // (the turn the server asked the answer of is the first to start after it asked)
       if (answerAsked && !answerTurn) answerTurn = e.turnId
       await setState($, 'working')
@@ -301,6 +302,9 @@ export function register(on, options) {
         if (began.isAsync) subagents.get(began.agentId).background = true
         cardChanged()
       }
+      // (asked to be told when another session is done: Claude Code tells it, in a turn of its own, and keeps no track of
+      // that where its Stop can say so)
+      if (!agentId && tool === 'SendMessage' && input.notify_when_idle === true && !end.isError) waitOn(`${String(input.to ?? 'another session')} to finish`)
     }
     const row = resultRow(end)
     if (row) await emitRows($, [row])
@@ -655,6 +659,7 @@ function forgetSession() {
   mainTurnOn = false
   workSince = null
   waits = []
+  waitsOn = []
   stopOwed = 0
   stepsDone.clear()
   for (const id of [...held.keys()]) settleHeld(id)
@@ -813,7 +818,7 @@ function cardNow() {
     effort: effortNow ?? null,
     ultracode: ultracodeNow,
     agents: agentsNow().sort((a, b) => a.startedAt - b.startedAt),
-    waits,
+    waits: [...waits, ...waitsOn],
   }
 }
 function cardChanged(urgent = false) {
@@ -957,6 +962,17 @@ function noteWaits(e) {
   ]
   stopTaken = true
   stopOwed = 0
+  cardChanged(true)
+}
+
+// What Claude says its turn waits for that will bring the session back by itself and that Claude Code keeps no track of
+// (its own tool, waiting_on, or another session it asked to be told is done): on the card beside what the Stop says, so
+// that the page draws it as not done (deon, 2026-11-08: "a session waiting on something Claude Code doesn't track,
+// such as a message from another session, still shows as done ... Can you fix this?"). Until the next turn starts.
+function waitOn(what) {
+  const about = cap(String(what ?? '').trim(), 200)
+  if (!about || waitsOn.some((w) => w.about === about)) return
+  waitsOn.push({ kind: 'peer', about })
   cardChanged(true)
 }
 
@@ -2172,6 +2188,14 @@ async function ownTool($, name, input, e) {
     const answers = asked?.result?.answers
     if (!answers) return asked
     return { result: `The user answered on their ManyClaws page: ${Object.entries(answers).map(([q, a]) => `"${q}"="${a}"`).join(', ')}. You can now continue with these answers in mind.` }
+  }
+  if (name === 'waiting_on') {
+    await currentSessionId($)
+    if (e?.agentId) return { result: "Only the session's own turn can wait: a subagent's ends when it answers." }
+    const what = String(input?.what ?? '').trim()
+    if (!what) return { deny: 'Say what you are waiting for.' }
+    waitOn(what)
+    return { result: "The page shows this session as waiting for that, not done, until your next turn starts." }
   }
   if (name === 'notify_user') {
     await currentSessionId($)
