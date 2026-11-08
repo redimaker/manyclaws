@@ -55,6 +55,8 @@ import {
   isAttended,
   randomId,
   took,
+  photoNotes,
+  photoFileName,
 } from './lib.js'
 import { seal, open, isSealed, openBytes, keysFromText, keysText, contentKey, nameOf, toB64, fromB64, sha256, isOrder, readOrder, takeOrder, orderMemory, devicesMemory, askedOf, OrderRefused, sshSigned, pluginDigest, pluginOfList, notPlugin, hexSha256, mayStart, pairStart, pairFinish, pairConfirmed, sealPaired, openPaired, pairCode } from './seal.js'
 import { messageRows, resultRow, historyRows, summarizeInput } from './rows.js'
@@ -153,6 +155,8 @@ let relayBusy = false // a look in the relay's folder is under way
 let relayModeAt = 0 // when the permission mode the relay keeps was last read
 const deltas = new Map() // streamed reply text not yet sent, by turn, step and block
 const added = new Set() // the names of its own tools that are before Claude (OWN_TOOLS)
+const photoNames = new Map() // attachment id -> what the note in a prompt called the photo (its file is named by it: savePhoto)
+const photoFolders = new Map() // session id -> the folder its photos were saved in, which goes as the session ends
 
 export function register(on, options) {
   on('session.start', async ($, e, next) => {
@@ -417,6 +421,7 @@ export function register(on, options) {
       }
       await $.store.delete('cursor:' + e.sessionId).catch(() => {})
     }
+    await dropPhotos($, e.sessionId)
     return next(e)
   })
 
@@ -961,6 +966,7 @@ async function recordRow($, e) {
   if (door === 'attachment' || (door === 'tool-result' && !policy.toolResults)) return
   if (!agentId) {
     await noteSetting($, message.content)
+    if (door === 'prompt' || door === 'delivery') notePhotos(message.content)
     await emitRows($, messageRows({ uuid, door, isMeta: !!message.isMeta, origin: cap(e.origin, 300), blocks: normalizeBlocks(door === 'command' ? colorless(message.content) : message.content, policy.maxField) }))
     // (the reply is in the chat now: what streamed of it is done with)
     if (door === 'response') partDone()
@@ -2142,7 +2148,8 @@ async function ownTool($, name, input, e) {
     await flush($)
     return { result: 'The notification was sent.' }
   }
-  // A photo the user sent from the page: kept on the server as the page sealed it, and opened here
+  // A photo the user sent from the page: kept on the server as the page sealed it, and opened here, for Claude to see
+  // and as a file (savePhoto)
   const id = String(input?.id ?? '').trim()
   if (!/^[a-f0-9]{16}$/.test(id)) return { deny: `There is no attachment ${id} for this session.` }
   let r
@@ -2159,7 +2166,75 @@ async function ownTool($, name, input, e) {
   if (!plain) return { result: [{ type: 'text', text: "[A photo that could not be opened with this machine's key]" }] }
   // (in the standard base64 Claude expects; what kind of picture it is, the picture says itself)
   const b64 = toB64(plain).replace(/-/g, '+').replace(/_/g, '/')
-  return { result: [{ type: 'image', source: { type: 'base64', media_type: pictureType(plain), data: b64 + '='.repeat((4 - (b64.length % 4)) % 4) } }] }
+  const data = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+  const type = pictureType(plain)
+  return { result: [{ type: 'image', source: { type: 'base64', media_type: type, data } }, { type: 'text', text: await savePhoto($, id, data, type) }] }
+}
+
+// A photo is kept as a file too, as it came: Claude sees it, and only once it has done so is it likely to know that the
+// file itself is wanted (to attach to a ticket, say), which it then has (deon, 2026-11-08: a session sent a screenshot
+// from the page had no file of it to attach to a ticket). In a folder of the session's own in this computer's temp folder, which
+// only this user may open, and which goes as the session ends: a photo is on disk no longer than the session that was
+// sent it. Its bytes are written by bash, as the mods API writes nothing but text, and it says what came of it, which
+// is what Claude is told
+async function savePhoto($, id, data, type) {
+  try {
+    const sid = await currentSessionId($)
+    const folder = photoFolders.get(sid) ?? `${await tempFolder($)}/manyclaws-${String(sid ?? '').replace(/[^A-Za-z0-9_-]/g, '') || 'session'}`
+    const file = `${folder}/${id}-${photoFileName(photoNames.get(id), type)}`
+    photoFolders.set(sid, folder)
+    const windows = onWindows(folder)
+    const r = await $.process.run([await bash($, windows), '-c', SAVE_PHOTO, 'manyclaws', folder, file, windows ? '' : 'own'], { stdin: data, timeoutMs: 30_000 })
+    if (r.exitCode !== 0) throw new Error(lastLine(r) || 'it could not be written')
+    return `Saved to ${file}. The file is deleted when this session ends.`
+  } catch (err) {
+    return `It could not be saved as a file here: ${err?.message ?? err}.`
+  }
+}
+// (the folder made for this user alone, and one that was there already taken only where it is this user's own, and no
+// link: in a temp folder that every user shares, as /tmp is on Linux, another could have made it first. The file is
+// written beside its name and then given it, so that nothing reads half of it under that name)
+const SAVE_PHOTO =
+  'umask 077 && mkdir -p -- "$1" && { [ -z "$3" ] || { [ -O "$1" ] && [ ! -L "$1" ]; } || { echo "$1 is not a folder of this user\'s own" >&2; exit 1; }; } && chmod 700 "$1" && base64 --decode > "$2.part" && mv -f -- "$2.part" "$2"'
+
+// The photos a session was sent, and saved as files, go as it ends; and with them those of the sessions this process
+// went on from to another conversation (a panel's), which are saved again if Claude asks to see one of them again
+async function dropPhotos($, sid) {
+  for (const [of, folder] of [...photoFolders]) {
+    if (of !== sid && !endedIds.has(of)) continue
+    photoFolders.delete(of)
+    try {
+      await $.process.run([await bash($, onWindows(folder)), '-c', 'rm -rf -- "$1"', 'manyclaws', folder], { timeoutMs: 15_000 })
+    } catch {}
+  }
+}
+
+// What the notes in a prompt call the photos they name, for their files' names
+function notePhotos(content) {
+  for (const { id, name } of photoNotes(flattenText(content))) photoNames.set(id, name)
+  for (const id of [...photoNames.keys()].slice(0, Math.max(0, photoNames.size - 500))) photoNames.delete(id)
+}
+
+// This computer's temp folder, as its system names it (on Windows, with the slashes bash and Claude both take, and the
+// one on a drive before a TMPDIR of Git Bash's own, /tmp, which nothing else there can read by that name). A whole
+// path, always: what the folder is made by takes nothing else
+async function tempFolder($) {
+  // (each read by its name, as the mods API has a module's variables named where it reads them)
+  const named = [await $.env.get('TMPDIR'), await $.env.get('TEMP'), await $.env.get('TMP')]
+    .map((value) => String(value ?? '').replace(/\\/g, '/').replace(/(.)\/+$/, '$1'))
+    .filter((value) => /^(\/|[A-Za-z]:\/)/.test(value))
+  return named.find((f) => /^[A-Za-z]:\//.test(f)) ?? named[0] ?? '/tmp'
+}
+// (Windows, by what uname said, or by a folder on a drive where it said nothing)
+const onWindows = (folder) => /^(MSYS|MINGW|CYGWIN)/.test(meta.platform ?? '') || /^[A-Za-z]:\//.test(folder)
+// The bash that runs what the plugin does on files: on Windows the Git Bash Claude Code runs (gitBash), and not one found
+// on the PATH, which may be WSL's
+let gitBashFound = null
+async function bash($, windows) {
+  if (!windows) return 'bash'
+  gitBashFound ??= await gitBash($)
+  if (!gitBashFound) throw new Error('Git Bash was not found on this computer')
+  return gitBashFound
 }
 
 // What kind of picture some bytes are, by how they begin

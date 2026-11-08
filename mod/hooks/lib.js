@@ -140,7 +140,8 @@ export const OWN_TOOLS = [
   },
   {
     name: 'view_attachment',
-    description: 'Shows a photo the user sent from the ManyClaws page (their phone or browser). Call it with the id from an "[Attachment <id>: …]" note in their message, once for each id, before answering.',
+    description:
+      'Shows a photo the user sent from the ManyClaws page (their phone or browser), and saves it as a file on this computer, whose path it gives, for when the file itself is wanted (to attach it to something, or to work on it). Call it with the id from an "[Attachment <id>: …]" note in their message, once for each id, before answering.',
     inputSchema: {
       type: 'object',
       properties: { id: { type: 'string', description: 'The attachment id from the note' } },
@@ -311,6 +312,27 @@ export function colorless(content) {
   const plain = (text) => String(text ?? '').replace(/\x1b\[[0-9;]*m/g, '')
   if (typeof content === 'string') return plain(content)
   return Array.isArray(content) ? content.map((b) => (b?.type === 'text' ? { ...b, text: plain(b.text) } : b)) : content
+}
+
+// The photos a prompt's notes name, as the page writes them ("[Attachment <id>: <name> (<type>). Call the view_attachment
+// tool …]"): each one's id and name
+const PHOTO_NOTE = /\[Attachment ([a-f0-9]{16}): ([^\]\n]*?) \(image\/[^)\n]*\)\. Call the view_attachment tool/g
+export function photoNotes(text) {
+  return [...String(text ?? '').matchAll(PHOTO_NOTE)].map((m) => ({ id: m[1], name: m[2] }))
+}
+
+// What a photo saved as a file is called: what its note called it, with nothing in it that a path would take for more
+// (a folder, a drive, a name Windows refuses), and ending as the kind of picture it is (a big photo goes from the page
+// made smaller, as a JPEG, under the name it had)
+const PICTURE_ENDINGS = { 'image/png': ['png'], 'image/gif': ['gif'], 'image/webp': ['webp'], 'image/jpeg': ['jpg', 'jpeg'] }
+export function photoFileName(name, type) {
+  const endings = PICTURE_ENDINGS[type] ?? PICTURE_ENDINGS['image/jpeg']
+  // eslint-disable-next-line no-control-regex
+  let stem = String(name ?? '').replace(/[\x00-\x1f\x7f/\\:*?"<>|]+/g, '_').replace(/^[\s.]+|[\s.]+$/g, '')
+  const ending = /\.([A-Za-z0-9]+)$/.exec(stem)?.[1].toLowerCase()
+  if (ending && endings.includes(ending)) return stem.slice(-120)
+  if (ending && ['png', 'gif', 'webp', 'jpg', 'jpeg', 'heic', 'heif', 'avif', 'bmp', 'tif', 'tiff'].includes(ending)) stem = stem.slice(0, -ending.length - 1)
+  return (stem.slice(0, 100) || 'photo') + '.' + endings[0]
 }
 
 export function flattenText(content) {

@@ -1,7 +1,7 @@
 // The hooks, with every Claude Code and network answer stubbed
 import { expect, mock, test } from 'claude-code/testing'
 import { PLUGIN_VERSION } from '../hooks/lib.js'
-import { keysText, toB64, fromB64, sha256, sha512, sign, verifyKey, contentKey, seal, open, isSealed, nameOf, makeOrder, makeDevices, readOrder, askedOf, sealedLength, gcmDecrypt, ORDER_MS, hexSha256, pluginDigest, pairStart, pairFinish, pairConfirmed, sealPaired, openPaired } from '../hooks/seal.js'
+import { keysText, toB64, fromB64, sha256, sha512, sign, verifyKey, contentKey, seal, open, isSealed, nameOf, makeOrder, makeDevices, readOrder, askedOf, sealedLength, gcmDecrypt, ORDER_MS, hexSha256, pluginDigest, pairStart, pairFinish, pairConfirmed, sealPaired, openPaired, sealBytes } from '../hooks/seal.js'
 
 // Every session here is its account's, sealed with its key: there is no other kind (a
 // mod with no key sends nothing and asks for nothing, which is the second test). The mod
@@ -39,7 +39,8 @@ const polled = (sent: Sent[]) => sent.filter((s) => s.url.includes('/api/agent/p
 // `refused`: the server refuses the mod's token (taken back), whatever it asks with it.
 // `tools: false`: nothing answers tool.register, or the test answers it itself.
 // `run`: what answers any other command the mod runs (its argv and how it was run), where it answers anything
-function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, refused = false, surfaces = ['terminal'], swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>), page = null as null | Page , sid = null as null | (() => string) } = {}) {
+// `attachments`: the photos the server keeps for the session, sealed as the page sealed them, by id
+function setup(on: any, { run = null as null | ((argv: string[], init: any) => any), attachments = {} as Record<string, string>, env = ENV as Record<string, string>, poll = [] as any[], decision = null as any, unreachable = false, refused = false, surfaces = ['terminal'], swaps = true, store = {} as Record<string, unknown>, messages = [] as any[] | (() => any[]), tools = true, devices = undefined as undefined | string | ((clock: any) => string | Promise<string>), page = null as null | Page , sid = null as null | (() => string) } = {}) {
   const clock = mock.clock(on)
   // (The test says what the key is first, `await made()`: where it has not, what the environment holds is as it is.)
   const known = env.MANYCLAWS_KEY ? makes.get('u_test|' + env.MANYCLAWS_KEY) : null
@@ -103,6 +104,10 @@ function setup(on: any, { run = null as null | ((argv: string[], init: any) => a
     }
     const body = e.init?.body ? JSON.parse(e.init.body) : null
     sent.push({ url: e.url, body })
+    if (e.url.includes('/api/agent/attachment?')) {
+      const data = attachments[new URL(e.url).searchParams.get('id') ?? '']
+      return { value: data ? { status: 200, ok: true, headers: {}, text: JSON.stringify({ data }) } : { status: 404, ok: false, headers: {}, text: '{"error":"no such attachment"}' } }
+    }
     // A computer being connected: the server's pairings, and the page where its code is typed (`page`)
     if (e.url.includes('/api/pairings')) return { value: pairings(e, body) }
     if (e.url.includes('/api/agent/poll')) {
@@ -1872,6 +1877,91 @@ test('its own two tools need nothing of the server but to pass a notification on
   // (no request is made of the server for either)
   expect(got.all.some((e) => e.type === 'request')).toBe(false)
   expect(JSON.stringify(got.all).includes('green')).toBe(false)
+})
+
+// (a photo's bytes, sealed as the page seals them; and the same in the standard base64 Claude is given them in)
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 1, 2, 250, 251, 252])
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70])
+const photoOf = (bytes: Uint8Array, m: Made) => toB64(sealBytes(bytes, contentKey(m.key)))
+const base64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes))
+const noted = (id: string, name: string, type: string) => `[Attachment ${id}: ${name} (${type}). Call the view_attachment tool with id "${id}" to see it.]`
+
+test("a photo sent from the page is shown to Claude and saved too, as it came, under its id and the name its note gave it, in a folder of the session's own in the temp folder that only this user may open; one that cannot be saved is still shown, with why not; and the folder goes as the session ends", async ($, on) => {
+  const m = await made(WORDS)
+  on('tool.call', () => ({ result: 'the engine, which is not asked' }))
+  on('session.end', ($: any, e: any) => ({ sessionId: e.sessionId }))
+  const ran: any[] = []
+  const run = (argv: string[], init: any) => {
+    if (argv[0] !== 'bash') return null
+    ran.push({ argv, stdin: init?.stdin })
+    return String(argv[5] ?? '').includes('/cccccccccccccccc-') ? { exitCode: 1, stdout: '', stderr: 'base64: write error: No space left on device' } : { exitCode: 0, stdout: '', stderr: '' }
+  }
+  const attachments = { aaaaaaaaaaaaaaaa: photoOf(PNG, m), bbbbbbbbbbbbbbbb: photoOf(JPEG, m), cccccccccccccccc: photoOf(PNG, m) }
+  const s: any = session(on, m, { run, attachments, env: { ...ENV, TMPDIR: '/var/folders/xy/abc/T/' }, poll: [{ policy: { version: 1 }, commands: [] }] })
+  await start($)
+  await s.clock.advance(1000)
+  await ($ as any).session.append(said('u1', 'prompt', 'user', [{ type: 'text', text: `Put these on the ticket\n\n${noted('aaaaaaaaaaaaaaaa', 'Screen Shot (2).png', 'image/png')}\n\n${noted('bbbbbbbbbbbbbbbb', 'IMG_0042.HEIC', 'image/jpeg')}` }]))
+  const view = (id: string) => $.tool.call({ tool: 'mcp__manyclaws__view_attachment', id, tool_use_id: 'tv-' + id } as any)
+  const folder = '/var/folders/xy/abc/T/manyclaws-sess-1'
+  expect(await view('aaaaaaaaaaaaaaaa')).toEqual({
+    result: [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64(PNG) } },
+      { type: 'text', text: `Saved to ${folder}/aaaaaaaaaaaaaaaa-Screen Shot (2).png. The file is deleted when this session ends.` },
+    ],
+  })
+  // (a photo the page made smaller went as a JPEG: its file ends as one)
+  expect((await view('bbbbbbbbbbbbbbbb')).result[1].text).toBe(`Saved to ${folder}/bbbbbbbbbbbbbbbb-IMG_0042.jpg. The file is deleted when this session ends.`)
+  // (one with no note to name it, which the disk has no room for)
+  expect(await view('cccccccccccccccc')).toEqual({
+    result: [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: base64(PNG) } },
+      { type: 'text', text: 'It could not be saved as a file here: base64: write error: No space left on device.' },
+    ],
+  })
+  // Each written by bash, as it came, the folder taken only where it is this user's own
+  expect(ran.map((r) => r.argv.slice(3))).toEqual([
+    ['manyclaws', folder, `${folder}/aaaaaaaaaaaaaaaa-Screen Shot (2).png`, 'own'],
+    ['manyclaws', folder, `${folder}/bbbbbbbbbbbbbbbb-IMG_0042.jpg`, 'own'],
+    ['manyclaws', folder, `${folder}/cccccccccccccccc-photo.png`, 'own'],
+  ])
+  expect(ran.map((r) => r.stdin)).toEqual([base64(PNG), base64(JPEG), base64(PNG)])
+  expect(ran[0].argv[2]).toMatch(/^umask 077 && mkdir -p -- "\$1" && .*\[ -O "\$1" \] && \[ ! -L "\$1" \].* base64 --decode > "\$2\.part" && mv -f -- "\$2\.part" "\$2"$/)
+  // (none of it, nor what the photos are called, went to the server in the open)
+  expect(JSON.stringify(s.sent).includes('Screen Shot')).toBe(false)
+  expect(JSON.stringify(s.sent).includes(folder)).toBe(false)
+  // The session ends, and its folder goes with it
+  await ($ as any).session.end({ sessionId: 'sess-1', reason: 'prompt_input_exit' })
+  expect(ran.slice(3).map((r) => r.argv)).toEqual([['bash', '-c', 'rm -rf -- "$1"', 'manyclaws', folder]])
+  // (an id that is none of the session's photos is refused, and nothing is written)
+  expect(await view('dddddddddddddddd')).toEqual({ deny: 'There is no attachment dddddddddddddddd for this session.' })
+  expect(ran.length).toBe(4)
+})
+
+test("on Windows a photo is saved by the Git Bash Claude Code runs, not a bash found on the PATH, in the system's temp folder on its drive, by a path with the slashes Claude and bash both take", async ($, on) => {
+  const m = await made(WORDS)
+  on('tool.call', () => ({ result: 'the engine, which is not asked' }))
+  // (Git Bash is where Claude Code says it is: a Windows path, which the engine running this on a Mac or Linux finds
+  // under its working folder)
+  const GIT = 'C:\\Program Files\\Git\\bin\\bash.exe'
+  on('fs.exists', ($: any, e: any) => ({ value: e.path.endsWith(GIT) }))
+  const ran: any[] = []
+  const run = (argv: string[], init: any) => {
+    if (argv[0] === 'uname') return { exitCode: 0, stdout: 'MINGW64_NT-10.0-26100 x86_64\n', stderr: '' }
+    if (!/bash/.test(argv[0])) return null
+    ran.push({ argv, stdin: init?.stdin })
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  // (a TMPDIR Git Bash set, its own /tmp, beside the system's)
+  const env = { ...ENV, CLAUDE_CODE_GIT_BASH_PATH: GIT, TMPDIR: '/tmp', TEMP: 'C:\\Users\\Ana\\AppData\\Local\\Temp\\' }
+  const s: any = session(on, m, { run, env, attachments: { aaaaaaaaaaaaaaaa: photoOf(PNG, m) }, poll: [{ policy: { version: 1 }, commands: [] }] })
+  await start($)
+  await s.clock.advance(1000)
+  await ($ as any).session.append(said('u1', 'prompt', 'user', [{ type: 'text', text: `This one\n\n${noted('aaaaaaaaaaaaaaaa', 'C:\\fakepath\\shot:1.png', 'image/png')}` }]))
+  const got = await $.tool.call({ tool: 'mcp__manyclaws__view_attachment', id: 'aaaaaaaaaaaaaaaa', tool_use_id: 'tv1' } as any)
+  const folder = 'C:/Users/Ana/AppData/Local/Temp/manyclaws-sess-1'
+  expect(got.result[1].text).toBe(`Saved to ${folder}/aaaaaaaaaaaaaaaa-C_fakepath_shot_1.png. The file is deleted when this session ends.`)
+  // (on Windows a folder's owner is not asked, as there the temp folder is the user's own)
+  expect(ran.map((r) => [r.argv[0], ...r.argv.slice(3)])).toEqual([[GIT, 'manyclaws', folder, `${folder}/aaaaaaaaaaaaaaaa-C_fakepath_shot_1.png`, '']])
 })
 
 test('the subagents a session has running are on its card: one starts as its SubagentStart says, described by the agent.spawn before it, and is gone at its stop or as its turn ends', async ($, on) => {
