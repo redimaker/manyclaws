@@ -73,6 +73,7 @@ const CARD_MS = 1000 // a session's card goes at most this often, but for a chan
 const ANSWER_FIELD = 200_000 // how long an answer the server asked for (a handoff) may be
 const DONE_WORTH_MS = 30_000 // all a session was set going on, done after this long, is worth telling a phone (allDone)
 const AGENT_IDLE_MS = 6 * 3600_000 // a subagent not heard of for this long is taken to be gone
+const STOP_WAIT_FLUSHES = 4 // a turn's end waits this many flushes (a second) for its Stop, which says what it left at work (noteWaits)
 const DEVICES_MS = 2000 // the list of the account's devices is not asked for again sooner than this after it was
 const DEVICES_EVERY_MS = 5 * 60_000 // and it is read this often with no order to go by: a device taken off it is seen to be, while the list without it is still what the server hands over
 const TOOL_PREFIX = 'mcp__manyclaws__'
@@ -102,6 +103,9 @@ let attended = false // a person can be at this session (see isAttended)
 let mainTurnOn = false // the main conversation's turn is running: from its turn.start to its turn.complete
 let workSince = null // when what the session is at was set going: its first turn since it was last all done (allDone)
 let stopSeen = '' // the turn's end the relay last kept that was taken up: its time and size (relayStopped)
+let waits = [] // what the last turn left at work in the background or set to wake the session, as its Stop said (noteWaits)
+let stopTaken = false // the running turn's Stop has been taken up
+let stopOwed = 0 // flushes the card's idle still waits for the turn's Stop (sendCard)
 let runningTurn = null // turnId of the main loop's running turn, for turn.abort
 let turnBefore = null // the turn that started before the session was taken up (while it was being connected), if it is still running
 let state = 'idle'
@@ -202,6 +206,8 @@ export function register(on, options) {
       if (!e.agentId) await ultracodeFlagNow($, true)
       if (!e.agentId) mainTurnOn = true
       if (!e.agentId) workSince ??= await $.clock.now()
+      // (what the last turn left at work is said again by this one's Stop)
+      if (!e.agentId) [waits, stopTaken, stopOwed] = [[], false, 0]
       // (the turn the server asked the answer of is the first to start after it asked)
       if (answerAsked && !answerTurn) answerTurn = e.turnId
       await setState($, 'working')
@@ -260,6 +266,9 @@ export function register(on, options) {
         // (a call the classifier refused is not asked about after the turn)
         for (const id of [...held.keys()]) settleHeld(id)
         await turnDone($, e)
+        // (a turn that was answered has a Stop to come, where it has not come already: Claude Code sends none of one
+        // that was stopped)
+        if (e.reason === 'answer' && !stopTaken) stopOwed = STOP_WAIT_FLUSHES
         await setState($, 'idle', e.reason === 'answer' ? '' : e.reason)
       }
     }
@@ -340,7 +349,7 @@ export function register(on, options) {
     if (config) {
       const event = e.hook_event_name
       if (event === 'Notification') await notified($, e)
-      if (event === 'Stop') await allDone($, e)
+      if (event === 'Stop') await stopped($, e)
       // The app is asking in its own dialog. The engine runs this hook beside the dialog
       // and takes whichever answers first, so the page's answer, if it comes, is given here
       if (event === 'PermissionRequest') {
@@ -645,6 +654,8 @@ function forgetSession() {
   spawns = []
   mainTurnOn = false
   workSince = null
+  waits = []
+  stopOwed = 0
   stepsDone.clear()
   for (const id of [...held.keys()]) settleHeld(id)
   relayTaken.clear()
@@ -729,7 +740,8 @@ async function settledMessages($) {
 //                next by (seal.js, nameOf) and that says nothing of it; `hist` and `asked`
 //                where they are the chat as it stood, sent again, whose rows have no names
 //   card         what the session is and how it stands: where it runs, its model and mode,
-//                its state, what it is about, the subagents it has running. Sealed whole.
+//                its state, what it is about, the subagents it has running, what its last turn left at
+//                work or set to wake it. Sealed whole.
 //   part         the reply as it is written, in sealed pieces; and that those so far are done with
 //   request      something it asks (a permission, a question), sealed whole, under the id
 //                its answer comes back by, which is the same kind of id whichever it asks;
@@ -801,6 +813,7 @@ function cardNow() {
     effort: effortNow ?? null,
     ultracode: ultracodeNow,
     agents: agentsNow().sort((a, b) => a.startedAt - b.startedAt),
+    waits,
   }
 }
 function cardChanged(urgent = false) {
@@ -810,6 +823,9 @@ function cardChanged(urgent = false) {
 // The card as it stands, put in the queue where it has changed and may go
 function sendCard() {
   if (!cardDirty || !sessionId || !(cardUrgent || Date.now() - cardSent >= CARD_MS)) return
+  // (a turn that has just ended waits a moment for its Stop, which says whether it left work going, so that it is not
+  // shown done between the two)
+  if (state === 'idle' && stopOwed > 0) return void stopOwed--
   cardDirty = cardUrgent = false
   cardSent = Date.now()
   put(sessionId, 'card', cardNow())
@@ -920,6 +936,28 @@ async function turnDone($, e) {
     answerAsked = ''
     answerTurn = null
   }
+}
+
+// A turn has ended (Claude Code's Stop event, by the settings hook events or the relay)
+async function stopped($, e) {
+  if (!e.agent_id) noteWaits(e)
+  await allDone($, e)
+}
+
+// What the turn has left at work in the background (a shell, a subagent, a monitor, a workflow) and what is set to wake
+// the session (ScheduleWakeup, /loop, CronCreate), as its Stop says: on the card, where the page draws a session whose
+// turn has ended with any of it as working, not done (deon, 2026-11-08, of a session whose tests ran on in the
+// background: "manyclaws is indicating that it is complete (with the green dot)"). Said again by the next turn's Stop.
+function noteWaits(e) {
+  const tasks = Array.isArray(e.background_tasks) ? e.background_tasks : []
+  const crons = Array.isArray(e.session_crons) ? e.session_crons : []
+  waits = [
+    ...tasks.map((t) => ({ kind: String(t?.type || 'task'), about: cap(String(t?.description || t?.name || t?.command || ''), 200) })),
+    ...crons.map((c) => ({ kind: c?.recurring ? 'cron' : 'wakeup', about: cap(String(c?.prompt ?? ''), 200), schedule: String(c?.schedule ?? '') })),
+  ]
+  stopTaken = true
+  stopOwed = 0
+  cardChanged(true)
 }
 
 // A turn has ended (Claude Code's Stop event, by the settings hook events or the relay). Where nothing it started is
@@ -1995,7 +2033,7 @@ async function relayStopped($) {
   try {
     e = JSON.parse(await $.fs.read(file))
   } catch {}
-  if (e?.session_id === sessionId) await allDone($, e)
+  if (e?.session_id === sessionId) await stopped($, e)
 }
 
 // The answer to a permission prompt the relay handed over, written where it waits: the page's, or none (the dialog's

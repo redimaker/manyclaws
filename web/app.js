@@ -36,8 +36,11 @@ const STATE_ORDER = { attention: 0, working: 1, idle: 2, offline: 3, ended: 4 }
 // How a session stands, as its dot, its label and the chat's working line say it: as its card says, but one whose turn
 // has ended while subagents it started run on (a workflow's, as Ultracode starts on every task) is working until they
 // are done (deon, 2026-10-28: "It stops pulsing if agents are working so it gives the impression the session is done").
-// Its Stop is still its turn's: that stops no subagent left running after it
-const standing = (s) => (s?.state === 'idle' && s.agents?.length ? 'working' : s?.state)
+// So is one whose turn left anything else at work in the background (a shell, a monitor) or set itself to come back
+// (ScheduleWakeup, /loop, CronCreate), as Claude Code said when the turn ended (the card's `waits`), until a turn
+// ends with none (deon, 2026-11-08: "manyclaws is indicating that it is complete (with the green dot) but clearly the
+// session set a timer that it is going to come back to"). Its Stop is still its turn's: that stops none of it
+const standing = (s) => (s?.state === 'idle' && (s.agents?.length || s.waits?.length) ? 'working' : s?.state)
 
 // The page's two looks: the VS Code extension's, and Claude Code's in the terminal
 const VIEWS = ['vscode', 'terminal', 'desktop']
@@ -248,6 +251,8 @@ function sessionOf(s, devices) {
     // (the server says only that it has ended or is not heard from: while it is heard from, its card says how it stands)
     state: s.state === 'ended' || s.state === 'offline' ? s.state : (card.state ?? 'idle'),
     agents: s.ended || !s.online || !Array.isArray(card.agents) ? [] : card.agents,
+    // (what its last turn left at work in the background or set to wake it: see standing)
+    waits: s.ended || !s.online || !Array.isArray(card.waits) ? [] : card.waits,
     pendingRequests: (s.pendingRequests ?? []).map(requestOf),
   }
 }
@@ -2658,7 +2663,7 @@ function renderLanes() {
     const m = app.machines.get(x.mid)
     const parent = x.fork && got.items.find((y) => y.mid === x.mid && y.sid === x.fork.from)
     const from = x.fork && (parent ? nameOf(parent) : markOf(x.fork.from)?.name || app.sessions.get(x.fork.from)?.title || '')
-    const state = live && !live.ended && live.online ? live.state : 'past'
+    const state = live && !live.ended && live.online ? standing(live) : 'past'
     return h(
       'a',
       { class: 'lane-head', 'data-key': x.key, 'data-color': m?.color || null, href: `#/m/${x.mid}/${encodeURIComponent(x.sid)}`, title: name, style: { width: wide + 'px' } },
@@ -7433,20 +7438,36 @@ setInterval(() => {
   working.firstChild.textContent = SPINNER[++spinnerFrame % SPINNER.length]
 }, 130)
 
-// ---- Subagents: the ones the open session has running now, in a strip above the reply box
+// ---- Subagents: the ones the open session has running now, in a strip above the reply box; and, once its turn has
+// ended, what else that left at work in the background, and whether it is set to come back (the card's `waits`, which
+// list a subagent too: that one is among the subagents)
 
 const AGENTS_SHOWN = 6
+const COMES_BACK = new Set(['wakeup', 'cron'])
 
 function renderAgents(s) {
   const box = el('agents')
   const agents = s?.agents ?? []
-  box.hidden = !agents.length
-  if (!agents.length) return box.replaceChildren()
-  const shown = agents.slice(0, AGENTS_SHOWN)
+  const waits = s?.state === 'idle' ? (s.waits ?? []) : []
+  const tasks = waits.filter((w) => w.kind !== 'subagent' && !COMES_BACK.has(w.kind))
+  const comes = waits.filter((w) => COMES_BACK.has(w.kind))
+  box.hidden = !agents.length && !tasks.length && !comes.length
+  if (box.hidden) return box.replaceChildren()
+  const items = [
+    ...agents.map((a) => h('span', { class: 'agent', title: [a.type, a.background ? 'in the background' : '', 'started ' + time(a.startedAt)].filter(Boolean).join(' · ') }, a.description || a.type || 'subagent', h('span', { class: 'agent-for' }, ' ' + ago(a.startedAt)))),
+    ...tasks.map((w) => h('span', { class: 'agent', title: w.kind + ' in the background' }, w.about || w.kind)),
+  ]
+  const shown = items.slice(0, AGENTS_SHOWN)
+  // (what it comes back with: not a /loop's word for itself)
+  const prompts = comes.map((w) => w.about).filter((p) => p && !/^<<[\w-]+>>$/.test(p))
   box.replaceChildren(
-    h('span', { class: 'agents-count' }, count(agents.length, 'subagent') + ' running'),
-    ...shown.map((a) => h('span', { class: 'agent', title: [a.type, a.background ? 'in the background' : '', 'started ' + time(a.startedAt)].filter(Boolean).join(' · ') }, a.description || a.type || 'subagent', h('span', { class: 'agent-for' }, ' ' + ago(a.startedAt)))),
-    ...(agents.length > shown.length ? [h('span', { class: 'agent more' }, `and ${agents.length - shown.length} more`)] : []),
+    h(
+      'span',
+      { class: 'agents-count', ...(prompts.length ? { title: prompts.join('\n') } : {}) },
+      [agents.length && count(agents.length, 'subagent') + ' running', tasks.length && count(tasks.length, 'task') + ' in the background', comes.length && 'set to come back'].filter(Boolean).join(' · '),
+    ),
+    ...shown,
+    ...(items.length > shown.length ? [h('span', { class: 'agent more' }, `and ${items.length - shown.length} more`)] : []),
   )
 }
 
