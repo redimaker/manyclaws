@@ -1,6 +1,6 @@
 // The mod's pure helpers
 import { expect, test } from 'claude-code/testing'
-import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, effortRefusal, cacheTtlOf, HOUR_CACHE_MS, SHORT_CACHE_MS, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, settingRefused, colorless, took } from '../hooks/lib.js'
+import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, effortRefusal, cacheTtlOf, HOUR_CACHE_MS, SHORT_CACHE_MS, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, settingRefused, colorless, took, photoNotes, photoFileName } from '../hooks/lib.js'
 import { summarizeInput, messageRows } from '../hooks/rows.js'
 
 test('capabilities: default, all, additions and exact lists', async () => {
@@ -155,4 +155,30 @@ test('what a turn took reads as the terminal says it: its length, and the tokens
   expect(took({ durationMs: 90_000 })).toBe('1m 30s')
   expect(took({ durationMs: 400, usage: { output_tokens: 0 } })).toBe('0s')
   expect(took({})).toBe('')
+})
+
+test("a prompt's photo notes, read for the names of the photos' files; and what such a file is called", async () => {
+  const note = (id: string, name: string, type = 'image/png') => `[Attachment ${id}: ${name} (${type}). Call the view_attachment tool with id "${id}" to see it.]`
+  expect(photoNotes(`See these\n\n${note('0123456789abcdef', 'Screen Shot (2).png')}\n\n${note('fedcba9876543210', 'photo', 'image/jpeg')}`)).toEqual([
+    { id: '0123456789abcdef', name: 'Screen Shot (2).png' },
+    { id: 'fedcba9876543210', name: 'photo' },
+  ])
+  expect(photoNotes('[Attachment 0123: x.png (image/png). Call the view_attachment tool]')).toEqual([])
+  expect(photoNotes('[Attached file: "/work/a.pdf" (2 KB). The user sent it from the ManyClaws page, and it is on this computer at that path: read it there.]')).toEqual([])
+  expect(photoFileName('image.png', 'image/png')).toBe('image.png')
+  expect(photoFileName('IMG_0042.JPEG', 'image/jpeg')).toBe('IMG_0042.JPEG')
+  // (a big photo went from the page as a JPEG, under the name it had)
+  expect(photoFileName('IMG_0042.HEIC', 'image/jpeg')).toBe('IMG_0042.jpg')
+  expect(photoFileName('Screen Shot.png', 'image/jpeg')).toBe('Screen Shot.jpg')
+  expect(photoFileName('photo', 'image/png')).toBe('photo.png')
+  expect(photoFileName('notes.v2', 'image/gif')).toBe('notes.v2.gif')
+  expect(photoFileName(undefined, 'image/webp')).toBe('photo.webp')
+  // (nothing a path takes for a folder, a drive or more, and no name that is only dots)
+  expect(photoFileName('../../etc/passwd', 'image/png')).toBe('_.._etc_passwd.png')
+  expect(photoFileName('C:\\fakepath\\a?b*"c"<d>|e.png', 'image/png')).toBe('C_fakepath_a_b_c_d_e.png')
+  expect(photoFileName('line\nbreak\x00.png', 'image/png')).toBe('line_break_.png')
+  expect(photoFileName('..', 'image/png')).toBe('photo.png')
+  expect(photoFileName(' .hidden.png ', 'image/png')).toBe('hidden.png')
+  expect(photoFileName('x'.repeat(300) + '.png', 'image/png')).toBe('x'.repeat(116) + '.png')
+  expect(photoFileName('y'.repeat(300), 'image/png')).toBe('y'.repeat(100) + '.png')
 })
