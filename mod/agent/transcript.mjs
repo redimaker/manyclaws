@@ -94,7 +94,42 @@ export function inputSummary(input) {
 // ---- Facts: what a session is, folded from its lines in order
 
 export function newFacts() {
-  return { cwd: '', title: '', firstPrompt: '', firstTs: 0, lastTs: 0, prompts: 0, messages: 0, version: '', branch: '', model: '', mode: '', entrypoint: '' }
+  return { cwd: '', title: '', firstPrompt: '', firstTs: 0, lastTs: 0, prompts: 0, messages: 0, version: '', branch: '', model: '', mode: '', entrypoint: '', startedAs: '' }
+}
+
+// How a session was started, by the first line of its transcript that says (its "entrypoint": cli at a terminal,
+// claude-vscode in VS Code, sdk-cli for anything run headless, as this agent runs one): not by the last, which says
+// how it runs now, and is sdk-cli for one a person started and the agent has woken since (deon, 2026-11-08: a reply
+// with a photo, "not sent", to a session he had started in a terminal). A first line the agent rewrote, so that
+// Claude Code's own lists show a session or not (relabelled, host.mjs), says nothing of it: the agent puts that word
+// first, where Claude Code never does
+const startedBy = (row) => (row.entrypoint && Object.keys(row)[0] !== 'entrypoint' ? String(row.entrypoint) : '')
+// The same read off the head of a transcript, for one indexed before it was kept: '' where none says
+const STARTED_HEAD = 262144
+export function startedAsOf(file) {
+  let text = ''
+  try {
+    const fd = fs.openSync(file, 'r')
+    try {
+      const buf = Buffer.alloc(STARTED_HEAD)
+      text = buf.subarray(0, fs.readSync(fd, buf, 0, STARTED_HEAD, 0)).toString('utf8')
+    } finally {
+      fs.closeSync(fd)
+    }
+  } catch {
+    return ''
+  }
+  for (const line of text.split('\n')) {
+    let row
+    try {
+      row = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const by = row && typeof row === 'object' ? startedBy(row) : ''
+    if (by) return by
+  }
+  return ''
 }
 
 export function foldFacts(facts, row) {
@@ -108,6 +143,7 @@ export function foldFacts(facts, row) {
   if (row.version) facts.version = row.version
   if (row.gitBranch) facts.branch = row.gitBranch
   if (row.entrypoint) facts.entrypoint = row.entrypoint
+  if (!facts.startedAs) facts.startedAs = startedBy(row)
   switch (row.type) {
     case 'ai-title':
       if (row.aiTitle && !facts.customTitle) facts.title = String(row.aiTitle)
