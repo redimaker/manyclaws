@@ -29,6 +29,9 @@ export class Store {
     // Who a user line came from (origin.kind in the transcript), kept since the prompts its people typed are listed
     // (recentPrompts): a line indexed before that has none, and is judged by its words alone
     if (!this.db.prepare('PRAGMA table_info(docs)').all().some((c) => c.name === 'origin')) this.db.exec('ALTER TABLE docs ADD COLUMN origin TEXT')
+    // How each session was started (startedAs, transcript.mjs), kept since the folders a person used are judged by it:
+    // a session indexed before that has none until it is read again, or filled in (fillStartedAs)
+    if (!this.db.prepare('PRAGMA table_info(sessions)').all().some((c) => c.name === 'started_as')) this.db.exec('ALTER TABLE sessions ADD COLUMN started_as TEXT')
     this.db.exec('CREATE INDEX IF NOT EXISTS docs_said ON docs (role, side, ts)')
     // What Claude Haiku made of each session's last week, for the page's Timeline (lanes.mjs): its blocks, and how far it read
     this.db.exec('CREATE TABLE IF NOT EXISTS lanes (sid TEXT PRIMARY KEY, state TEXT)')
@@ -47,11 +50,11 @@ export class Store {
       delFts: q('DELETE FROM fts WHERE rowid = ?'),
       addDoc: q('INSERT INTO docs (file, sid, uuid, ts, role, side, origin) VALUES (?, ?, ?, ?, ?, ?, ?)'),
       addFts: q('INSERT INTO fts (rowid, text) VALUES (?, ?)'),
-      setSession: q(`INSERT INTO sessions (sid, root, project, path, cwd, title, first_prompt, first_ts, last_ts, prompts, messages, version, branch, model, mode, entrypoint, size)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      setSession: q(`INSERT INTO sessions (sid, root, project, path, cwd, title, first_prompt, first_ts, last_ts, prompts, messages, version, branch, model, mode, entrypoint, size, started_as)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (sid) DO UPDATE SET root = excluded.root, project = excluded.project, path = excluded.path, cwd = excluded.cwd, title = excluded.title,
           first_prompt = excluded.first_prompt, first_ts = excluded.first_ts, last_ts = excluded.last_ts, prompts = excluded.prompts, messages = excluded.messages,
-          version = excluded.version, branch = excluded.branch, model = excluded.model, mode = excluded.mode, entrypoint = excluded.entrypoint, size = excluded.size`),
+          version = excluded.version, branch = excluded.branch, model = excluded.model, mode = excluded.mode, entrypoint = excluded.entrypoint, size = excluded.size, started_as = excluded.started_as`),
       delSession: q('DELETE FROM sessions WHERE path = ?'),
       lane: q('SELECT state FROM lanes WHERE sid = ?'),
       setLane: q('INSERT INTO lanes (sid, state) VALUES (?, ?) ON CONFLICT (sid) DO UPDATE SET state = excluded.state'),
@@ -113,7 +116,7 @@ export class Store {
     this.sql.setFile.run(size, mtime, offset, JSON.stringify(facts), file.id)
     if (file.side) return
     const f = facts
-    this.sql.setSession.run(file.sid, file.root, file.project, file.path, f.cwd, f.title, f.firstPrompt, f.firstTs, f.lastTs, f.prompts, f.messages, f.version, f.branch, f.model, f.mode, f.entrypoint, size)
+    this.sql.setSession.run(file.sid, file.root, file.project, file.path, f.cwd, f.title, f.firstPrompt, f.firstTs, f.lastTs, f.prompts, f.messages, f.version, f.branch, f.model, f.mode, f.entrypoint, size, f.startedAs ?? null)
   }
 
   // ---- Sessions
@@ -148,14 +151,24 @@ export class Store {
     return this.db.prepare("SELECT cwd, MAX(last_ts) AS last_ts, COUNT(*) AS sessions FROM sessions WHERE cwd != '' AND messages > 0 GROUP BY cwd ORDER BY last_ts DESC LIMIT ?").all(limit)
   }
 
-  // The folders a person ran Claude Code in since `since`, most recent first: sessions that say they were started at a
-  // terminal, in an editor or in the desktop app, not by a program (sdk-…), and none of those in `skip` (the ones the
-  // agent itself started, which may say otherwise of themselves once marked to be shown in Claude Code's own lists)
-  peopleFolders(since = 0, skip = new Set()) {
-    const rows = this.db.prepare("SELECT sid, cwd, last_ts FROM sessions WHERE cwd != '' AND messages > 0 AND last_ts >= ? AND COALESCE(entrypoint, '') NOT LIKE 'sdk-%' ORDER BY last_ts DESC").all(since)
+  // The folders a person ran Claude Code in since `since`, most recent first: sessions started at a terminal, in an
+  // editor or in the desktop app, not by a program (sdk-…) or this agent, by how each was started (started_as) and not
+  // by how it runs now: one a person started and the agent has woken since runs as sdk-cli (deon, 2026-11-08)
+  peopleFolders(since = 0) {
+    const rows = this.db.prepare("SELECT sid, cwd, last_ts FROM sessions WHERE cwd != '' AND messages > 0 AND last_ts >= ? AND COALESCE(NULLIF(started_as, ''), entrypoint, '') NOT LIKE 'sdk-%' ORDER BY last_ts DESC").all(since)
     const out = new Map()
-    for (const r of rows) if (!skip.has(r.sid) && !out.has(r.cwd)) out.set(r.cwd, { cwd: r.cwd, last_ts: r.last_ts })
+    for (const r of rows) if (!out.has(r.cwd)) out.set(r.cwd, { cwd: r.cwd, last_ts: r.last_ts })
     return [...out.values()]
+  }
+
+  // How each session active since `since` was started, where the index has nothing of it (one indexed before it was
+  // kept, whose transcript has not changed since): read off the head of its transcript (`read`, startedAsOf)
+  fillStartedAs(since, read) {
+    const rows = this.db.prepare('SELECT sid, path FROM sessions WHERE started_as IS NULL AND last_ts >= ?').all(since)
+    if (!rows.length) return 0
+    const set = this.db.prepare('UPDATE sessions SET started_as = ? WHERE sid = ?')
+    for (const r of rows) set.run(read(r.path), r.sid)
+    return rows.length
   }
 
   // ---- Search
