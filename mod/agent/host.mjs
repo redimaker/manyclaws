@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
+import { startedAsOf } from './transcript.mjs'
 
 const MODES = ['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions']
 // The ones a machine allows where its owner named none: every one, bypassing permissions too (deon, 2026-10-18, as on
@@ -401,7 +402,8 @@ export class Host {
   // ---- The folders a person used. Where its owner allows it (spawn.auto), a session may be
   // started in a folder a person has used Claude Code in here: one a session started at a
   // terminal, in an editor or in the desktop app ran in, not one a program started (its
-  // transcript says sdk-…) or this agent did. Never the home folder or one above it, a
+  // transcript says sdk-…) or this agent did; judged by how it was started, so that one
+  // the agent has woken since, from the page, still counts. Never the home folder or one above it, a
   // folder for what is temporary, or one inside a folder whose name starts with a dot
   // (~/.claude, ~/.ssh, ~/.manyclaws); only one that is there now, used in the last 90
   // days, and not one the owner turned off (spawn.autoOff). Worked out again as the index
@@ -409,7 +411,9 @@ export class Host {
   refreshAuto({ now = Date.now() } = {}) {
     const off = new Set((this.spawnConfig.autoOff ?? []).map((f) => sameCase(realOr(path.resolve(expandHome(f))))))
     const out = []
-    for (const { cwd } of this.store?.peopleFolders?.(now - AUTO_DAYS * 86400_000, this.started) ?? []) {
+    // (how a recent session was started, where the index has nothing of it yet, first)
+    this.store?.fillStartedAs?.(now - AUTO_DAYS * 86400_000, startedAsOf)
+    for (const { cwd } of this.store?.peopleFolders?.(now - AUTO_DAYS * 86400_000) ?? []) {
       let real
       try {
         real = fs.realpathSync(cwd)
@@ -426,7 +430,7 @@ export class Host {
     return changed
   }
 
-  // A session this agent started, remembered (the last few thousand)
+  // A session this agent started, as a new one or a copy, remembered (the last few thousand): not one it woke
   remember(sid) {
     this.started.add(sid)
     if (this.started.size > 5000) this.started.delete(this.started.values().next().value)
@@ -487,7 +491,8 @@ export class Host {
     const waiting = !String(prompt ?? '').trim()
     const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', turn: 'working', background: 0, startedAt: Date.now(), lastActive: Date.now(), idleSince: null, timer: null, tail: '', asked: new Map(), listed: typeof listed === 'boolean' ? listed : undefined }
     this.hosted.set(sid, h)
-    this.remember(sid)
+    // (one it starts, as a new session or a copy: not one it wakes, which whoever started it started)
+    if (args.includes('--session-id')) this.remember(sid)
     this.log(`started ${sid} in ${cwd} (pid ${proc.pid})`)
     let buffered = ''
     proc.stdout.on('data', (chunk) => {

@@ -3,7 +3,7 @@
 // gigabytes runs.
 import fs from 'node:fs'
 import path from 'node:path'
-import { eachLine, parse, searchable, newFacts, foldFacts } from './transcript.mjs'
+import { eachLine, parse, searchable, newFacts, foldFacts, startedAsOf } from './transcript.mjs'
 
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const SLICE = 8 * 1024 * 1024 // bytes of one file read per step
@@ -85,6 +85,8 @@ export class Indexer {
     if (!f) return 0
     let file = this.store.file(f.path) ?? this.store.addFile(f)
     let facts = file.facts ? JSON.parse(file.facts) : newFacts()
+    // (what was read of it before how a session was started was kept: that, off the head of the file, before the rest)
+    if (facts.startedAs === undefined) facts.startedAs = startedAsOf(f.path)
     let size
     try {
       size = fs.statSync(f.path).size
