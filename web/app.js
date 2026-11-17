@@ -5452,6 +5452,11 @@ const isReporting = (sid) => {
   const s = app.sessions.get(sid)
   return !!s && !s.ended && s.online
 }
+// A session its computer's agent says it runs, whose plugin the server hears nothing from: Claude Code goes on running it
+// there, answering what it is sent, and nothing of that comes here. A reply to it is signed to start it again (the
+// agent's Host.restart), which loads the plugin afresh (deon, 2026-11-16: "Another one that doesn't want to start up the
+// session. Don't fix just that session, fix the app/agent")
+const quietHosted = (s) => !!s && !!s.hosted && !s.online && !s.ended
 
 // A session in a machine's list. One that's reporting now is marked live (a green dot)
 // and opens as the live session it is; one that isn't opens from its transcript.
@@ -6534,7 +6539,8 @@ function renderPastHeader() {
   let note = ''
   if (p.sub) note = "This is a subagent's own conversation. Replies go to the session it worked for."
   else if (s?.gone) note = "This session's own transcript is no longer on the machine; only its subagents' are. It can be searched, not resumed."
-  else if (live || s?.hosted) note = 'This session is running. A reply goes to it.'
+  else if (live) note = 'This session is running. A reply goes to it.'
+  else if (s?.hosted) note = 'ManyClaws in this session has stopped reporting, though Claude Code is still running it here. A reply starts it again, and what it said meanwhile comes with it.'
   else if (!m?.online) note = `${machineName(m)} is offline. A session there can be read and resumed when it's back.`
   else if (!m.spawn) note = `Starting sessions is turned off on ${machineName(m)}, so this one can be read but not resumed from here.`
   else if (elsewhere) note = 'This session is open in Claude Code on the machine. Reply there, or continue it here in a copy.'
@@ -6645,7 +6651,9 @@ async function resumePast(typed) {
   // The reply goes signed, and nothing beside it: for the machine, to open the session
   // with it; or, where the session is running after all, for the session (one order and
   // not both: either would be run by whoever was handed it)
-  const signed = isReporting(p.sid) && !fork ? { reply: await promptOrder(p.sid, p.mid, !!app.sessions.get(p.sid)?.hosted, { text, mode }) } : { order: await orderFor(p.mid, 'open', { sid: p.sid, prompt: text, mode, fork }) }
+  // (one its agent runs, whose plugin is not heard from, is started again for the reply: see quietHosted)
+  const restart = !isReporting(p.sid) && !fork && !!p.session?.hosted
+  const signed = isReporting(p.sid) && !fork ? { reply: await promptOrder(p.sid, p.mid, !!app.sessions.get(p.sid)?.hosted, { text, mode }) } : { order: await orderFor(p.mid, 'open', { sid: p.sid, prompt: text, mode, fork, ...(restart ? { restart: true } : {}) }) }
   // (where this device cannot sign, nothing is sent)
   const unsigned = !signed.reply && !signed.order
   const r = unsigned ? null : await fetch(`/api/machines/${p.mid}/sessions/${encodeURIComponent(p.sid)}/resume`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(signed) }).catch(() => null)
@@ -6905,6 +6913,7 @@ function renderHeader() {
   else if (s.ended && !m.online) note = `${machineName(m)} is offline. This session can be resumed when it's back.`
   else if (s.ended) note = `Starting sessions is turned off on ${machineName(m)}, so this one can be read but not resumed from here.`
   else if (!s.attended) note = 'This is a headless session (claude -p or an SDK script): you can follow it but not reply.'
+  else if (quietHosted(s)) note = `ManyClaws in this session has stopped reporting, though Claude Code is still running it on ${machineName(m)}. A reply starts it again there, and what it said meanwhile comes with it.`
   else if (!s.online) note = 'This session is offline. A reply waits until it reconnects.'
   else if (app.modeError?.sid === s.id && Date.now() < app.modeError.until) note = app.modeError.text
   el('composer-note').textContent = note
@@ -8898,7 +8907,8 @@ async function send() {
   // One that has exited is started again on its machine by this reply, in the mode picked beside the box
   const m = s?.ended ? app.machines.get(s.machine) : null
   const mode = m ? resumeMode(m, s) : undefined
-  const waiting = m ? `starting on ${machineName(m)}…` : s?.online ? 'sending…' : 'waiting for the session to reconnect…'
+  const quiet = quietHosted(s)
+  const waiting = m ? `starting on ${machineName(m)}…` : quiet ? `starting it again on ${machineName(app.machines.get(s.machine))}…` : s?.online ? 'sending…' : 'waiting for the session to reconnect…'
   const node = userNode([text], { note: app.uploading ? (app.attachments.some((p) => p.sid === sid && p.file && !p.id) ? 'uploading the file…' : 'uploading the photo…') : waiting, pending: true })
   const entry = { text, node }
   app.pending.push(entry)
@@ -8927,7 +8937,7 @@ async function send() {
   entry.said = !files.length ? 'See the attached photo.' : photos.length || files.length > 1 ? 'See what is attached.' : 'See the attached file.'
   const plain = [text || entry.said, ...photos.map(photoNote), ...files.map(fileNoteOf)].join('\n\n').trim()
   const to = app.sessions.get(sid) ?? s
-  const order = await promptOrder(sid, to?.machine, !!(to?.ended || to?.hosted), { text: plain, mode })
+  const order = await promptOrder(sid, to?.machine, !!(to?.ended || to?.hosted), { text: plain, mode, ...(quiet && quietHosted(to) ? { restart: true } : {}) })
   if (!order) {
     node.querySelector('.from').textContent = 'not sent: ' + (blockedFor(sid) || NO_KEY)
     return
