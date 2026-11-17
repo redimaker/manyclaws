@@ -18,6 +18,9 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 // How long a session sits idle before an update that waits for the sessions to be done counts it done, and ends it
 // (deon, 2026-10-23: "'Update when they're done' can wait for 30 mins")
 export const DONE_IDLE_MINUTES = 30
+// A session started (or started again) less long ago than this, that has not finished a turn yet, is not started again
+// for a reply: its plugin may not have reported yet, and the reply goes to it as it is (restart)
+const RESTART_YOUNG_MS = 60_000
 // What a Claude Code session tells its children about itself, which a session the agent
 // starts must not take for its own. A service's environment is the account's, and the
 // CLAUDE_CODE_ settings in it are the owner's choices (a Git Bash path, a token limit):
@@ -64,6 +67,7 @@ export class Host {
     this.onChange = onChange
     this.log = log
     this.hosted = new Map() // sid -> { sid, proc, cwd, state, startedAt, lastActive, timer, tail }
+    this.restarting = new Map() // sid -> a promise, settled once a session being started again has been (restart)
     this.env = null
     // What is checked before any session is started here (the service's: that the plugin it loads is a release, or allowed)
     this.guard = null
@@ -208,10 +212,13 @@ export class Host {
   // is open elsewhere would get a second writer, so that takes `fork`, which continues
   // in a copy under a new id.
   // (`idle`, with `fork`: the copy is opened with nothing to do yet, waiting for its first prompt)
-  async resume({ sid, prompt, mode, model, effort, fork = false, idle = false, listed }) {
+  // (`restart`: where it is one the agent runs, it is started again for the reply, as `restart` says)
+  async resume({ sid, prompt, mode, model, effort, fork = false, idle = false, listed, restart = false }) {
     this.allow(mode, { counted: false })
     this.allowEffort(effort)
     if (!(fork && idle) && !String(prompt ?? '').trim()) throw new HostError('a prompt is required')
+    // (one being started again takes the reply once it is)
+    await this.restarting.get(sid)
     let mine = this.hosted.get(sid)
     // One that's on its way out is waited for: a reply written to it now would be lost
     if (mine?.closing) {
@@ -219,7 +226,7 @@ export class Host {
       mine = null
     }
     // (a reply to one it is running starts nothing, and one that has just gone left its place: neither is refused for room)
-    if (mine && !fork) return this.send({ sid, text: prompt })
+    if (mine && !fork) return this.send({ sid, text: prompt, restart })
     this.room()
     const session = this.store.session(sid)
     if (!session) throw new HostError('no such session on this machine')
@@ -232,13 +239,63 @@ export class Host {
     return { sid: id, forked: fork, cwd: folder }
   }
 
-  send({ sid, text }) {
+  // (`restart`: the page heard nothing from the session's plugin, though this machine says it runs the session, and
+  // signed the reply to start it again: see restart)
+  async send({ sid, text, restart = false }) {
+    // (one being started again takes the reply once it is)
+    await this.restarting.get(sid)
     const h = this.hosted.get(sid)
     if (!h || h.closing) throw new HostError('the agent is not running this session')
     if (!String(text ?? '').trim()) throw new HostError('a prompt is required')
+    // (answered once it is started again, or in five seconds where that takes longer: one at work finishes its turn
+    // first. The reply waits here for it meanwhile)
+    if (restart && (h.turns > 0 || Date.now() - h.startedAt >= RESTART_YOUNG_MS)) return Promise.race([this.restart(h, text), new Promise((done) => setTimeout(() => done({ sid }), 5000).unref())])
     h.proc.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: String(text) } }) + '\n')
     this.active(h, 'working')
     return { sid }
+  }
+
+  // A session it runs whose ManyClaws plugin has stopped reporting, while Claude Code goes on running it, is started
+  // again for a reply: what is said to it is answered, and nothing of that reaches the page. Seen on the Mac Studio
+  // (deon, 2026-11-16: "Another one that doesn't want to start up the session. Don't fix just that session, fix the
+  // app/agent"): every session the agent had running when the Claude account there was switched to a Team
+  // organization's went on answering what the page sent, and its plugin never spoke to the server again; every session
+  // started after it reported. Ended the way Exit ends it (one at work finishes its turn first, one idle that is still
+  // there ten seconds on is killed), and resumed in place with the reply, in the mode it was in: Claude Code loads the
+  // plugin afresh, and the server asks it for the chat it missed. What it ran in the background goes with it.
+  restart(h, text) {
+    const { sid } = h
+    this.log(`${sid}: started again for a reply: the page hears nothing from its plugin (pid ${h.proc.pid}, ${h.state ?? 'state not known'})`)
+    const gone = h.proc.exitCode !== null || h.proc.signalCode !== null ? Promise.resolve() : new Promise((done) => h.proc.once('exit', done))
+    h.exitAskedAt = Date.now()
+    this.close(h)
+    const idle = h.state === 'idle'
+    const killer = setTimeout(() => {
+      if (idle && this.hosted.get(sid) === h) {
+        this.log(`${sid}: still running ten seconds after it was to be started again: killed`)
+        h.proc.kill()
+      }
+    }, 10_000)
+    let mode
+    try {
+      if (h.mode) this.allowMode(h.mode)
+      mode = h.mode || undefined
+    } catch {}
+    const again = gone.then(() => {
+      clearTimeout(killer)
+      this.restarting.delete(sid)
+      // (Exit, asked for meanwhile, stands: it is not started again)
+      if (h.stopped) return { sid }
+      try {
+        this.launch({ sid, cwd: h.cwd, root: h.root, args: ['--resume', sid], mode, model: h.model || undefined, effort: h.effort || undefined, prompt: text, listed: h.listed })
+      } catch (err) {
+        this.log(`${sid}: could not be started again: ${err.message}`)
+        throw err
+      }
+      return { sid }
+    })
+    this.restarting.set(sid, again.catch(() => {}))
+    return again
   }
 
   // A running session's permission mode is changed the way an editor changes it: a
@@ -273,6 +330,7 @@ export class Host {
     }
     // (said, with how long it takes to go: VS Code that opens it meanwhile finds it still open)
     h.exitAskedAt = Date.now()
+    h.stopped = true
     this.log(`${sid}: Exit asked for (pid ${h.proc.pid}, ${h.state ?? 'state not known'}): its input is ended`)
     this.close(h)
     setTimeout(() => {
@@ -489,7 +547,7 @@ export class Host {
     const proc = spawn(claude, argv, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
     // (one started with nothing to do is idle from the first)
     const waiting = !String(prompt ?? '').trim()
-    const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', turn: 'working', background: 0, startedAt: Date.now(), lastActive: Date.now(), idleSince: null, timer: null, tail: '', asked: new Map(), listed: typeof listed === 'boolean' ? listed : undefined }
+    const h = { sid, proc, cwd, root, mode: mode ?? '', model: model ?? '', effort: effort ?? '', state: 'working', turn: 'working', turns: 0, background: 0, startedAt: Date.now(), lastActive: Date.now(), idleSince: null, timer: null, tail: '', asked: new Map(), listed: typeof listed === 'boolean' ? listed : undefined }
     this.hosted.set(sid, h)
     // (one it starts, as a new session or a copy: not one it wakes, which whoever started it started)
     if (args.includes('--session-id')) this.remember(sid)
@@ -526,7 +584,10 @@ export class Host {
           this.active(h)
         }
         // A turn ends with a result; until the next prompt the session is idle
-        if (msg.type === 'result') this.active(h, 'idle')
+        if (msg.type === 'result') {
+          h.turns++
+          this.active(h, 'idle')
+        }
         // (what a subagent says, one in the background too, is not the session's own turn)
         else if ((msg.type === 'assistant' || msg.type === 'user') && !msg.parent_tool_use_id) this.active(h, 'working')
         // (by its first reply its transcript is written, and can be marked)
