@@ -943,9 +943,11 @@ export async function run(config, flags = {}) {
   // agent, is not taken here, so an order has one runner and that runner's memory of it.
   const ORDERED = {
     // A reply, for a session this machine runs
+    // (`restart`: signed with it where the page hears nothing from the session's plugin, though this machine says it runs
+    // the session: it is started again for the reply, Host.restart)
     'session.send': (a) => {
       const w = take(a.order, machine.id, ['prompt']).with
-      return { sid: String(w.sid ?? ''), text: String(w.text ?? '') }
+      return { sid: String(w.sid ?? ''), text: String(w.text ?? ''), restart: w.restart === true }
     },
     'session.resume': (a) => {
       const what = asks(a.order)
@@ -954,12 +956,12 @@ export async function run(config, flags = {}) {
         const o = take(a.order, machine.id, ['prompt'])
         const w = o.with
         if (!host.hosted.has(String(w.sid ?? ''))) startedBy(o)
-        return { sid: String(w.sid ?? ''), prompt: String(w.text ?? ''), mode: w.mode }
+        return { sid: String(w.sid ?? ''), prompt: String(w.text ?? ''), mode: w.mode, restart: w.restart === true }
       }
       // One opened from its transcript: signed for this machine
       if (what === 'open') {
         const w = startedBy(take(a.order, machine.id, ['open'])).with
-        return { sid: w.sid, prompt: w.prompt, mode: w.mode, model: w.model, effort: w.effort, fork: w.fork === true }
+        return { sid: w.sid, prompt: w.prompt, mode: w.mode, model: w.model, effort: w.effort, fork: w.fork === true, restart: w.restart === true }
       }
       // A copy of one that is here
       const w = branch(a, 'clone')
