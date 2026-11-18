@@ -465,23 +465,18 @@ const promptOrder = (sid, machine, viaAgent, rest) => (viaAgent ? orderFor(machi
 // a machine reads nothing it was asked any other way.
 const askOf = async (asked = {}) => 'c=' + encodeURIComponent((await sealFor(asked)) ?? '')
 // A machine's folders, read from it: asked that way too, though there is nothing to say of which. What it answered, or
-// null. One reading of a machine's at a time, which whoever asks meanwhile shares, and what it read is kept a few
-// seconds: the list grouped by project, the New dialog and its projects each asked for them as one opened, and the
-// computer was asked three times in the same second (seen 2026-11-17).
-const FOLDERS_KEPT_MS = 5000
-const foldersRead = new Map() // machine id -> { reading, at (once read) }
+// null. One reading of a machine's at a time, which whoever asks while it is being read shares: the list grouped by
+// project, the New dialog and its projects each asked for them as one opened, and the computer was asked three times
+// in the same second (seen 2026-11-17). What was read is not kept: whoever asks after it has come asks afresh.
+const foldersRead = new Map() // machine id -> the reading under way
 function readFolders(mid) {
   if (!app.key) return Promise.resolve(null)
-  const known = foldersRead.get(mid)
-  if (known && (!known.at || Date.now() - known.at < FOLDERS_KEPT_MS)) return known.reading
+  if (foldersRead.has(mid)) return foldersRead.get(mid)
   const reading = (async () => {
     const r = await fetch(`/api/machines/${mid}/folders?` + (await askOf())).catch(() => null)
-    const got = r?.ok ? await r.json().catch(() => null) : null
-    // (what failed is asked again by whoever asks next)
-    if (foldersRead.get(mid)?.reading === reading) got ? (foldersRead.get(mid).at = Date.now()) : foldersRead.delete(mid)
-    return got
-  })()
-  foldersRead.set(mid, { reading })
+    return r?.ok ? await r.json().catch(() => null) : null
+  })().finally(() => foldersRead.get(mid) === reading && foldersRead.delete(mid))
+  foldersRead.set(mid, reading)
   return reading
 }
 // The stream's first word is everything as it stands. Until it has come this page does
@@ -5272,9 +5267,11 @@ const OTHER_KEY = 'This computer answered with something this browser cannot ope
 // without it). And one its agent runs that the list does not have yet, its transcript not read there yet, is asked for
 // again a little after, a few times.
 const CATALOG_AGAIN_MS = 3000
-// What a machine runs, as its hello says: the sessions its agent runs, and the ones open in Claude Code there. A hello
-// that says the same as the one before is no reason to read its lists again, but after this long one is.
-const runsOn = (m) => [(m.hosted ?? []).map((x) => x.sid).sort().join(), Object.keys(m.open ?? {}).sort().join()].join('|')
+// What a machine says of what it runs, as its hello says it, opened (deviceOf): each session its agent runs (its state,
+// mode, when it was last active), each one open in Claude Code there (its state, its title), and what it has indexed.
+// A hello that says the same as the one before is no reason to read its lists again; after this long, one is.
+const bySid = (a, b) => String(a.sid ?? a[0]).localeCompare(String(b.sid ?? b[0]))
+const runsOn = (m) => JSON.stringify([[...(m.hosted ?? [])].sort(bySid), Object.entries(m.open ?? {}).sort(bySid), m.stats ?? {}])
 const CATALOG_STALE_MS = 5 * 60_000
 const catalogTimers = new Map() // machine id -> the reading waited for
 const catalogMissed = new Map() // "machine id/session id" -> how many times it was asked for again
@@ -10022,8 +10019,6 @@ function foldersPart(c, m, at) {
     const order = await orderFor(m.id, 'folders', asked)
     if (!order) return void ((c.foldersSaid = blockedFor(m.id) ? sentence(blockedFor(m.id)) : NO_KEY_MACHINE), renderComputer())
     const r = await sendJson(`/api/machines/${m.id}/folders`, { order })
-    // (what was read of its folders before is not kept past this: they are what it allows)
-    foldersRead.delete(m.id)
     c.foldersSaid = r.ok ? says : sentence(r.error)
     renderComputer()
   }
