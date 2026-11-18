@@ -456,8 +456,26 @@ const promptOrder = (sid, machine, viaAgent, rest) => (viaAgent ? orderFor(machi
 // Which session, which folder, what words and how many are not the server's to read, and
 // a machine reads nothing it was asked any other way.
 const askOf = async (asked = {}) => 'c=' + encodeURIComponent((await sealFor(asked)) ?? '')
-// A machine's folders, read from it: asked that way too, though there is nothing to say of which
-const readFolders = async (mid) => (app.key ? fetch(`/api/machines/${mid}/folders?` + (await askOf())).catch(() => null) : null)
+// A machine's folders, read from it: asked that way too, though there is nothing to say of which. What it answered, or
+// null. One reading of a machine's at a time, which whoever asks meanwhile shares, and what it read is kept a few
+// seconds: the list grouped by project, the New dialog and its projects each asked for them as one opened, and the
+// computer was asked three times in the same second (seen 2026-11-17).
+const FOLDERS_KEPT_MS = 5000
+const foldersRead = new Map() // machine id -> { reading, at (once read) }
+function readFolders(mid) {
+  if (!app.key) return Promise.resolve(null)
+  const known = foldersRead.get(mid)
+  if (known && (!known.at || Date.now() - known.at < FOLDERS_KEPT_MS)) return known.reading
+  const reading = (async () => {
+    const r = await fetch(`/api/machines/${mid}/folders?` + (await askOf())).catch(() => null)
+    const got = r?.ok ? await r.json().catch(() => null) : null
+    // (what failed is asked again by whoever asks next)
+    if (foldersRead.get(mid)?.reading === reading) got ? (foldersRead.get(mid).at = Date.now()) : foldersRead.delete(mid)
+    return got
+  })()
+  foldersRead.set(mid, { reading })
+  return reading
+}
 // The stream's first word is everything as it stands. Until it has come this page does
 // not know the account's computers: what goes by what one of them allows waits for it.
 let snapshotCame = () => {}
@@ -1567,14 +1585,17 @@ function connect() {
   })
   on('machine', (ev) => {
     const m = JSON.parse(ev.data)
+    const was = app.machines.get(m.id)
     if (m.removed) app.machines.delete(m.id)
     else app.machines.set(m.id, m)
     // (what it says is open on it, and whether it is there to say, is what its quiet sessions are read by)
     for (const s of app.sessions.values()) if (s.machine === m.id) settle(s)
     lookAgain()
     seeToUpgrade()
-    // Its sessions are read again when it comes online, and when what it runs changes
-    if (m.online) catalogSoon(m.id)
+    // Its sessions are read again when it comes online, and when what it runs changes; else at the most every few
+    // minutes. Not at each hello it says, once a minute: every page open on the account read every computer's lists
+    // then, and a computer was asked for its sessions and folders four times in the same second (seen 2026-11-17)
+    if (m.online && (!was?.online || runsOn(was) !== runsOn(m) || Date.now() - (app.catalog.get(m.id)?.at ?? 0) > CATALOG_STALE_MS)) catalogSoon(m.id)
     renderListSoon()
     if (el('ns-box').open) drawNewDevices()
     if (app.computer?.mid === m.id) renderComputer()
@@ -3779,8 +3800,7 @@ function readProjects(mid) {
   const known = newProjects.get(mid)
   if (known?.reading) return known.reading
   const reading = (async () => {
-    const r = await readFolders(mid)
-    const { folders = [], allowed = [], others = [] } = r?.ok ? await r.json() : {}
+    const { folders = [], allowed = [], others = [] } = (await readFolders(mid)) ?? {}
     const recent = folders.map((f) => f.cwd).filter((cwd) => allowed.some((root) => isUnder(cwd, root)))
     const listed = new Set(recent.map(folderKey))
     const list = [['Projects with sessions', recent], ['Other folders', others.filter((cwd) => !listed.has(folderKey(cwd)))], ['The folders themselves', allowed.filter((cwd) => !listed.has(folderKey(cwd)))]]
@@ -5244,6 +5264,10 @@ const OTHER_KEY = 'This computer answered with something this browser cannot ope
 // without it). And one its agent runs that the list does not have yet, its transcript not read there yet, is asked for
 // again a little after, a few times.
 const CATALOG_AGAIN_MS = 3000
+// What a machine runs, as its hello says: the sessions its agent runs, and the ones open in Claude Code there. A hello
+// that says the same as the one before is no reason to read its lists again, but after this long one is.
+const runsOn = (m) => [(m.hosted ?? []).map((x) => x.sid).sort().join(), Object.keys(m.open ?? {}).sort().join()].join('|')
+const CATALOG_STALE_MS = 5 * 60_000
 const catalogTimers = new Map() // machine id -> the reading waited for
 const catalogMissed = new Map() // "machine id/session id" -> how many times it was asked for again
 function catalogSoon(mid) {
@@ -5370,9 +5394,9 @@ function setPastBy(how) {
 }
 
 async function loadProjects(mid) {
-  const r = await readFolders(mid)
-  if (!r?.ok) return
-  app.projects.set(mid, (await r.json()).folders)
+  const got = await readFolders(mid)
+  if (!got) return
+  app.projects.set(mid, got.folders)
   // The ones that are open are read again too: a session may have ended into one
   for (const key of app.projectOpen.keys()) if (key.startsWith(mid + '|')) loadProject(mid, key.slice(mid.length + 1))
   renderList()
@@ -6748,9 +6772,9 @@ async function openNew(mid) {
   renderList()
   // The projects there: the folders sessions have run in, the other folders beside
   // them, and the folders the machine allows sessions in themselves
-  const r = await readFolders(mid)
+  const got = await readFolders(mid)
   if (el('new').dataset.machine !== mid) return
-  const { folders = [], allowed = [], others = [], unread = [] } = r?.ok ? await r.json() : {}
+  const { folders = [], allowed = [], others = [], unread = [] } = got ?? {}
   // A folder the machine couldn't list in time: on a Mac that's a prompt on its screen waiting for an answer
   if (unread.length) {
     el('new-error').textContent = `${machineName(m)} could not list ${unread.join(' or ')}. On a Mac, a prompt asking to let node read it may be waiting on its screen. Its projects with sessions are still here, and "Another folder…" takes any path.`
@@ -9924,6 +9948,8 @@ function foldersPart(c, m, at) {
     const order = await orderFor(m.id, 'folders', asked)
     if (!order) return void ((c.foldersSaid = blockedFor(m.id) ? sentence(blockedFor(m.id)) : NO_KEY_MACHINE), renderComputer())
     const r = await sendJson(`/api/machines/${m.id}/folders`, { order })
+    // (what was read of its folders before is not kept past this: they are what it allows)
+    foldersRead.delete(m.id)
     c.foldersSaid = r.ok ? says : sentence(r.error)
     renderComputer()
   }
