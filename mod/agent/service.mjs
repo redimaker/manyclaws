@@ -150,7 +150,18 @@ const SCAN_MS = 10_000 // how often the disk is checked for new and changed tran
 const FROM_PLUGIN_MS = 3000 // how often the agent looks for what the plugin left for it
 const HELLO_MS = 60_000
 const POLL_WAIT_S = 25
-const POLL_MS = (POLL_WAIT_S + 15) * 1000 // how long a poll is given: what the server holds it for, and some
+// How long a poll is given: what the server holds it for, and a little. The server always answers within its hold, so one
+// with no answer by then had it lost on the way, and is asked again at once (seen 2026-11-17 on deon's MacBook: a poll's
+// connection sat quiet while the server held it, and the answer it then carried, a reply to send, never came; given 40 s,
+// the agent asked again after the server had given the page up on it, and the page said the computer did not answer).
+const POLL_MS = (POLL_WAIT_S + 3) * 1000
+// What an answer to a call is given each time it is sent: a big one, all of its time once (a transcript's piece, a file's);
+// any other a while, and sent again on another connection if it goes unheard (the same day: answers sent on a
+// connection that had gone quiet were never heard of)
+const ANSWER_MS = 10_000
+const ANSWER_LARGE = 256 * 1024 // one longer than this is given more each time
+const ANSWER_LARGE_MS = 30_000
+const ANSWER_BIG_MS = 180_000
 const STUCK_MS = 5_000 // how long after a request is told to stop it is waited for no longer
 const DEVICES_MS = 2000 // the list of the account's devices is not asked for again sooner than this after it was
 const DEVICES_EVERY_MS = 5 * 60_000 // and it is read this often with no order to go by: a device taken off it is seen to be, while the list without it is still what the server hands over
@@ -1062,14 +1073,18 @@ export async function run(config, flags = {}) {
   // A call's answer, sent until the server has had it, three times at the most. Sent once, an answer whose request
   // failed on its way (a connection the server had let go of meanwhile, the network gone for a moment) was lost, and
   // whoever had asked waited for nothing: a transcript on its way to another machine never arrived for one piece of
-  // it. The server takes an answer it has had already for nothing new. (One that ran out of time is not sent again:
-  // it had all the time an answer is given.)
-  const sendAnswer = async (body, ms) => {
+  // it. The server takes an answer it has had already for nothing new. One that ran out of its time is sent again too,
+  // on another connection (the one it went on is let go of with it), all but a big one (`big`), which had all the time
+  // it is given.
+  const sendAnswer = async (body, big) => {
+    const text = JSON.stringify(body)
+    const ms = big ? ANSWER_BIG_MS : text.length > ANSWER_LARGE ? ANSWER_LARGE_MS : ANSWER_MS
     for (let tries = 1; ; tries++) {
       try {
-        return await post('/api/machine/result', body, ms)
+        return await request('/api/machine/result', { method: 'POST', body: text }, ms)
       } catch (err) {
-        if (tries >= 3 || err?.name === 'TimeoutError') throw err
+        if (tries >= 3 || (big && err?.name === 'TimeoutError')) throw err
+        if (err?.name === 'TimeoutError') log('result: ' + err.message + ': sent again')
         await new Promise((done) => setTimeout(done, 300 * tries))
       }
     }
@@ -1121,6 +1136,14 @@ export async function run(config, flags = {}) {
           }
         } catch (err) {
           polled = Date.now()
+          // One whose answer did not come in its time is asked again at once, on another connection (the one it went on
+          // is let go of with it). What the answer carried is still the server's to hand over: it keeps a call until
+          // this machine's next poll says it has had it, or the call's own time is up. Said in the log, as it is how often
+          // a machine's connections go quiet on it.
+          if (err?.name === 'TimeoutError') {
+            log('poll:', err.message + ': asked again')
+            continue
+          }
           // (a request that did not end is said whether or not the rest is: it is what stops a machine being heard)
           if (flags.verbose || err?.name === 'StuckError') log('poll:', err.message)
           await new Promise((r) => setTimeout(r, 3000))
@@ -1203,7 +1226,7 @@ export async function run(config, flags = {}) {
         body = { machine: machine.id, id: c.id, ok: false, error: why.startsWith('unknown method ') ? why : seal(why, sealKey) }
       }
       // (a transcript on its way to another machine is megabytes, and so may a file be: each is given the time that takes)
-      sendAnswer(body, method === 'session.export.part' || method.startsWith('file.') ? 180_000 : 30_000).catch((err) => log('result not sent:', err.message))
+      sendAnswer(body, method === 'session.export.part' || method.startsWith('file.')).catch((err) => log('result not sent:', err.message))
     }
     poll()
   } else if (config.locked) {
