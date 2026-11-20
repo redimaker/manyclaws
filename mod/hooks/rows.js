@@ -9,6 +9,29 @@
 // and as the role has them: uuid, origin, tool, toolUseId, detail, desc, more, approx,
 // error, diff, mid, hist, ts }
 
+// A row's text is sent whole: what was typed, what Claude said, a notice, a command's output. It is cut only where its
+// row, sealed, would be more than the server keeps of one thing (MAX_SEALED, 420,000 characters of base64): past
+// TEXT_BYTES of it as JSON in UTF-8, saying how much was left out. What a tool takes and gives is cut shorter, at the
+// policy's field limit, before it comes here. (The words of a reply were cut at that too, 8000 characters: one of 8022
+// reached the page as its first 8000 and "… [22 more]", and nowhere was the rest. 2026-11-19.)
+export const TEXT_BYTES = 280_000
+const encoder = new TextEncoder()
+const sizeOf = (text) => encoder.encode(JSON.stringify(text)).length
+export function capText(text, maxBytes = TEXT_BYTES) {
+  const s = String(text ?? '')
+  // (no text this short can come to that much, however it is written: most are not measured)
+  if (s.length * 6 + 2 <= maxBytes || sizeOf(s) <= maxBytes) return s
+  const cut = (n) => s.slice(0, n) + `… [${s.length - n} more]`
+  let [lo, hi] = [0, s.length]
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2)
+    if (sizeOf(cut(mid)) <= maxBytes) lo = mid
+    else hi = mid - 1
+  }
+  return cut(lo)
+}
+const capped = (rows) => rows.map((r) => (typeof r.text === 'string' ? { ...r, text: capText(r.text) } : r))
+
 // What the app wraps around a prompt before Claude reads it
 export function cleanPrompt(text) {
   return text.replace(/<(ide_opened_file|ide_selection|ide_diagnostics|system-reminder)>[\s\S]*?<\/\1>\s*/g, '').trim()
@@ -100,7 +123,7 @@ export function historyRows(list) {
       rows.push({ role: 'result', toolUseId: id, ...outcome, ts: at.ts, ...(typeof t.resultUuid === 'string' ? { uuid: t.resultUuid } : {}) })
     }
   }
-  return rows.map((r) => ({ ...r, hist: true }))
+  return capped(rows).map((r) => ({ ...r, hist: true }))
 }
 
 // The one line of a tool call's input worth showing
@@ -233,7 +256,7 @@ export function messageRows(ev) {
       if (text) rows.push({ uuid: ev.uuid, role: 'notice', text })
       break
   }
-  return rows
+  return capped(rows)
 }
 
 // The row under a tool call for what it came back with: none for a subagent's call

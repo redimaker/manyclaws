@@ -1619,6 +1619,42 @@ const engine = (on: any) => {
 }
 const said = (uuid: string, door: string, role: string, content: any[]) => ({ door, uuid, message: { type: role, role, content }, origin: role === 'user' ? { kind: 'composer' } : undefined }) as any
 
+// (deon, 2026-11-19: a reply of 8022 characters reached the page as its first 8000 and "… [22 more]", and nowhere was the rest)
+test('a reply longer than the field limit reaches the server whole; replies too much for one request go in several, each one the server takes', async ($, on) => {
+  const m = await made(WORDS)
+  engine(on)
+  const s = session(on, m)
+  await start($)
+  const herons = 'Herons stand in the shallows. '.repeat(400)
+  await ($ as any).session.append(said('a1', 'response', 'assistant', [{ type: 'text', text: herons }]))
+  await s.clock.advance(1000)
+  expect(s.rows().find((r) => r.role === 'assistant').text).toBe(herons)
+  // Forty-five of all a row may hold: sixteen megabytes and more, which the server would refuse in one request
+  const big = (i: number) => String(i).padStart(2, '0') + 'h'.repeat(270_000)
+  for (let i = 0; i < 45; i++) await ($ as any).session.append(said('b' + i, 'response', 'assistant', [{ type: 'text', text: big(i) }]))
+  for (let i = 0; i < 10; i++) await s.clock.advance(300)
+  const sent = s.events().batches.map((b: any) => JSON.stringify(b).length)
+  expect(sent.filter((n: number) => n > 1_000_000).length).toBeGreaterThan(1)
+  expect(Math.max(...sent)).toBeLessThan(16 * 1024 * 1024)
+  expect(s.rows().filter((r) => r.role === 'assistant').map((r) => r.text.slice(0, 2))).toEqual(['He', ...Array.from({ length: 45 }, (_, i) => String(i).padStart(2, '0'))])
+  expect(s.rows().every((r) => r.role !== 'assistant' || r.text === herons || r.text.length === 270_002)).toBe(true)
+})
+
+test('the chat sent as it stood has its replies whole, and is its newest rows that the server can take in one thing', async ($, on) => {
+  const m = await made()
+  const talk = Array.from({ length: 40 }, (_, i) => ({ role: 'assistant', text: String(i).padStart(2, '0') + 'h'.repeat(270_000), toolUses: [] }))
+  const s = session(on, m, { messages: [{ role: 'user', text: 'Tell me of herons' }, ...talk], poll: [{ history: 'ffffffffffff', commands: [] }] })
+  await start($)
+  await s.clock.advance(5000)
+  const [sent] = histories(s, m)
+  expect(sent.asked).toBe('ffffffffffff')
+  // (the newest that come to nine megabytes: the first of them gone, and the last as it was)
+  expect(sent.said.length).toBeLessThan(41)
+  expect(sent.said.length).toBeGreaterThan(30)
+  expect(sent.said.at(-1)).toBe(talk.at(-1)!.text)
+  expect(sent.said.every((t: string) => t.length === 270_002)).toBe(true)
+})
+
 test('of a session nothing is in the open but which session, the order things came in, and what kind of thing each is: a turn with a tool call goes as sealed rows and a sealed card', async ($, on) => {
   const m = await made(WORDS)
   on('tool.call', () => ({ result: { stdout: 'seven herons', stderr: '' } }))

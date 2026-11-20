@@ -244,8 +244,9 @@ export function normalizeBlocks(content, max = 8000) {
   const blocks = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : []
   return blocks.map((b) => {
     switch (b?.type) {
+      // (the words said, whole: the rows made of them are cut only where the server could not keep one, capText in rows.js)
       case 'text':
-        return { type: 'text', text: cap(String(b.text ?? ''), max) }
+        return { type: 'text', text: String(b.text ?? '') }
       case 'tool_use':
       case 'server_tool_use':
         return { type: 'tool_use', id: b.id, name: b.name, input: cap(b.input, max) }

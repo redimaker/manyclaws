@@ -67,6 +67,12 @@ const DECISION_WAIT_S = 20 // how long the server may hold a wait for an answer 
 const RETRY_MS = 5000 // wait after a failed poll
 const MAX_QUEUE = 5000 // things kept while the server is unreachable
 const MAX_BATCH = 300 // things per request
+// And at most this much of them, as JSON: the server takes a request of 16 MB, and refuses a larger one whole, which is
+// dropped here so that it does not hold up the rest. A thing larger than this goes by itself.
+const BATCH_CHARS = 12_000_000
+// The chat sent as it stood is its newest rows that come to at most this much, as JSON in UTF-8: it goes in one thing
+// (the server puts it in place of what it has), which the server could not take if it were much larger
+const HISTORY_BYTES = 9_000_000
 const MAX_RESULT = 1_000_000 // longest string in a call's result
 const HISTORY_WAIT_MS = 3000 // how long a session's history waits for the first poll to say whether the server asks for it
 const CARD_MS = 1000 // a session's card goes at most this often, but for a change of state, which goes at once
@@ -694,7 +700,22 @@ async function output($, argv) {
 async function sendHistory($, asked) {
   const messages = await settledMessages($)
   if (!messages.length && !asked) return
-  await emitRows($, historyRows(cap(messages.slice(-300), policy.maxField)), { hist: true, asked })
+  // (what tools took and gave cut at the field limit, as the rows of a turn have it; what was said whole, to the size a row may
+  // be, capText in rows.js)
+  const kept = messages.slice(-300).map((m) => (m && typeof m === 'object' && typeof m.text === 'string' ? { ...cap({ ...m, text: '' }, policy.maxField), text: m.text } : cap(m, policy.maxField)))
+  await emitRows($, newestThatFit(historyRows(kept), HISTORY_BYTES), { hist: true, asked })
+}
+const encoder = new TextEncoder()
+// The last of `rows` that come to `max` bytes at most, as JSON in UTF-8 (one at least)
+function newestThatFit(rows, max) {
+  let size = 0
+  let from = rows.length
+  while (from > 0) {
+    size += encoder.encode(JSON.stringify(rows[from - 1])).length
+    if (size > max && from < rows.length) break
+    from--
+  }
+  return rows.slice(from)
 }
 
 // The history a session starts with, if it has not gone yet
@@ -1029,6 +1050,13 @@ function authHeaders(json) {
   return h
 }
 
+// How much a thing in the queue comes to, as JSON: worked out once, not at every flush it waits through
+const sizes = new WeakMap()
+function sizeOfThing(thing) {
+  if (!sizes.has(thing)) sizes.set(thing, JSON.stringify(thing).length)
+  return sizes.get(thing)
+}
+
 async function flush($) {
   if (isFlushing || !config) return
   sendDeltas()
@@ -1038,7 +1066,15 @@ async function flush($) {
     put(sessionId, 'ping')
   }
   isFlushing = true
-  const batch = queue.slice(0, MAX_BATCH)
+  // (as many as go in one request: MAX_BATCH, and BATCH_CHARS of them as JSON, but always the first)
+  const batch = []
+  let chars = 0
+  for (const thing of queue) {
+    const n = sizeOfThing(thing)
+    if (batch.length && (batch.length >= MAX_BATCH || chars + n > BATCH_CHARS)) break
+    batch.push(thing)
+    chars += n
+  }
   try {
     const r = await $.http.fetch(config.url + '/api/agent/events', {
       method: 'POST',

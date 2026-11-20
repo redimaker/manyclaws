@@ -1,7 +1,7 @@
 // The mod's pure helpers
 import { expect, test } from 'claude-code/testing'
 import { parseCapabilities, mergePolicy, DEFAULT_POLICY, commandRefusal, effortRefusal, cacheTtlOf, HOUR_CACHE_MS, SHORT_CACHE_MS, parseSlash, cap, normalizeBlocks, isAttended, settingSaid, settingRefused, colorless, took } from '../hooks/lib.js'
-import { summarizeInput, messageRows } from '../hooks/rows.js'
+import { summarizeInput, messageRows, historyRows, capText, TEXT_BYTES } from '../hooks/rows.js'
 
 test('capabilities: default, all, additions and exact lists', async () => {
   expect([...parseCapabilities('')].sort()).toEqual(['approve', 'chat', 'core', 'inspect', 'message', 'notify', 'upkeep'])
@@ -86,6 +86,39 @@ test('message blocks are normalized', async () => {
   ])
   expect(normalizeBlocks('plain')).toEqual([{ type: 'text', text: 'plain' }])
   expect(summarizeInput({ command: 'ls -la\nmore' })).toBe('ls -la')
+})
+
+// (deon, 2026-11-19: a reply of 8022 characters reached the page as its first 8000 and "… [22 more]")
+test("the words of a prompt or a reply are not cut at the field limit, which is for what tools take and give", async () => {
+  const long = 'Herons stand in the shallows. '.repeat(400) // 12,000 characters
+  const blocks = normalizeBlocks([{ type: 'text', text: long }, { type: 'tool_result', tool_use_id: 't1', content: [{ type: 'text', text: long }] }], 8000)
+  expect(blocks[0].text).toBe(long)
+  expect((blocks[1] as any).text).toBe(long.slice(0, 8000) + '… [4000 more]')
+  const rows = messageRows({ uuid: 'a1', door: 'response', blocks })
+  expect(rows.map((r: any) => [r.role, r.text.length])).toEqual([['assistant', 12_000]])
+  expect(messageRows({ uuid: 'u1', door: 'prompt', blocks: normalizeBlocks(long, 8000) })[0].text).toBe(long.trim())
+  expect(historyRows([{ role: 'user', text: 'Tell me of herons' }, { role: 'assistant', text: long, toolUses: [] }]).map((r: any) => r.text.length)).toEqual([17, 12_000])
+})
+
+test('a row\'s text is cut only where its row, sealed, would be more than the server keeps: by its size as JSON in UTF-8, saying how much was left out', async () => {
+  const size = (t: string) => new TextEncoder().encode(JSON.stringify(t)).length
+  const plain = 'a'.repeat(TEXT_BYTES + 1000)
+  const cut = capText(plain)
+  expect(size(cut)).toBeLessThanOrEqual(TEXT_BYTES)
+  expect(cut).toMatch(/^a+… \[\d+ more\]$/)
+  expect(cut.length - cut.indexOf('…')).toBeLessThan(20)
+  expect(Number(/\[(\d+) more\]/.exec(cut)![1]) + cut.indexOf('…')).toBe(plain.length)
+  // (three bytes a character in UTF-8, two for a quote's escape and six for a control character's: each is cut sooner, to the same size)
+  for (const one of ['鷺', '"', '\u0001']) {
+    const t = one.repeat(TEXT_BYTES / 2)
+    const c = capText(t)
+    expect(size(c)).toBeLessThanOrEqual(TEXT_BYTES)
+    expect(size(c)).toBeGreaterThan(TEXT_BYTES - 40)
+    expect(Number(/\[(\d+) more\]/.exec(c)![1]) + c.indexOf('…')).toBe(t.length)
+  }
+  expect(capText('short')).toBe('short')
+  expect(capText(undefined)).toBe('')
+  expect(messageRows({ uuid: 'a2', door: 'response', blocks: [{ type: 'text', text: plain }] })[0].text).toBe(cut)
 })
 
 test('attended: a terminal or an app hosting the session, not claude -p or an SDK script', async () => {
