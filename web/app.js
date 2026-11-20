@@ -58,6 +58,9 @@ const app = {
   // its last and first rows, whether there are rows before those, and the numbering it
   // was read in (the server renumbers when it rebuilds a session's history)
   lastSeq: 0,
+  viewGen: 0, // which drawing of a chat is on the page: rows read for one are drawn into it and no other. A chat's rows came
+  // back while another was open, and were drawn into that one with the other's numbers: its own replies were then taken
+  // for rows drawn already, and never shown (deon, 2026-11-20: "Another request that's not getting picked up")
   firstSeq: 0,
   earlier: false,
   epoch: null,
@@ -2025,7 +2028,9 @@ function clearRows() {
 
 // Reads the open session's rows: the latest window of them the first time, and after
 // that only what has come since the last one drawn
+// (what comes back is drawn only into the view it was asked for: see viewGen)
 async function loadMessages(id, { fromEnd = 0 } = {}) {
+  const gen = app.viewGen
   const have = app.loaded && app.lastSeq > 0
   // (how far the stream had got when this was asked for: see where its answer is taken)
   const asOf = app.tellings
@@ -2041,6 +2046,11 @@ async function loadMessages(id, { fromEnd = 0 } = {}) {
   el('messages').querySelector('.starting')?.remove()
   el('composer-note').hidden = true
   const data = await r.json()
+  // (opened, which takes a moment for many rows: another chat may be showing by now, or this one drawn anew)
+  if (app.current !== id || app.viewGen !== gen) return
+  // Drawn past the session's last row, the rows drawn are not all its own: a reply to it would be taken for one drawn
+  // already, and never shown. Drawn afresh
+  if (have && typeof data.last === 'number' && app.lastSeq > data.last) return void reloadMessages()
   // How the session is, as the server had it when it answered: unless the stream has said
   // since this was asked for, which is how it is now. The answer can come after a word of
   // the stream's that was sent after it, and would put the session back as it was before.
@@ -2104,6 +2114,7 @@ const VIEWS_KEPT = matchMedia('(pointer: coarse)').matches ? 3 : 6 // a phone ha
 const viewKey = () => (app.past ? `m:${app.past.mid}/${app.past.sid}/${app.past.sub}` : app.current ? 's:' + app.current : null)
 
 function blankView() {
+  app.viewGen++
   Object.assign(app, { lastSeq: 0, firstSeq: 0, earlier: false, epoch: null, loaded: false, early: [], promptBefore: null, pending: [], partial: '', results: new Map(), tools: new Map(), openTools: new Set(), rowKeys: new Set() })
 }
 
@@ -2134,6 +2145,7 @@ function enterView(key) {
   if (!view) return null
   app.views.delete(key)
   const { nodes, fromEnd, past, ...state } = view
+  app.viewGen++
   Object.assign(app, state, { partial: '', loaded: true })
   el('messages').replaceChildren(...nodes)
   watchEarlier()
@@ -2167,10 +2179,12 @@ async function loadEarlierRows() {
   const id = app.current
   if (!id || !app.earlier || app.loadingEarlier) return
   app.loadingEarlier = true
+  const gen = app.viewGen
   try {
     const r = await fetch(`/api/sessions/${encodeURIComponent(id)}/messages?limit=${WINDOW}&before=${app.firstSeq}`).catch(() => null)
     if (!r?.ok || app.current !== id) return
     const data = await r.json()
+    if (app.current !== id || app.viewGen !== gen) return
     if (data.epoch !== app.epoch) return void reloadMessages()
     const box = el('messages')
     const fromEnd = box.scrollHeight - box.scrollTop
