@@ -3146,8 +3146,12 @@ function renderListSoon() {
 // at work, then the rest; and among those alike, the one that came to be so last. So a
 // session keeps its place for as long as it stays as it is. (By when each was last heard
 // from, the ones at work changed places at every word, several times a second: nothing
-// stayed under a finger.)
-const sinceOf = (s) => s.since ?? s.lastActivity
+// stayed under a finger.) One at rest came to be so when it last said or did something, which its tile says: that is
+// what puts it. What its card says (`since`) is when its plugin took up how it stands, and Claude Code loads a plugin
+// anew under a session sitting idle (as the computer's Claude account is switched, and about every eight hours from
+// then on, seen 2026-11-18): that said it came to rest then, and one idle for days went to the top of the rest (deon,
+// 2026-11-21: "Why is this sort order not chronologic?")
+const sinceOf = (s) => (standing(s) === 'working' || standing(s) === 'attention' ? (s.since ?? s.lastActivity) : (s.lastActivity ?? s.since))
 const byStanding = (a, b) => STATE_ORDER[standing(a)] - STATE_ORDER[standing(b)] || sinceOf(b) - sinceOf(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 // The orders the list can be in (the button beside the gear). Standard is as it was: the favorites, the active (needs
 // you, then at work, then the rest, each the latest first), and each computer's past sessions. The other two are of
