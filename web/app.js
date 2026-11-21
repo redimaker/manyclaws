@@ -171,6 +171,24 @@ function opened(data) {
 const folderOf = (path) => String(path ?? '').split(/[\\/]/).filter(Boolean).pop() ?? ''
 const isLocked = (v) => typeof v === 'string' && v === sealing?.UNOPENED
 
+// Claude in Chrome's instructions to Claude, some 4,000 characters, which the VS Code extension puts in front of the
+// first prompt typed there while Chrome is connected, in the same message: nobody typed them. A plugin or an agent
+// before 6.2.17 left them in that prompt's row, and in the first prompt of a session it indexed, cut at 200 characters
+// inside them (deon, 2026-11-18, of a session of his whose chat began with them: "That's not mine!")
+const CHROME_BLOCK = /<browser_instruction>[\s\S]*?<\/browser_instruction>\s*/g
+const withoutChrome = (text) => String(text ?? '').replace(CHROME_BLOCK, '').replace(/^\s*<browser_instruction>[\s\S]*$/, '').trim()
+// A prompt's row, without them
+const ownRow = (r) => (r?.role === 'user' && typeof r.text === 'string' && r.text.includes('<browser_instruction>') ? { ...r, text: withoutChrome(r.text) } : r)
+// A title Claude Code made of them rather than of what was typed ("Claude in Chrome browser automation", for "pull"): one
+// that speaks of Chrome or of browser automation, where what was typed speaks of neither. The agent holds a title to the
+// same rule (chromeTitle in mod/agent/transcript.mjs)
+const fromChrome = (title, typed) => /\bchrome\b|\bbrowser automation\b/i.test(String(title ?? '')) && !/chrome|browser/i.test(String(typed ?? ''))
+// What a session in a machine's index is called: its title, unless that was made of them; else what was first typed
+const indexTitle = (x) => {
+  const first = withoutChrome(x?.first_prompt)
+  return (x?.title && !fromChrome(x.title, first) ? x.title : '') || first.slice(0, 80)
+}
+
 // A session's summary (the server marks one `closed`), with its card laid out as a summary's own fields. `devices`:
 // the account's machines, where they came with it (else the ones this page has).
 function sessionOf(s, devices) {
@@ -206,7 +224,7 @@ function sessionOf(s, devices) {
     messageCount: s.messageCount ?? 0,
     pendingCalls: s.pendingCalls ?? 0,
     policy: s.policy,
-    title: locked ? sealing.UNOPENED : named || topic.slice(0, 80) || project || s.id.slice(0, 8),
+    title: locked ? sealing.UNOPENED : (named && !fromChrome(named, topic) ? named : '') || topic.slice(0, 80) || project || s.id.slice(0, 8),
     project,
     topic: locked ? sealing.UNOPENED : topic,
     preview: locked ? sealing.UNOPENED : (card.preview ?? ''),
@@ -257,7 +275,7 @@ function sessionOf(s, devices) {
 // session said, whoever it says said it, and the server writes none of its own.
 function rowOf(m) {
   if (!m || !('row' in m)) return null
-  if (m.row && typeof m.row === 'object') return { ...m.row, ts: m.row.ts ?? m.ts, seq: m.seq, ...(m.hist ? { hist: true } : {}) }
+  if (m.row && typeof m.row === 'object') return ownRow({ ...m.row, ts: m.row.ts ?? m.ts, seq: m.seq, ...(m.hist ? { hist: true } : {}) })
   return { seq: m.seq, ts: m.ts, role: 'assistant', text: sealing?.UNOPENED ?? '' }
 }
 
@@ -334,8 +352,8 @@ function catalogOf(mid, row, open = {}, hosted = []) {
   return {
     id: row.sid,
     machine: mid,
-    title: row.title || (row.first_prompt ? String(row.first_prompt).slice(0, 80) : '') || folderOf(row.cwd) || row.sid.slice(0, 8),
-    topic: row.first_prompt ?? '',
+    title: indexTitle(row) || folderOf(row.cwd) || row.sid.slice(0, 8),
+    topic: withoutChrome(row.first_prompt),
     cwd: row.cwd ?? '',
     project: folderOf(row.cwd),
     model: row.model ?? '',
@@ -365,7 +383,7 @@ function machineAnswer({ of, machine, r, sid }) {
       return { machine: m, sessions: (got?.sessions ?? []).map((row) => catalogOf(mid, row, got.open, got.hosted)), ...(isLocked(r) ? { locked: true } : {}) }
     case 'messages':
       // (rows keep their order across pages)
-      return got ? { session: got.session ? catalogOf(mid, got.session, got.open ? { [sid]: got.open } : {}, m.hosted) : null, messages: (got.rows ?? []).map((row, i) => ({ ...row, text: String(row.text ?? ''), ts: row.ts ?? Date.now(), seq: got.from * 1000 + i + 1 })), from: got.from, to: got.to, total: got.total } : { session: null, messages: [], from: 0, to: 0, total: 0, error: NOT_OPENED }
+      return got ? { session: got.session ? catalogOf(mid, got.session, got.open ? { [sid]: got.open } : {}, m.hosted) : null, messages: (got.rows ?? []).map(ownRow).map((row, i) => ({ ...row, text: String(row.text ?? ''), ts: row.ts ?? Date.now(), seq: got.from * 1000 + i + 1 })), from: got.from, to: got.to, total: got.total } : { session: null, messages: [], from: 0, to: 0, total: 0, error: NOT_OPENED }
     case 'search.sessions':
       return { total: got?.total ?? 0, sessions: (got?.sessions ?? []).map((g) => ({ ...(g.session ? catalogOf(mid, g.session, m.open ?? {}, m.hosted) : { id: g.sid, machine: mid, title: g.sid.slice(0, 8), gone: true }), hits: g.hits, lastHit: g.last })) }
     case 'search.hits':
@@ -410,7 +428,8 @@ function shaped(data) {
   // (what a call came to: `r`, sealed whole)
   if ('r' in data && 'status' in data) {
     const { r, ...call } = data
-    return r && typeof r === 'object' ? { ...call, ...r } : { ...call, ...(isLocked(r) ? { error: 'what it answered could not be opened with the key this device has' } : {}) }
+    // (a chat's rows a machine read itself, as the server's are)
+    return r && typeof r === 'object' ? { ...call, ...r, ...(Array.isArray(r.rows) ? { rows: r.rows.map(ownRow) } : {}) } : { ...call, ...(isLocked(r) ? { error: 'what it answered could not be opened with the key this device has' } : {}) }
   }
   // (and what a session said to the account's phones: `n`)
   if ('n' in data && 'sid' in data) {
@@ -2364,7 +2383,7 @@ function promptNodes() {
 // typed ... Then reply after > ... and then server name and session below that")
 function promptRow(x) {
   const live = app.sessions.get(x.sid)
-  const name = markOf(x.sid)?.name || live?.title || x.session.title || (x.session.first_prompt ?? '').slice(0, 80) || folderOf(x.session.cwd) || x.sid.slice(0, 8)
+  const name = markOf(x.sid)?.name || live?.title || indexTitle(x.session) || folderOf(x.session.cwd) || x.sid.slice(0, 8)
   const m = app.machines.get(x.mid)
   const sub = app.tile.where ? dotted(name, folderOf(x.session.cwd), whereLabel(m ? machineName(m) : x.machine, x.mid)) : [name]
   const here = app.past?.sid === x.sid && app.past.at === x.uuid
@@ -2667,7 +2686,7 @@ function renderLanes() {
   const dayOf = (ts) => (phone ? `${new Date(ts).toLocaleDateString(undefined, { weekday: 'short' })} ${new Date(ts).getDate()}` : new Date(ts).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }))
   // The heads: what each session is called, where it is, and what it was forked from, under a line in its computer's
   // color, as are its lane and its blocks (deon, 2026-10-30: "It used to show in the colors of my machines")
-  const nameOf = (x) => markOf(x.sid)?.name || app.sessions.get(x.sid)?.title || x.title || (x.first_prompt ?? '').slice(0, 80) || folderOf(x.cwd) || x.sid.slice(0, 8)
+  const nameOf = (x) => markOf(x.sid)?.name || app.sessions.get(x.sid)?.title || indexTitle(x) || folderOf(x.cwd) || x.sid.slice(0, 8)
   const heads = lanes.map((x) => {
     const live = app.sessions.get(x.sid)
     const name = nameOf(x)

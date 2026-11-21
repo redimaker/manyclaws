@@ -7,6 +7,7 @@ const emitWarning = process.emitWarning
 process.emitWarning = (warning, ...rest) => (String(warning?.message ?? warning).includes('SQLite') ? undefined : emitWarning.call(process, warning, ...rest))
 const { DatabaseSync } = await import('node:sqlite')
 import { promptRows } from './rows.mjs'
+import { chromeTitle } from './transcript.mjs'
 
 export class Store {
   constructor(file) {
@@ -116,7 +117,9 @@ export class Store {
     this.sql.setFile.run(size, mtime, offset, JSON.stringify(facts), file.id)
     if (file.side) return
     const f = facts
-    this.sql.setSession.run(file.sid, file.root, file.project, file.path, f.cwd, f.title, f.firstPrompt, f.firstTs, f.lastTs, f.prompts, f.messages, f.version, f.branch, f.model, f.mode, f.entrypoint, size, f.startedAs ?? null)
+    // (a title Claude Code made of Claude in Chrome's instructions is none: the session goes by what was typed)
+    const title = chromeTitle(f.title, f.firstPrompt) ? '' : f.title
+    this.sql.setSession.run(file.sid, file.root, file.project, file.path, f.cwd, title, f.firstPrompt, f.firstTs, f.lastTs, f.prompts, f.messages, f.version, f.branch, f.model, f.mode, f.entrypoint, size, f.startedAs ?? null)
   }
 
   // ---- Sessions
