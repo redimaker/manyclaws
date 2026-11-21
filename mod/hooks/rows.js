@@ -9,9 +9,11 @@
 // and as the role has them: uuid, origin, tool, toolUseId, detail, desc, more, approx,
 // error, diff, mid, hist, ts }
 
-// What the app wraps around a prompt before Claude reads it
+// What the app wraps around a prompt before Claude reads it, and puts in front of one: Claude in Chrome's instructions,
+// some 4,000 characters, which the VS Code extension sends with the first prompt typed there while Chrome is connected
+// (deon, 2026-11-18, of a session of his whose chat began with them: "That's not mine!")
 export function cleanPrompt(text) {
-  return text.replace(/<(ide_opened_file|ide_selection|ide_diagnostics|system-reminder)>[\s\S]*?<\/\1>\s*/g, '').trim()
+  return text.replace(/<(ide_opened_file|ide_selection|ide_diagnostics|system-reminder|browser_instruction)>[\s\S]*?<\/\1>\s*/g, '').trim()
 }
 
 // Word from the app that something it ran in the background has ended. Claude reads it as

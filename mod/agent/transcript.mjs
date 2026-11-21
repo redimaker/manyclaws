@@ -74,8 +74,14 @@ const blocksText = (content) =>
 
 const hasToolResult = (content) => Array.isArray(content) && content.some((b) => b?.type === 'tool_result')
 
-// What the app adds around a prompt before Claude reads it
-const unwrap = (text) => text.replace(/<(system-reminder|ide_opened_file|ide_selection|ide_diagnostics)>[\s\S]*?<\/\1>\s*/g, '').trim()
+// What the app adds around a prompt before Claude reads it, and in front of one (Claude in Chrome's instructions: see
+// cleanPrompt in rows.mjs)
+const unwrap = (text) => text.replace(/<(system-reminder|ide_opened_file|ide_selection|ide_diagnostics|browser_instruction)>[\s\S]*?<\/\1>\s*/g, '').trim()
+
+// A title Claude Code made of Claude in Chrome's instructions rather than of what was typed ("Claude in Chrome browser
+// automation", for "pull"): one that speaks of Chrome or of browser automation, where what was typed speaks of neither.
+// The page holds a title to the same rule (fromChrome in web/app.js)
+export const chromeTitle = (title, typed) => /\bchrome\b|\bbrowser automation\b/i.test(String(title ?? '')) && !/chrome|browser/i.test(String(typed ?? ''))
 
 // A user row's own words: '' for one that only carries tool results, or that the app wrote
 export function promptOf(row) {

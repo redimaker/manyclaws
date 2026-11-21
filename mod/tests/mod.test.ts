@@ -1712,6 +1712,9 @@ test('the last thing its user typed is on the card, with what Claude has said si
   // instructions, some thousands of characters of them, with a prompt typed in VS Code
   await append(said('u4', 'prompt', 'user', [...words('<browser_instruction># Claude in Chrome browser automation\n\n' + 'You have access to browser automation tools. '.repeat(90) + '</browser_instruction>'), ...words('Now the terns')]))
   expect(await card()).toEqual(['Now the terns', '', 'Now the terns'])
+  // (and the chat's row of it is what was typed: nobody typed the instructions, and they are no part of the chat)
+  const prompts = opened(s, m).rows.filter((r: any) => r.role === 'user')
+  expect([prompts.at(-1).text, prompts.some((r: any) => String(r.text).includes('browser_instruction'))]).toEqual(['Now the terns', false])
   // A path is no command, and a long prompt is cut where the last thing said is
   await append(said('u3', 'prompt', 'user', words('/Users/maya/git/herons has the counts: ' + 'x'.repeat(300))))
   const [prompt, , preview] = await card()
